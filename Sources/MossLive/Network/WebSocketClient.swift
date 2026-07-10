@@ -23,6 +23,7 @@ actor WebSocketClient {
         case helloAck(HelloAck)
         case transcript(TranscriptUpdate)
         case answerPending(requestId: Int)
+        case answerDelta(requestId: Int, text: String)
         case answer(AnswerPayload)
         case serverError(ServerErrorMessage)
         case roundTrip(ms: Double)
@@ -177,6 +178,8 @@ actor WebSocketClient {
             emit(.transcript(update))
         case .answerPending(let requestId):
             emit(.answerPending(requestId: requestId))
+        case .answerDelta(let requestId, let text):
+            emit(.answerDelta(requestId: requestId, text: text))
         case .answer(let payload):
             emit(.answer(payload))
         case .pong(let tMs, _):

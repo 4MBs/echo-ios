@@ -141,6 +141,7 @@ enum ServerMessage: Equatable, Sendable {
     case helloAck(HelloAck)
     case transcript(TranscriptUpdate)
     case answerPending(requestId: Int)
+    case answerDelta(requestId: Int, text: String)
     case answer(AnswerPayload)
     case pong(tMs: Int64, serverTimeMs: Int64)
     case serverError(ServerErrorMessage)
@@ -162,6 +163,17 @@ enum ServerMessage: Equatable, Sendable {
                 enum CodingKeys: String, CodingKey { case requestId = "request_id" }
             }
             return try .answerPending(requestId: WireProtocol.decoder.decode(Pending.self, from: data).requestId)
+        case "answer_delta":
+            struct Delta: Decodable {
+                let requestId: Int
+                let text: String
+                enum CodingKeys: String, CodingKey {
+                    case text
+                    case requestId = "request_id"
+                }
+            }
+            let delta = try WireProtocol.decoder.decode(Delta.self, from: data)
+            return .answerDelta(requestId: delta.requestId, text: delta.text)
         case "answer":
             return try .answer(WireProtocol.decoder.decode(AnswerPayload.self, from: data))
         case "pong":

@@ -35,6 +35,29 @@ final class AnswerTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.records.first?.state, .success(text: "OLD", latencyMs: 1))
     }
 
+    func testStreamingDeltasAccumulate() {
+        var tracker = AnswerTracker()
+        let id = tracker.begin()
+        tracker.markAcknowledged(id: id)
+        tracker.appendDelta(id: id, text: "Pa")
+        tracker.appendDelta(id: id, text: "ris")
+        XCTAssertEqual(tracker.current?.state, .streaming(partial: "Paris"))
+        XCTAssertTrue(tracker.hasInflightRequest)
+
+        tracker.complete(id: id, ok: true, text: "Paris.", error: "", latencyMs: 900)
+        XCTAssertEqual(tracker.current?.state, .success(text: "Paris.", latencyMs: 900))
+        // late deltas after completion are ignored
+        tracker.appendDelta(id: id, text: "junk")
+        XCTAssertEqual(tracker.current?.state, .success(text: "Paris.", latencyMs: 900))
+    }
+
+    func testDeltaForUnknownIdIgnored() {
+        var tracker = AnswerTracker()
+        _ = tracker.begin()
+        tracker.appendDelta(id: 999, text: "x")
+        XCTAssertEqual(tracker.current?.state, .pending)
+    }
+
     func testFailureState() {
         var tracker = AnswerTracker()
         let id = tracker.begin()

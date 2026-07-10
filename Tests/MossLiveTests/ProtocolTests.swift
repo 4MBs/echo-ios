@@ -80,6 +80,13 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(payload.latency.totalMs, 2410.5, accuracy: 0.001)
     }
 
+    func testDecodeAnswerDelta() throws {
+        XCTAssertEqual(
+            try ServerMessage.decode(#"{"type":"answer_delta","request_id":4,"text":"Par"}"#),
+            .answerDelta(requestId: 4, text: "Par")
+        )
+    }
+
     func testDecodeAnswerPendingAndError() throws {
         XCTAssertEqual(
             try ServerMessage.decode(#"{"type":"answer_pending","request_id":9}"#),

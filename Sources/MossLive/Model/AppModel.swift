@@ -153,6 +153,8 @@ final class AppModel {
             pulseTranscribing()
         case .answerPending(let requestId):
             answers.markAcknowledged(id: requestId)
+        case .answerDelta(let requestId, let text):
+            answers.appendDelta(id: requestId, text: text)
         case .answer(let payload):
             answers.complete(
                 id: payload.requestId,

@@ -70,6 +70,11 @@ struct AnswerCard: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+        case .streaming(let partial):
+            Text(partial + " …")
+                .font(.body.weight(.medium))
+                .textSelection(.enabled)
+                .contentTransition(.interpolate)
         case .success(let text, let latencyMs):
             Text(text)
                 .font(.body.weight(.medium))
