@@ -1,5 +1,5 @@
-import XCTest
 @testable import MossLive
+import XCTest
 
 final class AnswerTrackerTests: XCTestCase {
     func testLifecycle() {
@@ -62,7 +62,7 @@ final class AnswerTrackerTests: XCTestCase {
 
     func testHistoryBounded() {
         var tracker = AnswerTracker(maxHistory: 3)
-        for _ in 0..<10 {
+        for _ in 0 ..< 10 {
             _ = tracker.begin()
         }
         XCTAssertEqual(tracker.records.count, 3)

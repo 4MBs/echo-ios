@@ -31,7 +31,7 @@ struct SettingsView: View {
                 }
 
                 Section("AI answer") {
-                    Stepper(value: $settings.contextSeconds, in: 10...120, step: 5) {
+                    Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
                         Text("Context window: \(Int(settings.contextSeconds)) s")
                     }
                 }

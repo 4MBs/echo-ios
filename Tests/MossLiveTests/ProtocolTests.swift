@@ -1,5 +1,5 @@
-import XCTest
 @testable import MossLive
+import XCTest
 
 final class ProtocolTests: XCTestCase {
     func testBinaryFrameLayoutIsBigEndian() {
@@ -10,7 +10,7 @@ final class ProtocolTests: XCTestCase {
         )
         XCTAssertEqual(frame.count, WireProtocol.binaryHeaderSize + 2)
         XCTAssertEqual([UInt8](frame.prefix(4)), [0x01, 0x02, 0x03, 0x04])
-        XCTAssertEqual([UInt8](frame[4..<12]), [0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C])
+        XCTAssertEqual([UInt8](frame[4 ..< 12]), [0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C])
         XCTAssertEqual([UInt8](frame.suffix(2)), [0xAA, 0xBB])
     }
 

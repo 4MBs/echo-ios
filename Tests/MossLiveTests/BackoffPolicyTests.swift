@@ -1,11 +1,11 @@
-import XCTest
 @testable import MossLive
+import XCTest
 
 final class BackoffPolicyTests: XCTestCase {
     func testCapDoublesAndSaturates() {
         var policy = BackoffPolicy(baseDelay: 0.5, maxDelay: 10)
         var caps: [Double] = []
-        for _ in 0..<7 {
+        for _ in 0 ..< 7 {
             caps.append(policy.currentCap)
             _ = policy.nextDelay(random: { $0.upperBound })
         }
@@ -14,7 +14,7 @@ final class BackoffPolicyTests: XCTestCase {
 
     func testJitterStaysInRange() {
         var policy = BackoffPolicy(baseDelay: 0.5, maxDelay: 10)
-        for _ in 0..<20 {
+        for _ in 0 ..< 20 {
             let cap = policy.currentCap
             let delay = policy.nextDelay()
             XCTAssertGreaterThanOrEqual(delay, 0.05)

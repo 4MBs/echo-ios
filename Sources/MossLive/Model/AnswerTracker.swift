@@ -66,7 +66,7 @@ struct AnswerTracker: Sendable {
     /// Fails every request still in flight (connection lost, session ended...).
     mutating func failAllInflight(error: String) {
         for idx in records.indices
-        where records[idx].state == .pending || records[idx].state == .waitingForAnswer {
+            where records[idx].state == .pending || records[idx].state == .waitingForAnswer {
             records[idx].state = .failure(error: error)
         }
     }

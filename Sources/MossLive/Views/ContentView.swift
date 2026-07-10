@@ -95,8 +95,8 @@ struct RecordButton: View {
 
     private var isActive: Bool {
         switch model.phase {
-        case .recording, .connecting, .reconnecting, .connected: return true
-        default: return false
+        case .recording, .connecting, .reconnecting, .connected: true
+        default: false
         }
     }
 

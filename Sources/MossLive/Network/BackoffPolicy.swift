@@ -21,7 +21,7 @@ struct BackoffPolicy: Sendable {
     mutating func nextDelay(random: (ClosedRange<Double>) -> Double = { Double.random(in: $0) }) -> TimeInterval {
         let cap = currentCap
         attempt += 1
-        return random(0.05...max(0.05, cap))
+        return random(0.05 ... max(0.05, cap))
     }
 
     mutating func reset() {

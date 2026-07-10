@@ -8,15 +8,19 @@ final class AppSettings {
     var serverHost: String {
         didSet { defaults.set(serverHost, forKey: "serverHost") }
     }
+
     var serverPort: Int {
         didSet { defaults.set(serverPort, forKey: "serverPort") }
     }
+
     var authToken: String {
         didSet { Keychain.set(authToken, account: "mosslive-auth-token") }
     }
+
     var contextSeconds: Double {
         didSet { defaults.set(contextSeconds, forKey: "contextSeconds") }
     }
+
     var bitrate: Int {
         didSet { defaults.set(bitrate, forKey: "bitrate") }
     }

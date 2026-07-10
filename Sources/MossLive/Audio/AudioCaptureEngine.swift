@@ -19,7 +19,7 @@ final class AudioCaptureEngine {
         var errorDescription: String? {
             switch self {
             case .microphoneDenied:
-                return "Microphone access is denied. Enable it in Settings > Privacy > Microphone."
+                "Microphone access is denied. Enable it in Settings > Privacy > Microphone."
             }
         }
     }
@@ -36,7 +36,7 @@ final class AudioCaptureEngine {
     /// Called when capture stops unexpectedly (interruption that can't resume, etc.)
     var onInterruption: (@Sendable (String) -> Void)?
 
-    private lazy var targetFormat: AVAudioFormat = AVAudioFormat(
+    private lazy var targetFormat: AVAudioFormat = .init(
         commonFormat: .pcmFormatInt16,
         sampleRate: Double(AudioPipelineConstants.sampleRate),
         channels: 1,
@@ -56,7 +56,7 @@ final class AudioCaptureEngine {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement,
                                 options: [.allowBluetooth, .duckOthers])
-        try? session.setPreferredSampleRate(48_000)
+        try? session.setPreferredSampleRate(48000)
         try? session.setPreferredIOBufferDuration(0.02)
         try session.setActive(true, options: [])
 

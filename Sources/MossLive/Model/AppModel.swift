@@ -1,6 +1,6 @@
 import Foundation
-import SwiftUI
 import os
+import SwiftUI
 
 /// Central state machine + orchestration: audio engine -> WebSocket -> UI.
 @MainActor
@@ -18,22 +18,22 @@ final class AppModel {
 
         var label: String {
             switch self {
-            case .disconnected: return "Disconnected"
-            case .connecting: return "Connecting…"
-            case .connected: return "Connected"
-            case .recording: return "Recording"
-            case .reconnecting: return "Reconnecting…"
-            case .error: return "Error"
+            case .disconnected: "Disconnected"
+            case .connecting: "Connecting…"
+            case .connected: "Connected"
+            case .recording: "Recording"
+            case .reconnecting: "Reconnecting…"
+            case .error: "Error"
             }
         }
 
         var color: Color {
             switch self {
-            case .disconnected: return .gray
-            case .connecting, .reconnecting: return .orange
-            case .connected: return .blue
-            case .recording: return .green
-            case .error: return .red
+            case .disconnected: .gray
+            case .connecting, .reconnecting: .orange
+            case .connected: .blue
+            case .recording: .green
+            case .error: .red
             }
         }
     }

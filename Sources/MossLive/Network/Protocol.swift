@@ -17,8 +17,8 @@ enum WireProtocol {
         return data
     }
 
-    static let encoder: JSONEncoder = JSONEncoder()
-    static let decoder: JSONDecoder = JSONDecoder()
+    static let encoder: JSONEncoder = .init()
+    static let decoder: JSONDecoder = .init()
 }
 
 // MARK: - Shared payloads
@@ -153,17 +153,17 @@ enum ServerMessage: Equatable, Sendable {
         let envelope = try WireProtocol.decoder.decode(Envelope.self, from: data)
         switch envelope.type {
         case "hello_ack":
-            return .helloAck(try WireProtocol.decoder.decode(HelloAck.self, from: data))
+            return try .helloAck(WireProtocol.decoder.decode(HelloAck.self, from: data))
         case "transcript":
-            return .transcript(try WireProtocol.decoder.decode(TranscriptUpdate.self, from: data))
+            return try .transcript(WireProtocol.decoder.decode(TranscriptUpdate.self, from: data))
         case "answer_pending":
             struct Pending: Decodable {
                 let requestId: Int
                 enum CodingKeys: String, CodingKey { case requestId = "request_id" }
             }
-            return .answerPending(requestId: try WireProtocol.decoder.decode(Pending.self, from: data).requestId)
+            return try .answerPending(requestId: WireProtocol.decoder.decode(Pending.self, from: data).requestId)
         case "answer":
-            return .answer(try WireProtocol.decoder.decode(AnswerPayload.self, from: data))
+            return try .answer(WireProtocol.decoder.decode(AnswerPayload.self, from: data))
         case "pong":
             struct Pong: Decodable {
                 let tMs: Int64
@@ -176,7 +176,7 @@ enum ServerMessage: Equatable, Sendable {
             let pong = try WireProtocol.decoder.decode(Pong.self, from: data)
             return .pong(tMs: pong.tMs, serverTimeMs: pong.serverTimeMs)
         case "error":
-            return .serverError(try WireProtocol.decoder.decode(ServerErrorMessage.self, from: data))
+            return try .serverError(WireProtocol.decoder.decode(ServerErrorMessage.self, from: data))
         case "status":
             return .unknown(type: "status")
         default:
@@ -189,7 +189,7 @@ enum ServerMessage: Equatable, Sendable {
     }
 }
 
-func encodeJSON<T: Encodable>(_ value: T) -> String {
+func encodeJSON(_ value: some Encodable) -> String {
     guard let data = try? WireProtocol.encoder.encode(value),
           let text = String(data: data, encoding: .utf8)
     else {

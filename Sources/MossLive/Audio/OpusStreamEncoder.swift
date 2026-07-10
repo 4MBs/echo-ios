@@ -30,9 +30,9 @@ final class OpusStreamEncoder {
 
         var description: String {
             switch self {
-            case .createFailed(let code): return "opus encoder create failed: \(opusMessage(code))"
-            case .configureFailed(let code): return "opus encoder configure failed: \(opusMessage(code))"
-            case .encodeFailed(let code): return "opus encode failed: \(opusMessage(code))"
+            case .createFailed(let code): "opus encoder create failed: \(opusMessage(code))"
+            case .configureFailed(let code): "opus encoder configure failed: \(opusMessage(code))"
+            case .encodeFailed(let code): "opus encode failed: \(opusMessage(code))"
             }
         }
     }
