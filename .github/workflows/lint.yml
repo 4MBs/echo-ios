@@ -36,4 +36,4 @@ jobs:
           unzip -o swiftformat.zip
           chmod +x swiftformat_linux
       - name: SwiftFormat lint
-        run: ./swiftformat_linux --lint Sources Tests
+        run: ./swiftformat_linux Sources Tests --lint

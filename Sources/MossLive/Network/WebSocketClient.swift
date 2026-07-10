@@ -154,7 +154,7 @@ actor WebSocketClient {
             guard !userInitiatedClose, self.task === task else { return }
             let closeCode = task.closeCode
             log.warning("connection dropped: \(error.localizedDescription) close=\(closeCode.rawValue)")
-            if closeCode == .init(rawValue: 4401) {
+            if closeCode.rawValue == 4401 {
                 emit(.state(.failed(reason: "Server rejected the auth token. Check Settings.")))
                 return
             }
