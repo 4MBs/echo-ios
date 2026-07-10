@@ -1,0 +1,7 @@
+# SwiftFormat configuration (lint-only in CI)
+--swiftversion 5.10
+--indent 4
+--maxwidth 120
+--exclude LocalPackages
+--disable wrapMultilineStatementBraces,andOperator,redundantSelf,trailingCommas,unusedArguments,hoistPatternLet
+--commas inline

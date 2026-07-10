@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Reference values for the in-app Settings screen (the app stores these in
+  UserDefaults/Keychain at runtime; this file is documentation, not shipped).
+  Never put a real token in a committed file.
+-->
+<plist version="1.0">
+<dict>
+    <key>ServerHost</key>
+    <string>100.92.57.51</string>
+    <key>ServerPort</key>
+    <integer>8787</integer>
+    <key>AuthToken</key>
+    <string>REPLACE-WITH-MOSSLIVE_AUTH_TOKEN-FROM-THE-SERVER</string>
+    <key>ContextSeconds</key>
+    <integer>30</integer>
+    <key>BitrateBps</key>
+    <integer>24000</integer>
+</dict>
+</plist>

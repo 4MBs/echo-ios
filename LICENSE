@@ -1,0 +1,7 @@
+LICENSE PLACEHOLDER
+
+Choose a license for this repository (e.g. MIT, Apache-2.0) before distributing.
+
+Dependency licenses:
+- alta/swift-opus (SPM dependency): BSD-3-Clause
+- libopus (built from source by swift-opus): BSD-3-Clause

@@ -1,0 +1,204 @@
+# Release pipeline. Runs on version tags (v*) or manually.
+#
+# Always: unsigned IPA (SideStore/AltStore installable — the default path
+# while no Apple Developer Program membership exists).
+#
+# When signing secrets are configured (see docs/SIGNING.md): signed archive +
+# IPA export. When App Store Connect secrets are also configured AND the
+# workflow_dispatch input enables it (or a tag is pushed with it enabled):
+# TestFlight upload. Nothing here runs on pull requests.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: "Upload the signed build to TestFlight (requires ASC secrets)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  XCODE_PATH: /Applications/Xcode_16.4.app
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_signing: ${{ steps.check.outputs.has_signing }}
+      has_asc: ${{ steps.check.outputs.has_asc }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - id: check
+        env:
+          CERT: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY: ${{ secrets.ASC_API_PRIVATE_KEY }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          if [ -n "$CERT" ] && [ -n "$PROFILE" ] && [ -n "$TEAM" ]; then
+            echo "has_signing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_signing=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Apple signing secrets not configured — signed jobs will be skipped (unsigned IPA is still produced)."
+          fi
+          if [ -n "$ASC_KEY" ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER" ]; then
+            echo "has_asc=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_asc=false" >> "$GITHUB_OUTPUT"
+          fi
+          REF="${GITHUB_REF_NAME}"
+          if [[ "$REF" == v* ]]; then
+            echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=1.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
+  unsigned-ipa:
+    runs-on: macos-15
+    timeout-minutes: 45
+    needs: preflight
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select pinned Xcode and print versions
+        run: |
+          [ -d "$XCODE_PATH" ] && sudo xcode-select -s "$XCODE_PATH" || echo "::warning::pinned Xcode missing, using default"
+          xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .spm-packages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml', 'LocalPackages/OpusShim/Package.swift') }}
+          restore-keys: spm-${{ runner.os }}-
+      - name: Build (unsigned, Release)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project MossLive.xcodeproj -scheme MossLive -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd -clonedSourcePackagesDirPath .spm-packages \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION=${{ needs.preflight.outputs.version }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} | tail -40
+      - name: Package unsigned IPA
+        run: |
+          scripts/ci/make_unsigned_ipa.sh \
+            build/dd/Build/Products/Release-iphoneos/MossLive.app \
+            MossLive-${{ needs.preflight.outputs.version }}-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MossLive-${{ needs.preflight.outputs.version }}-unsigned
+          path: MossLive-*-unsigned.ipa
+          retention-days: 90
+
+  signed-ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    needs: preflight
+    if: needs.preflight.outputs.has_signing == 'true'
+    outputs:
+      version: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select pinned Xcode and print versions
+        run: |
+          [ -d "$XCODE_PATH" ] && sudo xcode-select -s "$XCODE_PATH" || echo "::warning::pinned Xcode missing, using default"
+          xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Import signing material into temporary keychain
+        id: signing
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          TEMP_KEYCHAIN_PASSWORD: ${{ secrets.TEMP_KEYCHAIN_PASSWORD }}
+        run: scripts/ci/import_signing.sh
+      - name: Archive (signed)
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_ID: ${{ secrets.APPLE_BUNDLE_ID }}
+          PROFILE_NAME: ${{ secrets.APPLE_PROFILE_NAME }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project MossLive.xcodeproj -scheme MossLive -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/MossLive.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID:-com.fourmbs.mosslive}" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            MARKETING_VERSION=${{ needs.preflight.outputs.version }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} | tail -40
+      - name: Export signed IPA
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/MossLive.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/export
+          mv "build/export/MossLive.ipa" "MossLive-${{ needs.preflight.outputs.version }}-signed.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MossLive-${{ needs.preflight.outputs.version }}-signed
+          path: MossLive-*-signed.ipa
+          retention-days: 90
+      - name: Clean up keychain and signing files
+        if: always()
+        run: scripts/ci/cleanup_keychain.sh
+
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 30
+    needs: [preflight, signed-ipa]
+    if: >-
+      needs.preflight.outputs.has_asc == 'true' &&
+      (github.event_name == 'push' || inputs.upload_testflight)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MossLive-${{ needs.preflight.outputs.version }}-signed
+      - name: Upload to TestFlight (App Store Connect API key)
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          ASC_API_PRIVATE_KEY: ${{ secrets.ASC_API_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/private_keys
+          echo -n "$ASC_API_PRIVATE_KEY" > ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
+          IPA=$(ls MossLive-*-signed.ipa | head -1)
+          xcrun altool --upload-app --type ios -f "$IPA" \
+            --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID"
+          {
+            echo "### TestFlight upload"
+            echo "- File: $IPA"
+            echo "- Version: ${{ needs.preflight.outputs.version }} (build ${{ github.run_number }})"
+            echo "- Processing continues in App Store Connect; the build appears in TestFlight after Apple finishes processing."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove API key
+        if: always()
+        run: rm -rf ~/private_keys

@@ -1,0 +1,39 @@
+# Cheap checks on ubuntu runners (private repo: macOS minutes bill at 10x,
+# linux at 1x — so style gates never touch macOS).
+name: Lint
+
+on:
+  push:
+    branches: [main]
+    paths: ["Sources/**", "Tests/**", "LocalPackages/**", ".swiftlint.yml", ".swiftformat", ".github/workflows/lint.yml"]
+  pull_request:
+    paths: ["Sources/**", "Tests/**", "LocalPackages/**", ".swiftlint.yml", ".swiftformat", ".github/workflows/lint.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swiftlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container: ghcr.io/realm/swiftlint:0.57.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: SwiftLint
+        run: swiftlint --reporter github-actions-logging
+
+  swiftformat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SwiftFormat (linux binary release)
+        run: |
+          curl -sSL -o swiftformat.zip \
+            https://github.com/nicklockwood/SwiftFormat/releases/download/0.55.5/swiftformat_linux.zip
+          unzip -o swiftformat.zip
+          chmod +x swiftformat_linux
+      - name: SwiftFormat lint
+        run: ./swiftformat_linux --lint Sources Tests

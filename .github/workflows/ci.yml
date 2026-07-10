@@ -1,0 +1,123 @@
+# macOS build + test + unsigned IPA. Kept frugal for a private repo:
+# path filters skip doc-only changes, concurrency cancels superseded runs,
+# and everything runs in a single macOS job (tests + device build).
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "LocalPackages/**"
+      - "project.yml"
+      - "scripts/ci/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "LocalPackages/**"
+      - "project.yml"
+      - "scripts/ci/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_PATH: /Applications/Xcode_16.4.app
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select pinned Xcode and print versions
+        run: |
+          if [ -d "$XCODE_PATH" ]; then
+            sudo xcode-select -s "$XCODE_PATH"
+          else
+            echo "::warning::pinned Xcode at $XCODE_PATH not on this runner image; using default"
+          fi
+          xcodebuild -version
+          sw_vers
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .spm-packages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml', 'LocalPackages/OpusShim/Package.swift') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Resolve dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project MossLive.xcodeproj -scheme MossLive \
+            -clonedSourcePackagesDirPath .spm-packages
+
+      - name: Unit tests (iOS Simulator)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project MossLive.xcodeproj \
+            -scheme MossLive \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -clonedSourcePackagesDirPath .spm-packages \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO | tail -100
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: TestResults.xcresult
+          retention-days: 14
+
+      - name: Build unsigned device binary
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project MossLive.xcodeproj \
+            -scheme MossLive \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            -clonedSourcePackagesDirPath .spm-packages \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} | tail -60
+
+      - name: Package unsigned IPA (installable via SideStore)
+        run: |
+          scripts/ci/make_unsigned_ipa.sh \
+            build/dd/Build/Products/Release-iphoneos/MossLive.app \
+            MossLive-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MossLive-unsigned-ipa-${{ github.run_number }}
+          path: MossLive-unsigned.ipa
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### MOSS Live CI"
+            echo "- Xcode: $(xcodebuild -version | tr '\n' ' ')"
+            echo "- Build number: ${{ github.run_number }}"
+            echo "- Unsigned IPA artifact: install with SideStore/AltStore"
+            echo "- Code signing: **not configured** in this workflow (see release.yml + docs/SIGNING.md)"
+          } >> "$GITHUB_STEP_SUMMARY"
