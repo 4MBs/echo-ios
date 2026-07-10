@@ -66,13 +66,33 @@ jobs:
             -project MossLive.xcodeproj -scheme MossLive \
             -clonedSourcePackagesDirPath .spm-packages
 
+      - name: Pick an available iOS simulator
+        id: sim
+        run: |
+          pick() { xcrun simctl list devices available | grep -E '^ +iPhone' | head -1 | sed -E 's/^ +//; s/ \([0-9A-Fa-f-]+\) \((Shutdown|Booted)\).*$//'; }
+          DEVICE=$(pick)
+          if [ -z "$DEVICE" ]; then
+            echo "::warning::no simulator runtime for the pinned Xcode; falling back to the image default Xcode"
+            sudo xcode-select -r
+            xcodebuild -version
+            DEVICE=$(pick)
+          fi
+          if [ -z "$DEVICE" ]; then
+            echo "::warning::no simulators at all; downloading the iOS platform (slow)"
+            sudo xcodebuild -downloadPlatform iOS
+            DEVICE=$(pick)
+          fi
+          [ -n "$DEVICE" ] || { echo "::error::could not find or create an iOS simulator"; exit 1; }
+          echo "picked simulator: $DEVICE"
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+
       - name: Unit tests (iOS Simulator)
         run: |
           set -o pipefail
           xcodebuild test \
             -project MossLive.xcodeproj \
             -scheme MossLive \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
             -clonedSourcePackagesDirPath .spm-packages \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO | tail -100
