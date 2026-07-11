@@ -28,11 +28,21 @@ targets:
     platform: iOS
     sources:
       - Sources/MossLive
+      - Sources/Shared
     dependencies:
       - package: OpusShim
         product: OpusShim
       - target: MossLiveWidget
         embed: true
+    # The app group lets the widget read the app's server settings (zero
+    # widget configuration). CI ad-hoc-signs the bundles with these
+    # entitlements so SideStore/AltStore can pick the group up and rewrite it
+    # for the user's team during re-signing.
+    entitlements:
+      path: MossLive.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.fourmbs.mosslive
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fourmbs.mosslive
@@ -66,6 +76,12 @@ targets:
     platform: iOS
     sources:
       - Sources/MossLiveWidget
+      - Sources/Shared
+    entitlements:
+      path: MossLiveWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.fourmbs.mosslive
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fourmbs.mosslive.widget

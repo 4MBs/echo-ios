@@ -6,19 +6,31 @@ import Security
 @Observable
 final class AppSettings {
     var serverHost: String {
-        didSet { defaults.set(serverHost, forKey: "serverHost") }
+        didSet {
+            defaults.set(serverHost, forKey: "serverHost")
+            mirrorToWidget()
+        }
     }
 
     var serverPort: Int {
-        didSet { defaults.set(serverPort, forKey: "serverPort") }
+        didSet {
+            defaults.set(serverPort, forKey: "serverPort")
+            mirrorToWidget()
+        }
     }
 
     var authToken: String {
-        didSet { Keychain.set(authToken, account: "mosslive-auth-token") }
+        didSet {
+            Keychain.set(authToken, account: "mosslive-auth-token")
+            mirrorToWidget()
+        }
     }
 
     var contextSeconds: Double {
-        didSet { defaults.set(contextSeconds, forKey: "contextSeconds") }
+        didSet {
+            defaults.set(contextSeconds, forKey: "contextSeconds")
+            mirrorToWidget()
+        }
     }
 
     var bitrate: Int {
@@ -37,6 +49,20 @@ final class AppSettings {
         contextSeconds = ctx == 0 ? 30 : ctx
         let rate = defaults.integer(forKey: "bitrate")
         bitrate = rate == 0 ? 24000 : rate
+        // propagate whatever is already configured to the widget container,
+        // so widgets work immediately after this app version's first launch
+        mirrorToWidget()
+    }
+
+    /// Keeps the widget's App Group container in sync so widgets need no
+    /// per-widget configuration.
+    private func mirrorToWidget() {
+        SharedConfig.write(
+            host: serverHost,
+            port: serverPort,
+            token: authToken,
+            contextSeconds: Int(contextSeconds)
+        )
     }
 
     var isConfigured: Bool {

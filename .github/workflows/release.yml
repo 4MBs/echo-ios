@@ -75,6 +75,15 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
       - run: xcodegen generate
+      - name: Stamp build version
+        run: |
+          V="${{ needs.preflight.outputs.version }}"
+          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST" \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$PLIST"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$PLIST" \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${{ github.run_number }}" "$PLIST"
+          done
       - name: Cache Swift packages
         uses: actions/cache@v4
         with:
@@ -88,9 +97,13 @@ jobs:
             -project MossLive.xcodeproj -scheme MossLive -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/dd -clonedSourcePackagesDirPath .spm-packages \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
-            MARKETING_VERSION=${{ needs.preflight.outputs.version }} \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} | tail -40
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" | tail -40
+      - name: Ad-hoc sign with entitlements
+        run: |
+          APP=build/dd/Build/Products/Release-iphoneos/MossLive.app
+          codesign --force --sign - --entitlements MossLiveWidget.entitlements \
+            "$APP/PlugIns/MossLiveWidget.appex"
+          codesign --force --sign - --entitlements MossLive.entitlements "$APP"
       - name: Package unsigned IPA
         run: |
           scripts/ci/make_unsigned_ipa.sh \

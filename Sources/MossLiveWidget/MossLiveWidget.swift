@@ -72,8 +72,12 @@ struct FetchAnswerIntent: AppIntent {
         AnswerSnapshotStore.save(.init(state: .loading, text: "", updatedAt: Date()))
         WidgetCenter.shared.reloadAllTimelines()
         do {
-            let text = try await WidgetBackend.requestAnswer(
+            let conn = Self.resolveConnection(
                 host: host, port: port, token: token, contextSeconds: contextSeconds
+            )
+            let text = try await WidgetBackend.requestAnswer(
+                host: conn.host, port: conn.port, token: conn.token,
+                contextSeconds: conn.contextSeconds
             )
             AnswerSnapshotStore.save(.init(state: .answer, text: text, updatedAt: Date()))
         } catch {
@@ -82,6 +86,21 @@ struct FetchAnswerIntent: AppIntent {
         }
         WidgetCenter.shared.reloadAllTimelines()
         return .result()
+    }
+
+    /// Per-widget parameters win when set; otherwise the app's own settings
+    /// (shared through the App Group) apply — zero configuration needed.
+    static func resolveConnection(
+        host: String, port: Int, token: String, contextSeconds: Int
+    ) -> SharedConfig.Connection {
+        if !host.trimmingCharacters(in: .whitespaces).isEmpty && !token.isEmpty {
+            return .init(host: host, port: port, token: token, contextSeconds: contextSeconds)
+        }
+        var shared = SharedConfig.read()
+        if contextSeconds > 0, contextSeconds != 30 {
+            shared.contextSeconds = contextSeconds
+        }
+        return shared
     }
 }
 
@@ -95,7 +114,9 @@ enum WidgetBackend {
     static func requestAnswer(host: String, port: Int, token: String, contextSeconds: Int) async throws -> String {
         let cleanHost = host.trimmingCharacters(in: .whitespaces)
         guard !cleanHost.isEmpty, !token.isEmpty else {
-            throw WidgetBackendError(message: "Long-press the widget → Edit Widget → enter server & token.")
+            throw WidgetBackendError(
+                message: "Not configured. Open the MOSS Live app once and enter server & token in Settings."
+            )
         }
         var comps = URLComponents()
         comps.scheme = "http"
@@ -165,6 +186,9 @@ struct AnswerEntry: TimelineEntry {
     let date: Date
     let snapshot: AnswerSnapshot
     let config: WidgetConfigIntent
+    /// Whether a usable server connection exists (widget params or the app's
+    /// shared settings) — drives the unconfigured hint in the idle state.
+    var configured: Bool = true
 }
 
 struct AnswerProvider: AppIntentTimelineProvider {
@@ -181,12 +205,27 @@ struct AnswerProvider: AppIntentTimelineProvider {
     }
 
     func snapshot(for configuration: WidgetConfigIntent, in context: Context) async -> AnswerEntry {
-        AnswerEntry(date: .now, snapshot: currentSnapshot(), config: configuration)
+        // the widget gallery must show the demo answer, never a stale
+        // failure snapshot from a previous tap
+        if context.isPreview {
+            return placeholder(in: context)
+        }
+        return AnswerEntry(
+            date: .now,
+            snapshot: currentSnapshot(),
+            config: configuration,
+            configured: isConfigured(configuration)
+        )
     }
 
     func timeline(for configuration: WidgetConfigIntent, in context: Context) async -> Timeline<AnswerEntry> {
         let snapshot = currentSnapshot()
-        let entry = AnswerEntry(date: .now, snapshot: snapshot, config: configuration)
+        let entry = AnswerEntry(
+            date: .now,
+            snapshot: snapshot,
+            config: configuration,
+            configured: isConfigured(configuration)
+        )
         switch snapshot.state {
         case .answer, .failure:
             // schedule the wipe back to the blank tile
@@ -194,12 +233,22 @@ struct AnswerProvider: AppIntentTimelineProvider {
             let blank = AnswerEntry(
                 date: max(expiry, .now + 1),
                 snapshot: .init(state: .idle, text: "", updatedAt: .now),
-                config: configuration
+                config: configuration,
+                configured: isConfigured(configuration)
             )
             return Timeline(entries: [entry, blank], policy: .never)
         case .idle, .loading:
             return Timeline(entries: [entry], policy: .never)
         }
+    }
+
+    private func isConfigured(_ configuration: WidgetConfigIntent) -> Bool {
+        FetchAnswerIntent.resolveConnection(
+            host: configuration.host,
+            port: configuration.port,
+            token: configuration.token,
+            contextSeconds: configuration.contextSeconds
+        ).isUsable
     }
 
     private func currentSnapshot() -> AnswerSnapshot {
@@ -279,7 +328,7 @@ struct AnswerWidgetView: View {
 
     private var inlineText: String {
         switch entry.snapshot.state {
-        case .idle: "·"
+        case .idle: entry.configured ? "·" : "⚙"
         case .loading: "…"
         case .answer: entry.snapshot.text
         case .failure: "!"
@@ -290,10 +339,17 @@ struct AnswerWidgetView: View {
     private var fullContent: some View {
         switch entry.snapshot.state {
         case .idle:
-            // near-invisible tap target
-            Circle()
-                .fill(.white.opacity(family.isAccessory ? 0.35 : 0.10))
-                .frame(width: 5, height: 5)
+            if entry.configured {
+                // near-invisible tap target
+                Circle()
+                    .fill(.white.opacity(family.isAccessory ? 0.35 : 0.10))
+                    .frame(width: 5, height: 5)
+            } else {
+                // no usable server settings anywhere: point at the app once
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14))
+                    .foregroundStyle(family.isAccessory ? .secondary : Color.white.opacity(0.3))
+            }
         case .loading:
             HStack(spacing: 3) {
                 ForEach(0 ..< 3, id: \.self) { _ in

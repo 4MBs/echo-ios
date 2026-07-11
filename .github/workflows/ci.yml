@@ -53,6 +53,19 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      # Every build gets a unique, visible version (Settings -> About shows
+      # it). XcodeGen's generated plists hardcode 1.0/1, so stamp explicitly;
+      # identical versions also confuse SideStore/AltStore update installs.
+      - name: Stamp build version
+        run: |
+          V="1.0.${{ github.run_number }}"
+          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST" \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$PLIST"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$PLIST" \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${{ github.run_number }}" "$PLIST"
+          done
+
       - name: Cache Swift packages
         uses: actions/cache@v4
         with:
@@ -117,6 +130,18 @@ jobs:
             -clonedSourcePackagesDirPath .spm-packages \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} | tail -60
+
+      # Ad-hoc signatures carry the app-group entitlement, which sideloading
+      # tools read and rewrite during their own re-signing — this is what lets
+      # the widget share the app's server settings (zero widget config).
+      # Inner bundle first, then the app (not --deep, which would clobber it).
+      - name: Ad-hoc sign with entitlements
+        run: |
+          APP=build/dd/Build/Products/Release-iphoneos/MossLive.app
+          codesign --force --sign - --entitlements MossLiveWidget.entitlements \
+            "$APP/PlugIns/MossLiveWidget.appex"
+          codesign --force --sign - --entitlements MossLive.entitlements "$APP"
+          codesign -d --entitlements - "$APP" 2>&1 | head -20
 
       - name: Package unsigned IPA (installable via SideStore)
         run: |
