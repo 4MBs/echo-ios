@@ -27,13 +27,10 @@ jobs:
   swiftformat:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # the container image is used instead of the prebuilt linux binary,
+    # which segfaults intermittently (exit 139)
+    container: ghcr.io/nicklockwood/swiftformat:0.55.5
     steps:
       - uses: actions/checkout@v4
-      - name: Install SwiftFormat (linux binary release)
-        run: |
-          curl -sSL -o swiftformat.zip \
-            https://github.com/nicklockwood/SwiftFormat/releases/download/0.55.5/swiftformat_linux.zip
-          unzip -o swiftformat.zip
-          chmod +x swiftformat_linux
       - name: SwiftFormat lint
-        run: ./swiftformat_linux Sources Tests --lint
+        run: swiftformat Sources Tests --lint
