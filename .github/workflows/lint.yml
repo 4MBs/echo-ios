@@ -27,10 +27,12 @@ jobs:
   swiftformat:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # the container image is used instead of the prebuilt linux binary,
-    # which segfaults intermittently (exit 139)
-    container: ghcr.io/nicklockwood/swiftformat:0.55.5
     steps:
       - uses: actions/checkout@v4
+      # docker-run instead of job container (the image is distroless — no
+      # shell) and instead of the prebuilt linux binary (segfaults, exit 139)
       - name: SwiftFormat lint
-        run: swiftformat Sources Tests --lint
+        run: |
+          docker run --rm -v "$PWD:/work" \
+            ghcr.io/nicklockwood/swiftformat:0.55.5 \
+            /work/Sources /work/Tests --lint
