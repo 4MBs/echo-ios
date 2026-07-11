@@ -35,6 +35,8 @@ final class AudioCaptureEngine {
     var onPacket: (@Sendable (OpusStreamEncoder.Packet) -> Void)?
     /// Called when capture stops unexpectedly (interruption that can't resume, etc.)
     var onInterruption: (@Sendable (String) -> Void)?
+    /// Called when audio capture recovers unattended after an interruption.
+    var onResumed: (@Sendable () -> Void)?
 
     private lazy var targetFormat: AVAudioFormat = .init(
         commonFormat: .pcmFormatInt16,
@@ -174,14 +176,14 @@ final class AudioCaptureEngine {
         switch type {
         case .began:
             log.warning("audio interruption began (call/Siri)")
+            // iOS sometimes never delivers .ended (e.g. declined call while
+            // locked) — the retry loop below recovers regardless.
+            scheduleResumeRetries()
         case .ended:
-            let optionsRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
-            if options.contains(.shouldResume) {
-                restartEngine(reason: "interruption ended")
-            } else {
-                onInterruption?("Recording was interrupted (phone call or Siri). Tap record to resume.")
-            }
+            // Always try to resume, even without .shouldResume: during class
+            // the device is locked in a pocket — "tap to resume" is exactly
+            // what the user cannot do.
+            attemptResume(reason: "interruption ended")
         @unknown default:
             break
         }
@@ -194,7 +196,9 @@ final class AudioCaptureEngine {
 
     @objc private func handleMediaReset(_ note: Notification) {
         guard running else { return }
-        onInterruption?("The system audio service restarted. Tap record to resume.")
+        // Apple: after a media-services reset everything must be rebuilt,
+        // including the session configuration.
+        attemptResume(reason: "media services reset")
     }
 
     private func restartEngine(reason: String) {
@@ -204,7 +208,38 @@ final class AudioCaptureEngine {
         do {
             try installTapAndStart()
         } catch {
-            onInterruption?("Could not restart the microphone: \(error.localizedDescription)")
+            scheduleResumeRetries()
+        }
+    }
+
+    /// Full resume: reactivate the session, rebuild the tap, start the engine.
+    /// On failure, keeps retrying in the background instead of giving up.
+    private func attemptResume(reason: String) {
+        guard running else { return }
+        log.info("resuming audio after: \(reason)")
+        engine.stop()
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .measurement,
+                                    options: [.allowBluetooth, .duckOthers])
+            try session.setActive(true, options: [])
+            try installTapAndStart()
+            log.info("audio resumed")
+            onResumed?()
+        } catch {
+            log.warning("audio resume failed (\(error.localizedDescription)); retrying")
+            scheduleResumeRetries()
+        }
+    }
+
+    /// Retries every few seconds while recording is wanted and the engine is
+    /// down (a phone call can hold the mic for minutes). Surfaces a banner
+    /// only while retrying, so a locked device recovers unattended.
+    private func scheduleResumeRetries() {
+        onInterruption?("Recording paused (call or Siri) — resuming automatically…")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, self.running, !self.engine.isRunning else { return }
+            self.attemptResume(reason: "retry")
         }
     }
 }

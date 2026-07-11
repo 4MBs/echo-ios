@@ -67,10 +67,18 @@ final class AppModel {
                 )
             )
         }
+        // Interruptions (call/Siri/route loss) no longer stop the session:
+        // the capture engine retries on its own — essential when the device
+        // is locked in a pocket and nobody can tap. The WebSocket stays up;
+        // the gap lands on the server timeline as silence.
         audio.onInterruption = { [weak self] message in
             Task { @MainActor in
                 self?.bannerMessage = message
-                self?.stopRecording()
+            }
+        }
+        audio.onResumed = { [weak self] in
+            Task { @MainActor in
+                self?.bannerMessage = nil
             }
         }
         eventPump = Task { [weak self] in
