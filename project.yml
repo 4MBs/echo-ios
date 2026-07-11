@@ -42,6 +42,12 @@ targets:
       path: Sources/MossLive/Info.plist
       properties:
         CFBundleDisplayName: MOSS Live
+        # The app talks ws:// (cleartext) to the user's own machine over a
+        # Tailscale address; the link is already WireGuard-encrypted, and ATS
+        # would otherwise block the in-app WebSocket (Safari is not affected,
+        # which makes this failure mode confusing to debug).
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
         NSMicrophoneUsageDescription: >-
           MOSS Live streams microphone audio to your own private computer for
           live transcription. Audio never goes to a third-party service.

@@ -189,7 +189,15 @@ actor WebSocketClient {
                 emit(.roundTrip(ms: ms))
             }
         case .serverError(let err):
-            emit(.serverError(err))
+            if err.code == "unauthorized" || err.code == "bad_protocol" {
+                // fatal handshake rejection: reconnecting would loop forever,
+                // so stop and surface the server's reason instead
+                userInitiatedClose = true
+                teardownSocket(code: .normalClosure)
+                emit(.state(.failed(reason: err.message)))
+            } else {
+                emit(.serverError(err))
+            }
         case .unknown:
             break
         }
