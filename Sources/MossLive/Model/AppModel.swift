@@ -48,15 +48,6 @@ final class AppModel {
     private(set) var recordingStartedAt: Date?
     var bannerMessage: String?
 
-    enum SummaryState: Equatable {
-        case generating
-        case ready(text: String, duration: TimeInterval, date: Date)
-        case failed(String)
-    }
-
-    private(set) var summaryState: SummaryState?
-    var showSummary = false
-
     let settings = AppSettings()
 
     // MARK: - Internals
@@ -66,7 +57,6 @@ final class AppModel {
     private let audio = AudioCaptureEngine()
     private var eventPump: Task<Void, Never>?
     private var transcribingPulse: Task<Void, Never>?
-    private var summaryTimeout: Task<Void, Never>?
     private var wantsRecording = false
 
     init() {
@@ -117,37 +107,14 @@ final class AppModel {
     }
 
     func stopRecording() {
-        let hadContent = phase == .recording && (!segments.isEmpty || !partial.isEmpty)
         wantsRecording = false
         recordingStartedAt = nil
         lastRoundTripMs = nil
         audio.stop()
         answers.failAllInflight(error: "Recording stopped")
+        Task { await client.disconnect(sendStop: true) }
         phase = .disconnected
         isTranscribing = false
-
-        if hadContent {
-            // keep the socket open: the server sends the lesson summary after
-            // it finishes exporting the transcript
-            summaryState = .generating
-            showSummary = true
-            Task { await client.endSession() }
-            summaryTimeout?.cancel()
-            summaryTimeout = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(120))
-                guard !Task.isCancelled else { return }
-                await self?.summaryTimedOut()
-            }
-        } else {
-            Task { await client.disconnect(sendStop: true) }
-        }
-    }
-
-    private func summaryTimedOut() {
-        if summaryState == .generating {
-            summaryState = .failed("The summary took too long — the transcript is still saved on the server.")
-            Task { await client.disconnect(sendStop: false) }
-        }
     }
 
     func pressAnswerButton() {
@@ -199,10 +166,6 @@ final class AppModel {
                 error: payload.error,
                 latencyMs: payload.latency.totalMs
             )
-        case .summary(let text, let durationSeconds):
-            summaryTimeout?.cancel()
-            summaryState = .ready(text: text, duration: durationSeconds, date: Date())
-            Task { await client.disconnect(sendStop: false) }
         case .serverError(let err):
             log.warning("server error \(err.code): \(err.message)")
             if err.code == "session_limit" {
@@ -218,13 +181,6 @@ final class AppModel {
         switch state {
         case .disconnected:
             phase = wantsRecording ? .reconnecting : .disconnected
-            // server closed without sending a summary (session too short)
-            if summaryState == .generating {
-                summaryTimeout?.cancel()
-                summaryState = .failed(
-                    "No summary was generated — the session was probably too short. The transcript is saved on the server."
-                )
-            }
         case .connecting:
             phase = .connecting
         case .connected:

@@ -3,12 +3,13 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @State private var showSettings = false
+    @State private var showLessons = false
 
     var body: some View {
         ZStack {
             AppBackground()
             VStack(spacing: 14) {
-                HeaderBar(showSettings: $showSettings)
+                HeaderBar(showSettings: $showSettings, showLessons: $showLessons)
                 if let banner = model.bannerMessage {
                     BannerView(text: banner)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -23,8 +24,8 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
-        .sheet(isPresented: Bindable(model).showSummary) {
-            SummaryView()
+        .sheet(isPresented: $showLessons) {
+            LessonsView()
         }
         .onAppear {
             if !model.settings.isConfigured {
@@ -52,6 +53,7 @@ struct AppBackground: View {
 struct HeaderBar: View {
     @Environment(AppModel.self) private var model
     @Binding var showSettings: Bool
+    @Binding var showLessons: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -64,18 +66,16 @@ struct HeaderBar: View {
             if model.phase == .recording, let started = model.recordingStartedAt {
                 RecordingTimer(startedAt: started)
             }
-            if case .ready = model.summaryState {
-                Button {
-                    model.showSummary = true
-                } label: {
-                    Image(systemName: "text.badge.star")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.purple)
-                        .frame(width: 40, height: 40)
-                        .background(.purple.opacity(0.12), in: Circle())
-                }
-                .accessibilityLabel("Lesson summary")
+            Button {
+                showLessons = true
+            } label: {
+                Image(systemName: "books.vertical.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.purple)
+                    .frame(width: 40, height: 40)
+                    .background(.purple.opacity(0.12), in: Circle())
             }
+            .accessibilityLabel("Lessons")
             Button {
                 showSettings = true
             } label: {

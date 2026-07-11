@@ -25,7 +25,6 @@ actor WebSocketClient {
         case answerPending(requestId: Int)
         case answerDelta(requestId: Int, text: String)
         case answer(AnswerPayload)
-        case summary(text: String, durationSeconds: Double)
         case serverError(ServerErrorMessage)
         case roundTrip(ms: Double)
     }
@@ -84,17 +83,6 @@ actor WebSocketClient {
         backoff.reset()
         startAudioSender(audioFrames)
         openSocket(resume: false)
-    }
-
-    /// Ends the recording session but keeps the socket open: the server
-    /// generates the lesson summary and sends it before closing its side.
-    func endSession() async {
-        userInitiatedClose = true
-        reconnectTask?.cancel()
-        keepaliveLoop?.cancel()
-        if let task, task.state == .running {
-            try? await task.send(.string(encodeJSON(StopMessage())))
-        }
     }
 
     func disconnect(sendStop: Bool) async {
@@ -229,8 +217,6 @@ actor WebSocketClient {
             emit(.answerDelta(requestId: requestId, text: text))
         case .answer(let payload):
             emit(.answer(payload))
-        case .summary(let text, let durationSeconds):
-            emit(.summary(text: text, durationSeconds: durationSeconds))
         case .pong(let tMs, _):
             if let sent = pingSentAt.removeValue(forKey: tMs) {
                 let elapsed = (ContinuousClock.now - sent).components

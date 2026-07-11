@@ -98,15 +98,6 @@ final class ProtocolTests: XCTestCase {
         )
     }
 
-    func testDecodeSummary() throws {
-        XCTAssertEqual(
-            try ServerMessage.decode(
-                #"{"type":"summary","session_id":"s1","text":"• point","duration_seconds":61.5}"#
-            ),
-            .summary(text: "• point", durationSeconds: 61.5)
-        )
-    }
-
     func testUnknownTypeDoesNotThrow() throws {
         XCTAssertEqual(
             try ServerMessage.decode(#"{"type":"future_thing","x":1}"#),

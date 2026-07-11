@@ -199,6 +199,9 @@ struct AnswerWidget: Widget {
     }
 }
 
+/// Deliberately stealth: no branding, no labels — an empty dark tile with a
+/// barely visible dot. Tap it and only the answer text appears, scaled to fit
+/// the widget. Errors show as small dim text (needed for setup/debugging).
 struct AnswerWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: AnswerEntry
@@ -215,16 +218,13 @@ struct AnswerWidgetView: View {
     var body: some View {
         Button(intent: intent) {
             content
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .containerBackground(for: .widget) {
             if family == .systemSmall || family == .systemMedium {
-                LinearGradient(
-                    colors: [Color(red: 0.10, green: 0.07, blue: 0.16), Color(red: 0.04, green: 0.03, blue: 0.07)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                Color(red: 0.05, green: 0.05, blue: 0.06)
             } else {
                 Color.clear
             }
@@ -233,86 +233,68 @@ struct AnswerWidgetView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch family {
-        case .accessoryInline:
-            inlineContent
-        case .accessoryRectangular:
-            rectangularContent
-        default:
-            systemContent
+        if family == .accessoryInline {
+            // inline renders exactly one line of text
+            Text(inlineText)
+        } else {
+            fullContent
         }
     }
 
-    private var inlineContent: some View {
+    private var inlineText: String {
         switch entry.snapshot.state {
-        case .idle: Text("✦ Tap for answer")
-        case .loading: Text("✦ Thinking…")
-        case .answer: Text("✦ \(entry.snapshot.text)")
-        case .failure: Text("✦ \(entry.snapshot.text)")
+        case .idle: "·"
+        case .loading: "…"
+        case .answer: entry.snapshot.text
+        case .failure: "!"
         }
     }
 
-    private var rectangularContent: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: iconName)
-                    .font(.caption2)
-                Text(headline)
-                    .font(.caption2.weight(.semibold))
-                Spacer()
-            }
-            Text(bodyText)
-                .font(.caption2)
-                .lineLimit(3)
-        }
-    }
-
-    private var systemContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Image(systemName: iconName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.purple)
-                Text(headline)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.purple)
-                Spacer()
-                if entry.snapshot.state == .answer || entry.snapshot.state == .failure {
-                    Text(entry.snapshot.updatedAt, style: .time)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
+    @ViewBuilder
+    private var fullContent: some View {
+        switch entry.snapshot.state {
+        case .idle:
+            // near-invisible tap target
+            Circle()
+                .fill(.white.opacity(family.isAccessory ? 0.35 : 0.10))
+                .frame(width: 5, height: 5)
+        case .loading:
+            HStack(spacing: 3) {
+                ForEach(0 ..< 3, id: \.self) { _ in
+                    Circle()
+                        .fill(.white.opacity(family.isAccessory ? 0.6 : 0.25))
+                        .frame(width: 4, height: 4)
                 }
             }
-            Text(bodyText)
-                .font(family == .systemSmall ? .caption2 : .footnote)
-                .foregroundStyle(entry.snapshot.state == .failure ? .secondary : .primary)
-                .lineLimit(family == .systemSmall ? 5 : 6)
-            Spacer(minLength: 0)
+        case .answer:
+            Text(entry.snapshot.text)
+                .font(answerFont)
+                .minimumScaleFactor(0.4)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .foregroundStyle(family.isAccessory ? .primary : Color.white.opacity(0.9))
+        case .failure:
+            Text(entry.snapshot.text)
+                .font(.system(size: 10))
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(family.isAccessory ? .secondary : Color.white.opacity(0.35))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
         }
     }
 
-    private var iconName: String {
-        switch entry.snapshot.state {
-        case .loading: "hourglass"
-        case .failure: "exclamationmark.triangle"
-        default: "sparkles"
+    private var answerFont: Font {
+        switch family {
+        case .accessoryInline: .body
+        case .accessoryRectangular: .caption2
+        case .systemSmall: .caption2
+        default: .footnote
         }
     }
+}
 
-    private var headline: String {
-        switch entry.snapshot.state {
-        case .idle: "MOSS Live"
-        case .loading: "Thinking…"
-        case .answer: "Answer"
-        case .failure: "Problem"
-        }
-    }
-
-    private var bodyText: String {
-        switch entry.snapshot.state {
-        case .idle: "Tap to answer the last 30 seconds."
-        case .loading: "Asking the AI…"
-        case .answer, .failure: entry.snapshot.text
-        }
+extension WidgetFamily {
+    var isAccessory: Bool {
+        self == .accessoryRectangular || self == .accessoryInline || self == .accessoryCircular
     }
 }
