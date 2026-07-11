@@ -31,6 +31,8 @@ targets:
     dependencies:
       - package: OpusShim
         product: OpusShim
+      - target: MossLiveWidget
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fourmbs.mosslive
@@ -58,6 +60,28 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+
+  MossLiveWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Sources/MossLiveWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fourmbs.mosslive.widget
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        SKIP_INSTALL: true
+    info:
+      path: Sources/MossLiveWidget/Info.plist
+      properties:
+        CFBundleDisplayName: MOSS Live Answer
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        # widget talks ws-less plain http to the Tailscale-only server;
+        # the link is WireGuard-encrypted by Tailscale
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
 
   MossLiveTests:
     type: bundle.unit-test

@@ -143,6 +143,7 @@ enum ServerMessage: Equatable, Sendable {
     case answerPending(requestId: Int)
     case answerDelta(requestId: Int, text: String)
     case answer(AnswerPayload)
+    case summary(text: String, durationSeconds: Double)
     case pong(tMs: Int64, serverTimeMs: Int64)
     case serverError(ServerErrorMessage)
     case unknown(type: String)
@@ -176,6 +177,17 @@ enum ServerMessage: Equatable, Sendable {
             return .answerDelta(requestId: delta.requestId, text: delta.text)
         case "answer":
             return try .answer(WireProtocol.decoder.decode(AnswerPayload.self, from: data))
+        case "summary":
+            struct SummaryMsg: Decodable {
+                let text: String
+                let durationSeconds: Double
+                enum CodingKeys: String, CodingKey {
+                    case text
+                    case durationSeconds = "duration_seconds"
+                }
+            }
+            let msg = try WireProtocol.decoder.decode(SummaryMsg.self, from: data)
+            return .summary(text: msg.text, durationSeconds: msg.durationSeconds)
         case "pong":
             struct Pong: Decodable {
                 let tMs: Int64

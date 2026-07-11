@@ -76,11 +76,16 @@ final class AnswerTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.records[1].state, .failure(error: "disconnected"))
     }
 
-    func testUnknownIdIgnored() {
+    func testExternalAnswerAppendsRecord() {
+        // widget-triggered answers arrive with server-side ids the app never
+        // issued; they must appear as new records (and become current)
         var tracker = AnswerTracker()
         _ = tracker.begin()
-        XCTAssertFalse(tracker.complete(id: 999, ok: true, text: "?", error: "", latencyMs: 0))
-        XCTAssertEqual(tracker.current?.state, .pending)
+        XCTAssertTrue(tracker.complete(id: 1_000_001, ok: true, text: "Paris", error: "", latencyMs: 5))
+        XCTAssertEqual(tracker.current?.id, 1_000_001)
+        XCTAssertEqual(tracker.current?.state, .success(text: "Paris", latencyMs: 5))
+        // the app's own pending request is untouched
+        XCTAssertEqual(tracker.records.first?.state, .pending)
     }
 
     func testHistoryBounded() {

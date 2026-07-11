@@ -23,6 +23,9 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        .sheet(isPresented: Bindable(model).showSummary) {
+            SummaryView()
+        }
         .onAppear {
             if !model.settings.isConfigured {
                 showSettings = true
@@ -60,6 +63,18 @@ struct HeaderBar: View {
             Spacer()
             if model.phase == .recording, let started = model.recordingStartedAt {
                 RecordingTimer(startedAt: started)
+            }
+            if case .ready = model.summaryState {
+                Button {
+                    model.showSummary = true
+                } label: {
+                    Image(systemName: "text.badge.star")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.purple)
+                        .frame(width: 40, height: 40)
+                        .background(.purple.opacity(0.12), in: Circle())
+                }
+                .accessibilityLabel("Lesson summary")
             }
             Button {
                 showSettings = true

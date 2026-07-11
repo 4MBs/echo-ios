@@ -75,12 +75,24 @@ struct AnswerTracker: Sendable {
 
     /// Applies a finished answer. Returns true iff this answer belongs to the
     /// most recent request (i.e. the main answer view should show it).
+    ///
+    /// Answers for ids this tracker never issued come from another trigger of
+    /// the same session (the Home/Lock-Screen widget, whose answers the server
+    /// mirrors to the app) — they are appended as fresh records so the app
+    /// shows what the widget asked.
     @discardableResult
     mutating func complete(id: Int, ok: Bool, text: String, error: String, latencyMs: Double) -> Bool {
-        guard let idx = records.lastIndex(where: { $0.id == id }) else { return false }
-        records[idx].state = ok
+        let state: State = ok
             ? .success(text: text, latencyMs: latencyMs)
             : .failure(error: error)
+        guard let idx = records.lastIndex(where: { $0.id == id }) else {
+            records.append(Record(id: id, pressedAt: Date(), state: state))
+            if records.count > maxHistory {
+                records.removeFirst(records.count - maxHistory)
+            }
+            return true
+        }
+        records[idx].state = state
         return id == latestRequestId
     }
 
