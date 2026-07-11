@@ -5,7 +5,6 @@ import SwiftUI
 /// demand (cached server-side after the first time).
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
 
     @State private var lessons: [BackendAPI.LessonInfo] = []
     @State private var loading = true
@@ -21,19 +20,10 @@ struct LessonsView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                AppBackground()
-                content
-            }
-            .navigationTitle("Lessons")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
+            content
+                .navigationTitle("Lessons")
+                .background(Color(.systemGroupedBackground))
         }
-        .preferredColorScheme(.dark)
         .task { await load() }
     }
 
@@ -70,9 +60,7 @@ struct LessonsView: View {
                 } label: {
                     LessonRow(info: lesson)
                 }
-                .listRowBackground(Color.white.opacity(0.045))
             }
-            .scrollContentBackground(.hidden)
             .refreshable { await load() }
         }
     }
@@ -134,8 +122,7 @@ struct LessonDetailView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        ZStack {
-            AppBackground()
+        Group {
             if let detail {
                 loadedContent(detail)
             } else if let errorMessage {
@@ -147,6 +134,8 @@ struct LessonDetailView: View {
                 ProgressView("Loading transcript…")
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
         .navigationTitle(info.startedAt.formatted(date: .abbreviated, time: .shortened))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -170,7 +159,8 @@ struct LessonDetailView: View {
     }
 
     private func loadedContent(_ detail: BackendAPI.LessonDetail) -> some View {
-        ScrollView {
+        let multiSpeaker = Set(detail.segments.map(\.speaker)).count > 1
+        return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 summarySection
                 Text("Transcript")
@@ -181,12 +171,16 @@ struct LessonDetailView: View {
                         SegmentRow(
                             segment: segment,
                             isPartial: false,
-                            showsSpeaker: index == 0 || detail.segments[index - 1].speaker != segment.speaker
+                            speakerStyle: !multiSpeaker
+                                ? .hidden
+                                : (index == 0 || detail.segments[index - 1].speaker != segment.speaker)
+                                ? .shown
+                                : .placeholder
                         )
                     }
                 }
                 .padding(14)
-                .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
             }
             .padding(16)
         }

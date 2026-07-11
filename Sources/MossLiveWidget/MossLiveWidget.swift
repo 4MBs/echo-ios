@@ -42,6 +42,10 @@ struct WidgetConfigIntent: WidgetConfigurationIntent {
 struct FetchAnswerIntent: AppIntent {
     static var title: LocalizedStringResource = "Answer Last Seconds"
     static var description = IntentDescription("Asks the AI about the last seconds of the lecture.")
+    /// Runs from the Lock Screen without unlocking the device — the whole
+    /// point is answering with the iPad face-down on the desk.
+    static var authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+    static var openAppWhenRun = false
 
     @Parameter(title: "Server address", default: "")
     var host: String
@@ -164,6 +168,10 @@ struct AnswerEntry: TimelineEntry {
 }
 
 struct AnswerProvider: AppIntentTimelineProvider {
+    /// Answers auto-expire back to the blank tile (stealth: nothing lingers
+    /// on the Home/Lock Screen after class).
+    static let answerLifetime: TimeInterval = 10 * 60
+
     func placeholder(in context: Context) -> AnswerEntry {
         AnswerEntry(
             date: .now,
@@ -173,12 +181,34 @@ struct AnswerProvider: AppIntentTimelineProvider {
     }
 
     func snapshot(for configuration: WidgetConfigIntent, in context: Context) async -> AnswerEntry {
-        AnswerEntry(date: .now, snapshot: AnswerSnapshotStore.load(), config: configuration)
+        AnswerEntry(date: .now, snapshot: currentSnapshot(), config: configuration)
     }
 
     func timeline(for configuration: WidgetConfigIntent, in context: Context) async -> Timeline<AnswerEntry> {
-        let entry = AnswerEntry(date: .now, snapshot: AnswerSnapshotStore.load(), config: configuration)
-        return Timeline(entries: [entry], policy: .never)
+        let snapshot = currentSnapshot()
+        let entry = AnswerEntry(date: .now, snapshot: snapshot, config: configuration)
+        switch snapshot.state {
+        case .answer, .failure:
+            // schedule the wipe back to the blank tile
+            let expiry = snapshot.updatedAt.addingTimeInterval(Self.answerLifetime)
+            let blank = AnswerEntry(
+                date: max(expiry, .now + 1),
+                snapshot: .init(state: .idle, text: "", updatedAt: .now),
+                config: configuration
+            )
+            return Timeline(entries: [entry, blank], policy: .never)
+        case .idle, .loading:
+            return Timeline(entries: [entry], policy: .never)
+        }
+    }
+
+    private func currentSnapshot() -> AnswerSnapshot {
+        let snapshot = AnswerSnapshotStore.load()
+        if snapshot.state == .answer || snapshot.state == .failure,
+           Date().timeIntervalSince(snapshot.updatedAt) > Self.answerLifetime {
+            return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
+        }
+        return snapshot
     }
 }
 
@@ -195,7 +225,10 @@ struct AnswerWidget: Widget {
         }
         .configurationDisplayName("AI Answer")
         .description("Tap to answer the last seconds of the lecture — the answer appears right here.")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular, .accessoryInline])
+        .supportedFamilies([
+            .systemSmall, .systemMedium, .systemLarge, .systemExtraLarge,
+            .accessoryRectangular, .accessoryInline,
+        ])
     }
 }
 
@@ -222,11 +255,14 @@ struct AnswerWidgetView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The system dims/shimmers this content the instant a tap lands, so
+        // the user gets feedback even before the network round-trip finishes.
+        .invalidatableContent()
         .containerBackground(for: .widget) {
-            if family == .systemSmall || family == .systemMedium {
-                Color(red: 0.05, green: 0.05, blue: 0.06)
-            } else {
+            if family.isAccessory {
                 Color.clear
+            } else {
+                Color(red: 0.05, green: 0.05, blue: 0.06)
             }
         }
     }
@@ -288,7 +324,9 @@ struct AnswerWidgetView: View {
         case .accessoryInline: .body
         case .accessoryRectangular: .caption2
         case .systemSmall: .caption2
-        default: .footnote
+        case .systemMedium: .footnote
+        case .systemLarge: .body
+        default: .title3
         }
     }
 }

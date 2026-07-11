@@ -29,7 +29,7 @@ struct AnswerButton: View {
             .background(
                 LinearGradient(
                     colors: disabled
-                        ? [Color(white: 0.22), Color(white: 0.18)]
+                        ? [Color(.systemGray3), Color(.systemGray4)]
                         : [.purple, .indigo],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing

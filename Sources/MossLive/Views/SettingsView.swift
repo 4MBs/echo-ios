@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -45,13 +44,30 @@ struct SettingsView: View {
                 } footer: {
                     Text("24 kbps ≈ 11 MiB per hour of streaming.")
                 }
-            }
-            .navigationTitle("Settings")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+
+                Section {
+                    LabeledContent("Transcription", value: "Qwen3-ASR 1.7B")
+                    LabeledContent("Answers", value: "Gemini 3.5 Flash")
+                    LabeledContent("Version", value: appVersion)
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text(
+                        """
+                        Audio is processed only on your own server; nothing goes to third \
+                        parties except the transcript excerpt sent to Gemini when you \
+                        request an answer.
+                        """
+                    )
                 }
             }
+            .navigationTitle("Settings")
         }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
     }
 }

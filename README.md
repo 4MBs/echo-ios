@@ -64,29 +64,34 @@ on the iPhone/iPad).
 
 ## Stealth widget (Home Screen + Lock Screen)
 
-The app ships a widget that answers without opening the app: tap it → the
-backend answers the last 30 s → the answer text appears inside the widget.
+The app ships a deliberately anonymous widget: a plain dark tile with a faint
+dot, no name, no branding. Tap it → the backend answers the last 30 s → only
+the answer text appears, scaled to fit the tile — then wipes itself after
+10 minutes. The tap runs without unlocking the device
+(`authenticationPolicy = .alwaysAllowed`), so it works from the Lock Screen
+with the iPad face-down on the desk. The system shimmers the tile the moment
+a tap lands, and any problem (unconfigured, no recording running, wrong
+token) shows as small dim text so failures are never silent.
 
 Setup (once, after installing the app):
 
 1. Long-press the Home Screen → **+** → search "MOSS Live" → add *AI Answer*
-   (small or medium). For the Lock Screen: long-press the Lock Screen →
-   Customize → add the rectangular widget.
+   (small, medium, large, or extra-large). For the Lock Screen: long-press
+   the Lock Screen → Customize → add the rectangular widget.
 2. Long-press the widget → **Edit Widget** → enter the server address, port
    and auth token (same values as in the app's Settings). The widget is
    configured on itself — SideStore's re-signing breaks shared app storage,
    so it cannot inherit the app's settings automatically.
-3. Recording must be running in the app; the widget then works even from the
-   Lock Screen while the phone stays otherwise untouched.
+3. Recording must be running in the app (background is fine).
+4. If SideStore asks about *app extensions* during install, keep them — the
+   widget is one; removing extensions removes the widget.
 
-## Lesson summary
+## Lessons tab
 
-When you stop a recording, the app keeps the connection open for a few
-seconds while the server condenses the whole lesson into a summary (overview,
-key points, assignments — in the lesson's language). It appears as a
-full-screen sheet with share/copy, can be reopened from the header button,
-and is also saved on the server next to the transcript
-(`...-summary.txt`).
+Every recording is archived on the Fedora server, never on the device. The
+Lessons tab lists them (date, duration, segment count), opens the full
+transcript, generates an on-demand summary per lesson (cached server-side
+after the first request), and shares/exports everything as text.
 
 ## What the app does
 

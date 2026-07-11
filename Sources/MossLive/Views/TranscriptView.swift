@@ -10,14 +10,9 @@ struct TranscriptCard: View {
         VStack(spacing: 0) {
             header
             Divider()
-                .overlay(.white.opacity(0.06))
             content
         }
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .strokeBorder(.white.opacity(0.07), lineWidth: 1)
-        )
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
         .frame(maxHeight: .infinity)
     }
 
@@ -39,6 +34,13 @@ struct TranscriptCard: View {
         .padding(.vertical, 12)
     }
 
+    /// With a single speaker (the current model does not diarize) the badge
+    /// column is pure noise, so it only appears when speakers actually differ.
+    private var isMultiSpeaker: Bool {
+        let speakers = Set(model.segments.map(\.speaker)).union(model.partial.map(\.speaker))
+        return speakers.count > 1
+    }
+
     @ViewBuilder
     private var content: some View {
         if model.segments.isEmpty && model.partial.isEmpty {
@@ -51,16 +53,20 @@ struct TranscriptCard: View {
                             SegmentRow(
                                 segment: segment,
                                 isPartial: false,
-                                showsSpeaker: index == 0 || model.segments[index - 1].speaker != segment.speaker
+                                speakerStyle: rowStyle(
+                                    changed: index == 0 || model.segments[index - 1].speaker != segment.speaker
+                                )
                             )
                         }
                         ForEach(Array(model.partial.enumerated()), id: \.element.id) { index, segment in
                             SegmentRow(
                                 segment: segment,
                                 isPartial: true,
-                                showsSpeaker: index == 0
-                                    ? model.segments.last?.speaker != segment.speaker
-                                    : model.partial[index - 1].speaker != segment.speaker
+                                speakerStyle: rowStyle(
+                                    changed: index == 0
+                                        ? model.segments.last?.speaker != segment.speaker
+                                        : model.partial[index - 1].speaker != segment.speaker
+                                )
                             )
                         }
                         Color.clear.frame(height: 2).id("bottom")
@@ -75,6 +81,11 @@ struct TranscriptCard: View {
                 }
             }
         }
+    }
+
+    private func rowStyle(changed: Bool) -> SegmentRow.SpeakerStyle {
+        guard isMultiSpeaker else { return .hidden }
+        return changed ? .shown : .placeholder
     }
 }
 
@@ -99,14 +110,23 @@ struct TranscriptEmptyState: View {
 }
 
 struct SegmentRow: View {
+    /// hidden = no speaker column at all (single-speaker transcript);
+    /// placeholder = keep the column aligned but show nothing (same speaker
+    /// as the previous row); shown = badge visible.
+    enum SpeakerStyle {
+        case hidden, placeholder, shown
+    }
+
     let segment: TranscriptSegment
     let isPartial: Bool
-    var showsSpeaker: Bool = true
+    var speakerStyle: SpeakerStyle = .shown
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            SpeakerBadge(speaker: segment.speaker)
-                .opacity(showsSpeaker ? 1 : 0)
+            if speakerStyle != .hidden {
+                SpeakerBadge(speaker: segment.speaker)
+                    .opacity(speakerStyle == .shown ? 1 : 0)
+            }
             Text(segment.text)
                 .font(.callout)
                 .italic(isPartial)

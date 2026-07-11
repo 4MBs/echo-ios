@@ -1,15 +1,14 @@
 import SwiftUI
 
-struct ContentView: View {
+/// The Live tab: connection status, live transcript, AI answer, and the
+/// record controls — laid out as a standard navigation screen so the app
+/// follows platform conventions (system backgrounds, light/dark adaptive).
+struct LiveView: View {
     @Environment(AppModel.self) private var model
-    @State private var showSettings = false
-    @State private var showLessons = false
 
     var body: some View {
-        ZStack {
-            AppBackground()
+        NavigationStack {
             VStack(spacing: 14) {
-                HeaderBar(showSettings: $showSettings, showLessons: $showLessons)
                 if let banner = model.bannerMessage {
                     BannerView(text: banner)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -18,74 +17,22 @@ struct ContentView: View {
                 AnswerCard()
                 ControlBar()
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
             .animation(.snappy, value: model.bannerMessage)
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-        }
-        .sheet(isPresented: $showLessons) {
-            LessonsView()
-        }
-        .onAppear {
-            if !model.settings.isConfigured {
-                showSettings = true
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("MOSS Live")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    StatusPill()
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if model.phase == .recording, let started = model.recordingStartedAt {
+                        RecordingTimer(startedAt: started)
+                    }
+                }
             }
-        }
-        .preferredColorScheme(.dark)
-    }
-}
-
-/// Subtle depth instead of a flat black sheet.
-struct AppBackground: View {
-    var body: some View {
-        LinearGradient(
-            colors: [Color(red: 0.07, green: 0.07, blue: 0.10), Color(red: 0.02, green: 0.02, blue: 0.04)],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .ignoresSafeArea()
-    }
-}
-
-// MARK: - Header
-
-struct HeaderBar: View {
-    @Environment(AppModel.self) private var model
-    @Binding var showSettings: Bool
-    @Binding var showLessons: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("MOSS Live")
-                    .font(.title2.weight(.bold))
-                StatusPill()
-            }
-            Spacer()
-            if model.phase == .recording, let started = model.recordingStartedAt {
-                RecordingTimer(startedAt: started)
-            }
-            Button {
-                showLessons = true
-            } label: {
-                Image(systemName: "books.vertical.fill")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.purple)
-                    .frame(width: 40, height: 40)
-                    .background(.purple.opacity(0.12), in: Circle())
-            }
-            .accessibilityLabel("Lessons")
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 40, height: 40)
-                    .background(.white.opacity(0.06), in: Circle())
-            }
-            .accessibilityLabel("Settings")
         }
     }
 }
@@ -110,7 +57,7 @@ struct StatusPill: View {
             Text(statusText)
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(model.phase == .disconnected ? .secondary : .primary)
-                .lineLimit(2)
+                .lineLimit(1)
             if let rtt = model.lastRoundTripMs,
                model.phase == .recording || model.phase == .connected {
                 Text("· \(Int(rtt)) ms")
@@ -144,7 +91,7 @@ struct RecordingTimer: View {
                     .font(.subheadline.monospacedDigit().weight(.semibold))
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
             .background(.red.opacity(0.12), in: Capsule())
         }
     }
@@ -156,10 +103,10 @@ struct BannerView: View {
     var body: some View {
         Label(text, systemImage: "exclamationmark.triangle.fill")
             .font(.footnote)
-            .foregroundStyle(.yellow)
+            .foregroundStyle(.orange)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -210,6 +157,6 @@ struct RecordButton: View {
 }
 
 #Preview {
-    ContentView()
+    MainTabView()
         .environment(AppModel())
 }
