@@ -49,6 +49,8 @@ struct SettingsView: View {
                     LabeledContent("Transcription", value: "Qwen3-ASR 1.7B")
                     LabeledContent("Answers", value: "Gemini 3.5 Flash")
                     LabeledContent("Version", value: appVersion)
+                    LabeledContent("Widget link", value: SharedConfig.resolvedGroupID ?? "unavailable")
+                        .font(.footnote)
                 } header: {
                     Text("About")
                 } footer: {

@@ -5,12 +5,13 @@ import WidgetKit
 /// Stealth answer widget: tap anywhere on it → the Fedora backend answers the
 /// last 30 seconds of the running recording session → the answer appears in
 /// the widget itself. No app opening, works on the Home Screen and the Lock
-/// Screen.
+/// Screen (without unlocking).
 ///
-/// Configuration (server address / token) lives on the widget itself
-/// (long-press → Edit Widget) rather than in shared app storage, because
-/// SideStore re-signs apps with rewritten app-group entitlements, which would
-/// silently break cross-process sharing.
+/// Zero configuration: the widget reads the app's server settings through the
+/// App Group (see SharedConfig, which resolves the group ID the sideloading
+/// tool actually granted at runtime). Per-widget Edit Widget parameters
+/// override the shared settings and are the fallback if the signer stripped
+/// app groups entirely.
 @main
 struct MossLiveWidgetBundle: WidgetBundle {
     var body: some Widget {
@@ -114,6 +115,14 @@ enum WidgetBackend {
     static func requestAnswer(host: String, port: Int, token: String, contextSeconds: Int) async throws -> String {
         let cleanHost = host.trimmingCharacters(in: .whitespaces)
         guard !cleanHost.isEmpty, !token.isEmpty else {
+            // distinguish "sharing broken" from "app never configured" so the
+            // tile tells the truth about what to fix
+            if SharedConfig.resolvedGroupID == nil {
+                throw WidgetBackendError(
+                    message: "App-widget link unavailable (SideStore stripped app groups). "
+                        + "Long-press → Edit Widget → enter server & token there."
+                )
+            }
             throw WidgetBackendError(
                 message: "Not configured. Open the MOSS Live app once and enter server & token in Settings."
             )
@@ -132,7 +141,20 @@ enum WidgetBackend {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["context_seconds": contextSeconds])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            // network failures must never masquerade as configuration problems
+            let reason = switch error.code {
+            case .timedOut: "Server not answering — is run.sh running on the computer?"
+            case .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .notConnectedToInternet:
+                "Can't reach the server — is Tailscale connected on this device?"
+            default: "Network error: \(error.localizedDescription)"
+            }
+            throw WidgetBackendError(message: reason)
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         struct Payload: Decodable {
             let ok: Bool
@@ -140,6 +162,9 @@ enum WidgetBackend {
             let error: String
         }
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data) else {
+            if status == 401 {
+                throw WidgetBackendError(message: "The server rejected the auth token.")
+            }
             throw WidgetBackendError(message: "Server error (HTTP \(status)).")
         }
         guard payload.ok else {
