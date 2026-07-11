@@ -5,69 +5,107 @@ struct ContentView: View {
     @State private var showSettings = false
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                StatusHeader()
+        ZStack {
+            AppBackground()
+            VStack(spacing: 14) {
+                HeaderBar(showSettings: $showSettings)
                 if let banner = model.bannerMessage {
                     BannerView(text: banner)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                TranscriptView()
+                TranscriptCard()
                 AnswerCard()
-                AnswerButton()
-                RecordButton()
+                ControlBar()
             }
-            .padding()
-            .navigationTitle("MOSS Live")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
+            .padding(16)
+            .animation(.snappy, value: model.bannerMessage)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
+        .onAppear {
+            if !model.settings.isConfigured {
+                showSettings = true
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// Subtle depth instead of a flat black sheet.
+struct AppBackground: View {
+    var body: some View {
+        LinearGradient(
+            colors: [Color(red: 0.07, green: 0.07, blue: 0.10), Color(red: 0.02, green: 0.02, blue: 0.04)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: - Header
+
+struct HeaderBar: View {
+    @Environment(AppModel.self) private var model
+    @Binding var showSettings: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("MOSS Live")
+                    .font(.title2.weight(.bold))
+                StatusPill()
             }
-            .onAppear {
-                if !model.settings.isConfigured {
-                    showSettings = true
-                }
+            Spacer()
+            if model.phase == .recording, let started = model.recordingStartedAt {
+                RecordingTimer(startedAt: started)
             }
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, height: 40)
+                    .background(.white.opacity(0.06), in: Circle())
+            }
+            .accessibilityLabel("Settings")
         }
     }
 }
 
-struct StatusHeader: View {
+struct StatusPill: View {
     @Environment(AppModel.self) private var model
 
+    private var isBusy: Bool {
+        model.phase == .connecting || model.phase == .reconnecting
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             Circle()
                 .fill(model.phase.color)
-                .frame(width: 12, height: 12)
-                .accessibilityHidden(true)
+                .frame(width: 8, height: 8)
+                .opacity(isBusy ? 0.35 : 1)
+                .animation(
+                    isBusy ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .default,
+                    value: isBusy
+                )
             Text(statusText)
-                .font(.subheadline.weight(.medium))
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(model.phase == .disconnected ? .secondary : .primary)
                 .lineLimit(2)
-            Spacer()
-            if model.isTranscribing {
-                Label("Transcribing", systemImage: "waveform")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .symbolEffect(.variableColor.iterative, isActive: true)
-            }
-            if let rtt = model.lastRoundTripMs {
-                Text("\(Int(rtt)) ms")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+            if let rtt = model.lastRoundTripMs,
+               model.phase == .recording || model.phase == .connected {
+                Text("· \(Int(rtt)) ms")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .background(model.phase.color.opacity(0.12), in: Capsule())
     }
 
     private var statusText: String {
@@ -78,15 +116,46 @@ struct StatusHeader: View {
     }
 }
 
+struct RecordingTimer: View {
+    let startedAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let seconds = max(0, Int(context.date.timeIntervalSince(startedAt)))
+            HStack(spacing: 6) {
+                Image(systemName: "record.circle")
+                    .foregroundStyle(.red)
+                Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.red.opacity(0.12), in: Capsule())
+        }
+    }
+}
+
 struct BannerView: View {
     let text: String
 
     var body: some View {
-        Label(text, systemImage: "exclamationmark.triangle")
+        Label(text, systemImage: "exclamationmark.triangle.fill")
             .font(.footnote)
-            .padding(10)
+            .foregroundStyle(.yellow)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.yellow.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+            .background(.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// MARK: - Controls
+
+struct ControlBar: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            AnswerButton()
+            RecordButton()
+        }
     }
 }
 
@@ -109,15 +178,19 @@ struct RecordButton: View {
             }
         } label: {
             Label(
-                isActive ? "Stop" : "Start Recording",
-                systemImage: isActive ? "stop.circle.fill" : "record.circle"
+                isActive ? "Stop Recording" : "Start Recording",
+                systemImage: isActive ? "stop.fill" : "record.circle"
             )
-            .font(.headline)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(isActive ? .red : .green)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .frame(height: 46)
+            .background(
+                (isActive ? Color.red : Color.green).opacity(0.13),
+                in: RoundedRectangle(cornerRadius: 15)
+            )
         }
-        .buttonStyle(.bordered)
-        .tint(isActive ? .red : .green)
+        .buttonStyle(.plain)
     }
 }
 

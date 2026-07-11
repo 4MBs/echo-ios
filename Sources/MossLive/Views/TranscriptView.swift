@@ -1,71 +1,145 @@
 import SwiftUI
 
-/// Live transcript: committed segments plus the italic, still-changing tail.
-struct TranscriptView: View {
+/// Live transcript card: committed segments plus the still-changing tail.
+/// Consecutive rows by the same speaker share one avatar column so the
+/// transcript reads like a conversation, not a log file.
+struct TranscriptCard: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    if model.segments.isEmpty && model.partial.isEmpty {
-                        Text("The live transcript appears here.")
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 24)
-                            .frame(maxWidth: .infinity)
-                    }
-                    ForEach(model.segments) { segment in
-                        SegmentRow(segment: segment, isPartial: false)
-                    }
-                    ForEach(model.partial) { segment in
-                        SegmentRow(segment: segment, isPartial: true)
-                    }
-                    Color.clear.frame(height: 1).id("bottom")
-                }
-                .padding(12)
-            }
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-            .frame(maxHeight: .infinity)
-            .onChange(of: model.segments.count) {
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .onChange(of: model.partial) {
-                proxy.scrollTo("bottom", anchor: .bottom)
+        VStack(spacing: 0) {
+            header
+            Divider()
+                .overlay(.white.opacity(0.06))
+            content
+        }
+        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(.white.opacity(0.07), lineWidth: 1)
+        )
+        .frame(maxHeight: .infinity)
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "waveform")
+                .foregroundStyle(.teal)
+                .symbolEffect(.variableColor.iterative, isActive: model.isTranscribing)
+            Text("Live Transcript")
+                .font(.subheadline.weight(.semibold))
+            Spacer()
+            if !model.segments.isEmpty {
+                Text("\(model.segments.count) segments")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if model.segments.isEmpty && model.partial.isEmpty {
+            TranscriptEmptyState()
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(model.segments.enumerated()), id: \.element.id) { index, segment in
+                            SegmentRow(
+                                segment: segment,
+                                isPartial: false,
+                                showsSpeaker: index == 0 || model.segments[index - 1].speaker != segment.speaker
+                            )
+                        }
+                        ForEach(Array(model.partial.enumerated()), id: \.element.id) { index, segment in
+                            SegmentRow(
+                                segment: segment,
+                                isPartial: true,
+                                showsSpeaker: index == 0
+                                    ? model.segments.last?.speaker != segment.speaker
+                                    : model.partial[index - 1].speaker != segment.speaker
+                            )
+                        }
+                        Color.clear.frame(height: 2).id("bottom")
+                    }
+                    .padding(14)
+                }
+                .onChange(of: model.segments.count) {
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+                .onChange(of: model.partial) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+        }
+    }
+}
+
+struct TranscriptEmptyState: View {
+    @Environment(AppModel.self) private var model
+
+    private var isRecording: Bool { model.phase == .recording }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: isRecording ? "ear" : "mic.slash")
+                .font(.system(size: 34))
+                .foregroundStyle(.quaternary)
+            Text(isRecording ? "Listening — speech appears here." : "Start recording to see the live transcript.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 }
 
 struct SegmentRow: View {
     let segment: TranscriptSegment
     let isPartial: Bool
-
-    private static let palette: [Color] = [.blue, .purple, .teal, .orange, .pink, .indigo]
-
-    private var speakerColor: Color {
-        let index = (Int(segment.speaker.dropFirst()) ?? 0) - 1
-        return Self.palette[abs(index) % Self.palette.count]
-    }
+    var showsSpeaker: Bool = true
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(segment.speaker)
-                .font(.caption2.weight(.bold).monospaced())
-                .foregroundStyle(speakerColor)
-                .frame(width: 34, alignment: .leading)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            SpeakerBadge(speaker: segment.speaker)
+                .opacity(showsSpeaker ? 1 : 0)
             Text(segment.text)
                 .font(.callout)
                 .italic(isPartial)
                 .foregroundStyle(isPartial ? .secondary : .primary)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Text(timestamp)
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.quaternary)
         }
     }
 
     private var timestamp: String {
         let total = Int(segment.t0)
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+struct SpeakerBadge: View {
+    let speaker: String
+
+    static let palette: [Color] = [.blue, .purple, .teal, .orange, .pink, .indigo, .mint, .cyan]
+
+    static func color(for speaker: String) -> Color {
+        let index = (Int(speaker.dropFirst()) ?? 0) - 1
+        return palette[abs(index) % palette.count]
+    }
+
+    var body: some View {
+        Text(String(Int(speaker.dropFirst()) ?? 0))
+            .font(.caption2.weight(.bold).monospacedDigit())
+            .foregroundStyle(Self.color(for: speaker))
+            .frame(width: 24, height: 24)
+            .background(Self.color(for: speaker).opacity(0.16), in: Circle())
+            .accessibilityLabel("Speaker \(speaker)")
     }
 }

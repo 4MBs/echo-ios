@@ -47,12 +47,19 @@ actor WebSocketClient {
     private var pingSentAt: [Int64: ContinuousClock.Instant] = [:]
 
     private var eventContinuation: AsyncStream<Event>.Continuation?
+    private let audioFrames: AsyncStream<Data>
+    private nonisolated let audioContinuation: AsyncStream<Data>.Continuation
+    private var audioSender: Task<Void, Never>?
 
     init() {
         let config = URLSessionConfiguration.ephemeral
         config.waitsForConnectivity = false
         config.timeoutIntervalForRequest = 10
         session = URLSession(configuration: config)
+        // ~5 s of audio buffered while reconnecting; older frames drop first
+        (audioFrames, audioContinuation) = AsyncStream.makeStream(
+            of: Data.self, bufferingPolicy: .bufferingNewest(256)
+        )
     }
 
     /// Single consumer (AppModel) subscribes once.
@@ -72,6 +79,7 @@ actor WebSocketClient {
         self.endpoint = endpoint
         userInitiatedClose = false
         backoff.reset()
+        startAudioSender(audioFrames)
         openSocket(resume: false)
     }
 
@@ -91,8 +99,25 @@ actor WebSocketClient {
     // MARK: - Sending
 
     /// Fire-and-forget audio. Never throws, never blocks the audio path.
+    ///
+    /// Frames go through a single-consumer queue so they hit the wire in
+    /// strict sequence order. (Spawning one Task per packet — the previous
+    /// implementation — gives no ordering guarantee: packets arrived shuffled,
+    /// the server logged them as lost/reordered, and the stateful Opus decoder
+    /// degraded on every swap.) When the socket is down, the bounded buffer
+    /// drops oldest frames; sequence numbers keep advancing, so the gap lands
+    /// on the server timeline as silence with correct timestamps.
     nonisolated func sendAudioFrame(_ frame: Data) {
-        Task { await self.sendBinary(frame) }
+        audioContinuation.yield(frame)
+    }
+
+    private func startAudioSender(_ frames: AsyncStream<Data>) {
+        guard audioSender == nil else { return }
+        audioSender = Task { [weak self] in
+            for await frame in frames {
+                await self?.sendBinary(frame)
+            }
+        }
     }
 
     private func sendBinary(_ data: Data) async {

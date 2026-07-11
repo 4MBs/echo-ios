@@ -1,16 +1,18 @@
 import SwiftUI
+import UIKit
 
 /// The big button: "answer whatever the teacher just asked".
 struct AnswerButton: View {
     @Environment(AppModel.self) private var model
 
     private var busy: Bool { model.answers.hasInflightRequest }
+    private var disabled: Bool { model.phase == .disconnected || model.phase == .connecting }
 
     var body: some View {
         Button {
             model.pressAnswerButton()
         } label: {
-            HStack {
+            HStack(spacing: 10) {
                 if busy {
                     ProgressView()
                         .tint(.white)
@@ -21,38 +23,77 @@ struct AnswerButton: View {
                     .fontWeight(.semibold)
             }
             .font(.title3)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .frame(height: 56)
+            .background(
+                LinearGradient(
+                    colors: disabled
+                        ? [Color(white: 0.22), Color(white: 0.18)]
+                        : [.purple, .indigo],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 17)
+            )
+            .shadow(color: disabled ? .clear : .purple.opacity(0.35), radius: 14, y: 5)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.purple)
-        .disabled(model.phase == .disconnected)
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .animation(.default, value: busy)
         .accessibilityHint("Sends the last 30 seconds of transcript to the AI and shows its answer")
     }
 }
 
-/// Shows the most recent answer request: loading, answer text, or error.
+/// Shows the most recent answer request: loading, streaming, answer, or error.
 struct AnswerCard: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         if let record = model.answers.current {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("AI Answer", systemImage: "sparkles")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.purple)
-                    Spacer()
-                    Text("#\(record.id) · \(record.pressedAt.formatted(date: .omitted, time: .standard))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+            VStack(alignment: .leading, spacing: 10) {
+                header(for: record)
                 content(for: record)
             }
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.purple.opacity(0.55), .indigo.opacity(0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
             .animation(.default, value: record)
+        }
+    }
+
+    private func header(for record: AnswerTracker.Record) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.purple)
+            Text("AI Answer")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.purple)
+            Spacer()
+            if case .success(let text, _) = record.state {
+                Button {
+                    UIPasteboard.general.string = text
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Copy answer")
+            }
+            Text("#\(record.id) · \(record.pressedAt.formatted(date: .omitted, time: .shortened))")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -71,21 +112,29 @@ struct AnswerCard: View {
                     .foregroundStyle(.secondary)
             }
         case .streaming(let partial):
-            Text(partial + " …")
-                .font(.body.weight(.medium))
+            Text(rendered(partial + " …"))
+                .font(.body)
                 .textSelection(.enabled)
-                .contentTransition(.interpolate)
         case .success(let text, let latencyMs):
-            Text(text)
-                .font(.body.weight(.medium))
+            Text(rendered(text))
+                .font(.body)
                 .textSelection(.enabled)
-            Text("\(String(format: "%.1f", latencyMs / 1000)) s server-side")
+            Text("answered in \(String(format: "%.1f", latencyMs / 1000)) s")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         case .failure(let error):
-            Label(error, systemImage: "exclamationmark.triangle")
+            Label(error, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout)
                 .foregroundStyle(.red)
         }
+    }
+
+    /// The backend asks Gemini for plain text, but render any inline Markdown
+    /// that slips through instead of showing raw asterisks.
+    private func rendered(_ text: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 }

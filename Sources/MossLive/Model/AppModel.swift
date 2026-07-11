@@ -45,6 +45,7 @@ final class AppModel {
     private(set) var answers = AnswerTracker()
     private(set) var lastRoundTripMs: Double?
     private(set) var sessionId: String?
+    private(set) var recordingStartedAt: Date?
     var bannerMessage: String?
 
     let settings = AppSettings()
@@ -107,6 +108,8 @@ final class AppModel {
 
     func stopRecording() {
         wantsRecording = false
+        recordingStartedAt = nil
+        lastRoundTripMs = nil
         audio.stop()
         answers.failAllInflight(error: "Recording stopped")
         Task { await client.disconnect(sendStop: true) }
@@ -182,6 +185,9 @@ final class AppModel {
             phase = .connecting
         case .connected:
             phase = wantsRecording && audio.running ? .recording : .connected
+            if phase == .recording && recordingStartedAt == nil {
+                recordingStartedAt = Date()
+            }
         case .reconnecting:
             phase = .reconnecting
         case .failed(let reason):
