@@ -100,6 +100,27 @@ after the first request), and shares/exports everything as text.
 - **Delete**: swipe a lesson left → Delete. Removes it everywhere on the server
   (transcript, summary, audio) — handy for clearing out test recordings.
 
+## Timetable (WebUntis)
+
+Connect your WebUntis timetable in **Settings → Stundenplan** (school, username,
+password). Credentials go to the Fedora server, which verifies and stores them —
+they never live on the phone. Once connected:
+
+- **Auto-labeling**: every recording is named by the lesson it overlaps
+  (subject, teacher, room), so the Lessons tab shows *"Physik · Raum 117"*
+  instead of a timestamp, and the summary is filed under the subject.
+- **Auto-split**: a recording that runs across several periods is split into one
+  lesson each — each period gets its own transcript, audio and summary.
+- **Current lesson**: the Live tab shows the lesson happening now (and the next
+  one), including *entfällt* / *Vertretung* changes.
+- **Notifications + auto-stop** (toggles in Settings): a reminder at each
+  lesson's start ("Zum Aufnehmen tippen"), and recording stops automatically
+  when the lesson ends. iOS can't switch the mic on from the background, so
+  starting is one tap from the notification.
+
+The server matches by the school's local clock (Europe/Berlin) and re-checks the
+timetable periodically to pick up same-day substitutions.
+
 ## What the app does
 
 - **Capture**: `AVAudioEngine` tap → `AVAudioConverter` → 16 kHz mono Int16.
