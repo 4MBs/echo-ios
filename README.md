@@ -93,6 +93,13 @@ Lessons tab lists them (date, duration, segment count), opens the full
 transcript, generates an on-demand summary per lesson (cached server-side
 after the first request), and shares/exports everything as text.
 
+- **Tap-to-replay**: the server keeps each lesson's audio (compact `.m4a`).
+  Open a lesson and tap any transcript line to hear exactly what was said at
+  that moment; the playing line is highlighted and a play/scrub bar sits above
+  the transcript. Audio is downloaded once and cached on the device.
+- **Delete**: swipe a lesson left → Delete. Removes it everywhere on the server
+  (transcript, summary, audio) — handy for clearing out test recordings.
+
 ## What the app does
 
 - **Capture**: `AVAudioEngine` tap → `AVAudioConverter` → 16 kHz mono Int16.
@@ -105,9 +112,13 @@ after the first request), and shares/exports everything as text.
 - **Stream**: one WebSocket (binary = audio frames, JSON = everything else) to the
   backend; protocol mirrored from the backend's `docs/PROTOCOL.md` in
   [`Protocol.swift`](Sources/MossLive/Network/Protocol.swift). Reconnects use
-  jittered exponential backoff and resume the same server session; packet
-  sequence numbers keep advancing while offline so the server records the outage
-  as silence and "the last 30 s" stays timestamp-true.
+  jittered exponential backoff and resume the same server session.
+- **Offline-safe (dead zones)**: if the network drops mid-lecture — thick walls,
+  no signal for a while — recording continues and every frame is held in an
+  in-order backlog (capped ~100 min) instead of being dropped. On reconnect the
+  server (long resume grace) is still holding the same session and the whole
+  backlog is replayed, paced to ~8× real time so the transcriber catches up
+  without skipping. Nothing said during the outage is lost.
 - **Status**: disconnected / connecting / connected / recording / reconnecting /
   error, plus live "transcribing" and RTT indicators.
 - **Transcript view**: committed segments (speaker-colored) + italic partial tail.
