@@ -6,64 +6,65 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var settings = model.settings
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    MossCard {
-                        VStack(alignment: .leading, spacing: 14) {
-                            MossSectionHeader(
-                                "Your Fedora server",
-                                subtitle: "Private connection over Tailscale",
-                                symbol: "server.rack"
-                            )
-                            TextField("100.92.57.51 or fedora", text: $settings.serverHost)
-                                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .textFieldStyle(.roundedBorder)
-                            TextField("Port", value: $settings.serverPort, format: .number.grouping(.never))
-                                .keyboardType(.numberPad).textFieldStyle(.roundedBorder)
-                            SecureField("Auth token", text: $settings.authToken)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .textFieldStyle(.roundedBorder)
-                            Text("Use `tailscale ip -4` for the address and MOSSLIVE_AUTH_TOKEN from your server.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+            Form {
+                Section {
+                    TextField("100.92.57.51 or fedora", text: $settings.serverHost)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Port", value: $settings.serverPort, format: .number.grouping(.never))
+                        .keyboardType(.numberPad)
+                    SecureField("Auth token", text: $settings.authToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("Fedora server (Tailscale)")
+                } footer: {
+                    Text(
+                        """
+                        On the server: address = `tailscale ip -4`, \
+                        token = the MOSSLIVE_AUTH_TOKEN value in ~/.config/mosslive/env. \
+                        Both devices must be on the same tailnet.
+                        """
+                    )
+                }
 
-                    MossCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            MossSectionHeader("Session preferences", symbol: "slider.horizontal.3", tint: .purple)
-                            Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
-                                LabeledContent("AI context", value: "\(Int(settings.contextSeconds)) sec")
-                            }
-                            Divider()
-                            Picker("Audio quality", selection: $settings.bitrate) {
-                                Text("Data saver · 16 kbps").tag(16000)
-                                Text("Balanced · 24 kbps").tag(24000)
-                                Text("High · 32 kbps").tag(32000)
-                            }
-                            Text("Balanced uses roughly 11 MiB per hour.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-
-                    TimetableSettingsCard()
-
-                    MossCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            MossSectionHeader("Privacy & app", symbol: "lock.shield", tint: .blue)
-                            LabeledContent("Transcription", value: "Qwen3-ASR 1.7B")
-                            LabeledContent("Answers", value: "Gemini 3.5 Flash")
-                            LabeledContent("Version", value: appVersion)
-                            Text(
-                                "Audio stays on your server. Only an excerpt is sent to Gemini "
-                                    + "when you explicitly ask for an answer."
-                            )
-                            .font(.caption).foregroundStyle(.secondary)
-                        }
+                Section("AI answer") {
+                    Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
+                        Text("Context window: \(Int(settings.contextSeconds)) s")
                     }
                 }
-                .padding(16)
+
+                Section {
+                    Picker("Audio bitrate", selection: $settings.bitrate) {
+                        Text("16 kbps (lowest data)").tag(16000)
+                        Text("24 kbps (recommended)").tag(24000)
+                        Text("32 kbps").tag(32000)
+                    }
+                } footer: {
+                    Text("24 kbps ≈ 11 MiB per hour of streaming.")
+                }
+
+                TimetableSettingsSection()
+
+                Section {
+                    LabeledContent("Transcription", value: "Qwen3-ASR 1.7B")
+                    LabeledContent("Answers", value: "Gemini 3.5 Flash")
+                    LabeledContent("Version", value: appVersion)
+                    LabeledContent("Widget link", value: SharedConfig.resolvedGroupID ?? "unavailable")
+                        .font(.footnote)
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text(
+                        """
+                        Audio is processed only on your own server; nothing goes to third \
+                        parties except the transcript excerpt sent to Gemini when you \
+                        request an answer.
+                        """
+                    )
+                }
             }
-            .background(MossBackground())
             .navigationTitle("Settings")
         }
     }
@@ -75,7 +76,9 @@ struct SettingsView: View {
     }
 }
 
-struct TimetableSettingsCard: View {
+/// WebUntis login + Tier-4 toggles. Credentials are sent to the Fedora server
+/// (which stores and uses them) — never kept on the phone.
+struct TimetableSettingsSection: View {
     @Environment(AppModel.self) private var model
     @State private var school = ""
     @State private var username = ""
@@ -85,45 +88,44 @@ struct TimetableSettingsCard: View {
     @State private var message: String?
 
     var body: some View {
-        MossCard {
-            VStack(alignment: .leading, spacing: 14) {
-                MossSectionHeader(
-                    "Timetable",
-                    subtitle: model.timetable.enabled ? "Connected to WebUntis" : "Automatically label your recordings",
-                    symbol: "calendar",
-                    tint: .orange
-                )
-                TextField("School", text: $school)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder)
-                TextField("Username", text: $username)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder)
-                SecureField("Password", text: $password).textFieldStyle(.roundedBorder)
-                Button { Task { await connect() } } label: {
-                    HStack {
-                        if busy { ProgressView() }
-                        Text(busy ? "Connecting…" : "Connect WebUntis").fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
+        Section {
+            TextField("Schule (z. B. avs-itzehoe)", text: $school)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            TextField("Benutzername", text: $username)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            SecureField("Passwort", text: $password)
+            Button {
+                Task { await connect() }
+            } label: {
+                HStack(spacing: 8) {
+                    if busy { ProgressView() }
+                    Text(busy ? "Verbinde…" : "Mit WebUntis verbinden")
                 }
-                .buttonStyle(.glassProminent).tint(.orange)
-                .disabled(busy || school.isEmpty || username.isEmpty || password.isEmpty)
-                if let message {
-                    Label(message, systemImage: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .font(.caption).foregroundStyle(ok ? .green : .red)
-                }
-                Divider()
-                Toggle("Lesson start reminders", isOn: notificationsBinding)
-                Toggle("Stop recording when class ends", isOn: autoStopBinding)
-                Text(footerText).font(.caption).foregroundStyle(.secondary)
             }
+            .disabled(busy || school.isEmpty || username.isEmpty || password.isEmpty)
+            if let message {
+                Text(message).font(.caption).foregroundStyle(ok ? .green : .red)
+            }
+
+            Toggle("Erinnerung bei Stundenbeginn", isOn: notificationsBinding)
+            Toggle("Aufnahme bei Stundenende stoppen", isOn: autoStopBinding)
+        } header: {
+            Text("Stundenplan (WebUntis)")
+        } footer: {
+            Text(footerText)
         }
     }
 
     private var notificationsBinding: Binding<Bool> {
-        Binding(get: { model.settings.lessonNotifications }, set: { value in
-            model.settings.lessonNotifications = value
-            Task { await model.syncTimetableNotifications() }
-        })
+        Binding(
+            get: { model.settings.lessonNotifications },
+            set: { value in
+                model.settings.lessonNotifications = value
+                Task { await model.syncTimetableNotifications() }
+            }
+        )
     }
 
     private var autoStopBinding: Binding<Bool> {
@@ -134,10 +136,14 @@ struct TimetableSettingsCard: View {
     }
 
     private var footerText: String {
-        if let current = model.timetable.current { return "Now: \(current.title)" }
-        return model.timetable.enabled
-            ? "Connected. Recordings are automatically matched to each class."
-            : "Credentials are stored only on your own Fedora server."
+        if model.timetable.enabled {
+            if let current = model.timetable.current {
+                return "Verbunden · aktuell: \(current.title)"
+            }
+            return "Verbunden. Aufnahmen werden automatisch dem Fach zugeordnet."
+        }
+        return "Melde dich an, damit Aufnahmen automatisch dem richtigen Fach "
+            + "zugeordnet werden. Dein Passwort wird nur auf deinem eigenen Server gespeichert."
     }
 
     private func connect() async {
@@ -152,7 +158,7 @@ struct TimetableSettingsCard: View {
         do {
             try await api.submitWebUntisCredentials(school: school, username: username, password: password)
             ok = true
-            message = "Connected"
+            message = "Verbunden."
             password = ""
             await model.refreshTimetable()
             await model.syncTimetableNotifications()

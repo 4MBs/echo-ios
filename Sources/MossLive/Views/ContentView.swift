@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// The live workspace keeps recording as the single primary action. Transcript
-/// and assistant content sit beneath it instead of competing as four equal cards.
+/// The Live tab. On iPad (regular width) it's a two-column layout — live
+/// transcript on the left, AI assistant on the right — with the record control
+/// under the transcript (left) and the answer control under the assistant
+/// (right). On iPhone it stacks. Styled with iOS 26 Liquid Glass.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var hSize
@@ -10,10 +12,8 @@ struct LiveView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                MossBackground()
-                VStack(spacing: 12) {
-                    liveHeader
+            GlassEffectContainer(spacing: 16) {
+                VStack(spacing: 14) {
                     if let banner = model.bannerMessage {
                         BannerView(text: banner)
                             .transition(.move(edge: .top).combined(with: .opacity))
@@ -30,41 +30,39 @@ struct LiveView: View {
                 .padding(16)
                 .animation(.snappy, value: model.bannerMessage)
             }
-            .toolbar(.hidden, for: .navigationBar)
-        }
-    }
-
-    private var liveHeader: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("MOSS").font(.caption.weight(.black)).tracking(2.2).foregroundStyle(MossTheme.accent)
-                Text("Live workspace").font(.title2.weight(.bold))
+            .background(LiveBackground())
+            .navigationTitle("MOSS Live")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { StatusPill() }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if model.phase == .recording, let started = model.recordingStartedAt {
+                        RecordingTimer(startedAt: started)
+                    }
+                }
             }
-            Spacer()
-            StatusPill()
         }
     }
 
+    // Left column controls the transcript; right column controls the assistant.
     private var wideBody: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(spacing: 14) {
-                RecordingHero()
-                TranscriptCard().frame(maxHeight: .infinity)
+        VStack(spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
+                TranscriptCard().frame(maxWidth: .infinity)
+                AIAssistantCard().frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
-            VStack(spacing: 14) {
-                AIAssistantCard().frame(maxHeight: .infinity)
-                AnswerButton()
+            HStack(spacing: 14) {
+                RecordButton().frame(maxWidth: .infinity)
+                AnswerButton().frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
     }
 
     private var compactBody: some View {
         VStack(spacing: 14) {
-            RecordingHero()
             TranscriptCard().frame(maxHeight: .infinity)
             AIAssistantCard()
+            RecordButton()
             AnswerButton()
         }
     }
@@ -73,7 +71,7 @@ struct LiveView: View {
 /// A quiet backdrop so the glass panels read; adaptive for light/dark.
 struct LiveBackground: View {
     var body: some View {
-        MossBackground()
+        Color(.systemGroupedBackground).ignoresSafeArea()
     }
 }
 
@@ -192,7 +190,7 @@ struct RecordingTimer: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(.red.opacity(0.12), in: Capsule())
+            .glassEffect(.regular.tint(.red.opacity(0.22)), in: .capsule)
         }
     }
 }
@@ -210,39 +208,7 @@ struct BannerView: View {
     }
 }
 
-// MARK: - Recording hero
-
-struct RecordingHero: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        HStack(spacing: 18) {
-            RecordButton()
-            VStack(alignment: .leading, spacing: 5) {
-                Text(model.phase == .recording ? "Recording in progress" : "Ready when you are")
-                    .font(.headline)
-                Text(
-                    model.phase == .recording
-                        ? "Audio is streaming securely to Fedora."
-                        : "Tap once to begin the live transcript."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                if model.phase == .recording, let started = model.recordingStartedAt {
-                    RecordingTimer(startedAt: started)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground).opacity(0.82), in: RoundedRectangle(cornerRadius: 26))
-        .overlay {
-            RoundedRectangle(cornerRadius: 26)
-                .strokeBorder(model.phase == .recording ? Color.red.opacity(0.28) : Color.primary.opacity(0.06))
-        }
-    }
-}
+// MARK: - Record control (left, under the transcript)
 
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
@@ -262,15 +228,25 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            Image(systemName: isActive ? "stop.fill" : "mic.fill")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 64, height: 64)
-                .background(isActive ? Color.red : MossTheme.accent, in: Circle())
-                .shadow(color: (isActive ? Color.red : MossTheme.accent).opacity(0.25), radius: 14, y: 7)
+            HStack(spacing: 14) {
+                Image(systemName: isActive ? "stop.circle.fill" : "record.circle")
+                    .font(.system(size: 26))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isActive ? "Stop Recording" : "Start Recording")
+                        .font(.headline)
+                    Text("Live-Transkript erfassen")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 18)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(isActive ? "Stop recording" : "Start recording")
+        .buttonStyle(.glassProminent)
+        .tint(isActive ? .red : .teal)
+        .buttonBorderShape(.roundedRectangle(radius: 22))
     }
 }
 

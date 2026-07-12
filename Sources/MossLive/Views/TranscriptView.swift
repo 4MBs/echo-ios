@@ -12,8 +12,7 @@ struct TranscriptCard: View {
             Divider()
             content
         }
-        .background(Color(.secondarySystemGroupedBackground).opacity(0.78), in: RoundedRectangle(cornerRadius: 24))
-        .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.primary.opacity(0.06)) }
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .frame(maxHeight: .infinity)
     }
 

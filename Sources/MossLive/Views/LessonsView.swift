@@ -23,78 +23,53 @@ struct LessonsView: View {
         NavigationStack {
             content
                 .navigationTitle("Lessons")
-                .background(MossBackground())
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { Task { await load() } } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .disabled(loading)
-                        .accessibilityLabel("Refresh lessons")
-                    }
-                }
+                .background(Color(.systemGroupedBackground))
         }
         .task { await load() }
     }
 
     @ViewBuilder
     private var content: some View {
-        if loading && lessons.isEmpty {
-            ContentUnavailableView {
-                ProgressView()
-            } description: {
-                Text("Loading your lessons…")
-            }
-        } else if let errorMessage, lessons.isEmpty {
-            ContentUnavailableView {
-                Label("Server unavailable", systemImage: "wifi.exclamationmark")
-            } description: {
+        if loading {
+            ProgressView("Loading lessons…")
+        } else if let errorMessage {
+            VStack(spacing: 12) {
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.secondary)
                 Text(errorMessage)
-            } actions: {
-                Button("Try Again") { Task { await load() } }
-                    .buttonStyle(.glassProminent)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Retry") { Task { await load() } }
+                    .buttonStyle(.bordered)
             }
+            .padding(28)
         } else if lessons.isEmpty {
-            ContentUnavailableView {
-                Label("No lessons yet", systemImage: "books.vertical")
-            } description: {
-                Text("Finished recordings will appear here with their transcripts and summaries.")
+            VStack(spacing: 10) {
+                Image(systemName: "books.vertical")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.quaternary)
+                Text("No recorded lessons yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         } else {
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    if let errorMessage {
-                        Label(errorMessage, systemImage: "wifi.exclamationmark")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+            List {
+                ForEach(lessons) { lesson in
+                    NavigationLink {
+                        LessonDetailView(api: api, info: lesson)
+                    } label: {
+                        LessonRow(info: lesson)
                     }
-                    HStack {
-                        Text("RECENT").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(lessons.count) saved")
-                            .font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 4)
-                    ForEach(lessons) { lesson in
-                        NavigationLink {
-                            LessonDetailView(api: api, info: lesson)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            Task { await delete(lesson) }
                         } label: {
-                            LessonRow(info: lesson)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                Task { await delete(lesson) }
-                            } label: {
-                                Label("Delete Lesson", systemImage: "trash")
-                            }
+                            Label("Delete", systemImage: "trash")
                         }
                     }
                 }
-                .padding(16)
             }
             .refreshable { await load() }
             .alert(
@@ -109,7 +84,7 @@ struct LessonsView: View {
     }
 
     private func load() async {
-        loading = true
+        loading = lessons.isEmpty
         errorMessage = nil
         do {
             lessons = try await api.listLessons().filter { $0.segmentCount > 0 }
@@ -127,6 +102,50 @@ struct LessonsView: View {
         } catch {
             actionError = error.localizedDescription
         }
+    }
+}
+
+struct LessonRow: View {
+    let info: BackendAPI.LessonInfo
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "graduationcap.fill")
+                .foregroundStyle(.teal)
+                .frame(width: 34, height: 34)
+                .background(.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.subheadline.weight(.semibold))
+                Text(secondaryLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if info.hasSummary {
+                Image(systemName: "text.badge.star")
+                    .font(.caption)
+                    .foregroundStyle(.purple)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var durationLabel: String {
+        let minutes = Int(info.durationSeconds) / 60
+        let seconds = Int(info.durationSeconds) % 60
+        return minutes > 0 ? "\(minutes) min" : "\(seconds) s"
+    }
+
+    /// When the lesson is titled from the timetable, the date/room become the
+    /// secondary line; otherwise fall back to duration + segment count.
+    private var secondaryLine: String {
+        if info.title != nil {
+            var parts = [info.startedAt.formatted(date: .abbreviated, time: .shortened), durationLabel]
+            if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
+            return parts.joined(separator: " · ")
+        }
+        return "\(durationLabel) · \(info.segmentCount) segments"
     }
 }
 
@@ -359,8 +378,8 @@ struct LessonAudioBar: View {
         return "Play recording"
     }
 
-    private func timeString(_ time: Double) -> String {
-        let seconds = Int(time.rounded())
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    private func timeString(_ t: Double) -> String {
+        let s = Int(t.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
