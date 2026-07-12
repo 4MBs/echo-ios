@@ -8,7 +8,6 @@ struct MossLiveApp: App {
         WindowGroup {
             MainTabView()
                 .environment(model)
-                .preferredColorScheme(.dark)
         }
     }
 }
@@ -25,21 +24,16 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            TabView(selection: $selectedTab) {
-                LiveView().tag(Tab.live)
-                LessonsView().tag(Tab.lessons)
-                SettingsView().tag(Tab.settings)
-            }
-            .toolbar(.hidden, for: .tabBar)
-            HStack(spacing: 8) {
-                tabButton(.live, "Live", "waveform")
-                tabButton(.lessons, "Archive", "square.stack.3d.up.fill")
-                tabButton(.settings, "Setup", "slider.horizontal.3")
-            }
-            .padding(8)
-            .background(.black)
-            .overlay(alignment: .top) { Divider().opacity(0.35) }
+        TabView(selection: $selectedTab) {
+            LiveView()
+                .tabItem { Label("Live", systemImage: "waveform") }
+                .tag(Tab.live)
+            LessonsView()
+                .tabItem { Label("Lessons", systemImage: "books.vertical.fill") }
+                .tag(Tab.lessons)
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tag(Tab.settings)
         }
         .tint(MossTheme.accent)
         .onAppear {
@@ -47,17 +41,5 @@ struct MainTabView: View {
                 selectedTab = .settings
             }
         }
-    }
-
-    private func tabButton(_ tab: Tab, _ title: String, _ symbol: String) -> some View {
-        Button { selectedTab = tab } label: {
-            Label(title, systemImage: symbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(selectedTab == tab ? .black : .secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .background(selectedTab == tab ? MossTheme.accent : .clear, in: Capsule())
-        }
-        .buttonStyle(.plain)
     }
 }

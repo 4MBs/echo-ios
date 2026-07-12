@@ -37,8 +37,8 @@ struct LiveView: View {
     private var liveHeader: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("MOSS / LIVE").font(.caption.weight(.black)).tracking(2.4).foregroundStyle(MossTheme.accent)
-                Text("Listening room").font(.largeTitle.weight(.black))
+                Text("MOSS").font(.caption.weight(.black)).tracking(2.2).foregroundStyle(MossTheme.accent)
+                Text("Live workspace").font(.title2.weight(.bold))
             }
             Spacer()
             StatusPill()
@@ -92,8 +92,7 @@ struct CurrentLessonBanner: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MossTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 18))
-        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(MossTheme.accent.opacity(0.18)) }
+        .glassEffect(.regular.tint(.teal.opacity(0.18)), in: .rect(cornerRadius: 18))
     }
 
     @ViewBuilder
@@ -168,7 +167,7 @@ struct StatusPill: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(MossTheme.raisedSurface, in: Capsule())
+        .glassEffect(.regular.tint(model.phase.color.opacity(0.22)), in: .capsule)
     }
 
     private var statusText: String {
@@ -207,7 +206,7 @@ struct BannerView: View {
             .foregroundStyle(.orange)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MossTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 16))
+            .glassEffect(.regular.tint(.orange.opacity(0.2)), in: .rect(cornerRadius: 16))
     }
 }
 
@@ -217,16 +216,11 @@ struct RecordingHero: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(spacing: 18) {
-            ZStack {
-                Circle()
-                    .stroke((model.phase == .recording ? Color.red : MossTheme.accent).opacity(0.12), lineWidth: 18)
-                    .frame(width: 116, height: 116)
-                RecordButton()
-            }
-            VStack(spacing: 6) {
+        HStack(spacing: 18) {
+            RecordButton()
+            VStack(alignment: .leading, spacing: 5) {
                 Text(model.phase == .recording ? "Recording in progress" : "Ready when you are")
-                    .font(.title3.weight(.bold))
+                    .font(.headline)
                 Text(
                     model.phase == .recording
                         ? "Audio is streaming securely to Fedora."
@@ -238,12 +232,11 @@ struct RecordingHero: View {
                     RecordingTimer(startedAt: started)
                 }
             }
+            Spacer(minLength: 0)
         }
-        .multilineTextAlignment(.center)
-        .padding(.vertical, 24)
-        .padding(.horizontal, 18)
-        .frame(maxWidth: .infinity)
-        .background(MossTheme.surface, in: RoundedRectangle(cornerRadius: 30))
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground).opacity(0.82), in: RoundedRectangle(cornerRadius: 26))
         .overlay {
             RoundedRectangle(cornerRadius: 26)
                 .strokeBorder(model.phase == .recording ? Color.red.opacity(0.28) : Color.primary.opacity(0.06))
@@ -272,7 +265,7 @@ struct RecordButton: View {
             Image(systemName: isActive ? "stop.fill" : "mic.fill")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 82, height: 82)
+                .frame(width: 64, height: 64)
                 .background(isActive ? Color.red : MossTheme.accent, in: Circle())
                 .shadow(color: (isActive ? Color.red : MossTheme.accent).opacity(0.25), radius: 14, y: 7)
         }
