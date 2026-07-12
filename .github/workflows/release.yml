@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  XCODE_PATH: /Applications/Xcode_16.4.app
+  XCODE_PATH: /Applications/Xcode_26.5.app
 
 jobs:
   preflight:
@@ -63,7 +63,7 @@ jobs:
           fi
 
   unsigned-ipa:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     needs: preflight
     steps:
@@ -116,7 +116,7 @@ jobs:
           retention-days: 90
 
   signed-ipa:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     needs: preflight
     if: needs.preflight.outputs.has_signing == 'true'
@@ -185,7 +185,7 @@ jobs:
         run: scripts/ci/cleanup_keychain.sh
 
   testflight:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     needs: [preflight, signed-ipa]
     if: >-

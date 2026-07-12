@@ -18,12 +18,12 @@ final class AppModel {
 
         var label: String {
             switch self {
-            case .disconnected: "Disconnected"
-            case .connecting: "Connecting…"
-            case .connected: "Connected"
-            case .recording: "Recording"
-            case .reconnecting: "Reconnecting…"
-            case .error: "Error"
+            case .disconnected: "Getrennt"
+            case .connecting: "Verbinde…"
+            case .connected: "Verbunden"
+            case .recording: "Nimmt auf"
+            case .reconnecting: "Neu verbinden…"
+            case .error: "Fehler"
             }
         }
 

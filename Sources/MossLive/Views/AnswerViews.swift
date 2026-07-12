@@ -1,7 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// The big button: "answer whatever the teacher just asked".
+/// The answer control (right column, under the AI assistant): asks the AI about
+/// the last 30 seconds of transcript. Secondary Liquid Glass, so the teal
+/// record button stays the primary action.
 struct AnswerButton: View {
     @Environment(AppModel.self) private var model
 
@@ -12,76 +14,64 @@ struct AnswerButton: View {
         Button {
             model.pressAnswerButton()
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 14) {
                 if busy {
                     ProgressView()
-                        .tint(.white)
                 } else {
                     Image(systemName: "sparkles")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.purple)
                 }
-                Text(busy ? "Thinking…" : "Answer Last 30 Seconds")
-                    .fontWeight(.semibold)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(busy ? "Denkt nach…" : "Letzte 30 Sekunden beantworten")
+                        .font(.headline)
+                    Text("Antwort der KI basierend auf dem letzten Transkript.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
             }
-            .font(.title3)
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .background(
-                LinearGradient(
-                    colors: disabled
-                        ? [Color(.systemGray3), Color(.systemGray4)]
-                        : [.purple, .indigo],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 17)
-            )
-            .shadow(color: disabled ? .clear : .purple.opacity(0.35), radius: 14, y: 5)
+            .padding(.vertical, 18)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.roundedRectangle(radius: 22))
         .disabled(disabled)
+        .opacity(disabled ? 0.55 : 1)
         .animation(.default, value: busy)
         .accessibilityHint("Sends the last 30 seconds of transcript to the AI and shows its answer")
     }
 }
 
-/// Shows the most recent answer request: loading, streaming, answer, or error.
-struct AnswerCard: View {
+/// Right column: the AI assistant panel — always present, showing the latest
+/// answer (or an empty prompt). Mirrors the transcript card's glass styling.
+struct AIAssistantCard: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let record = model.answers.current {
-            VStack(alignment: .leading, spacing: 10) {
-                header(for: record)
-                content(for: record)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.purple.opacity(0.55), .indigo.opacity(0.15)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
-            .animation(.default, value: record)
+        VStack(spacing: 0) {
+            header
+            Divider()
+            content
         }
+        .glassEffect(.regular.tint(.purple.opacity(0.12)), in: .rect(cornerRadius: 24))
+        .frame(maxHeight: .infinity)
+        .animation(.default, value: model.answers.current)
     }
 
-    private func header(for record: AnswerTracker.Record) -> some View {
+    private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
                 .foregroundStyle(.purple)
-            Text("AI Answer")
+            Text("AI Assistant")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.purple)
             Spacer()
-            if case .success(let text, _) = record.state {
+            if let record = model.answers.current, case .success(let text, _) = record.state {
                 Button {
                     UIPasteboard.general.string = text
                 } label: {
@@ -91,23 +81,42 @@ struct AnswerCard: View {
                 }
                 .accessibilityLabel("Copy answer")
             }
-            Text("#\(record.id) · \(record.pressedAt.formatted(date: .omitted, time: .shortened))")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            if let record = model.answers.current {
+                Text("#\(record.id) · \(record.pressedAt.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let record = model.answers.current {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    answerBody(for: record)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+        } else {
+            AIEmptyState()
         }
     }
 
     @ViewBuilder
-    private func content(for record: AnswerTracker.Record) -> some View {
+    private func answerBody(for record: AnswerTracker.Record) -> some View {
         switch record.state {
         case .pending:
-            Label("Sending request…", systemImage: "paperplane")
+            Label("Anfrage wird gesendet…", systemImage: "paperplane")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         case .waitingForAnswer:
             HStack(spacing: 8) {
                 ProgressView()
-                Text("Waiting for the AI answer…")
+                Text("Warte auf die Antwort…")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -119,7 +128,7 @@ struct AnswerCard: View {
             Text(rendered(text))
                 .font(.body)
                 .textSelection(.enabled)
-            Text("answered in \(String(format: "%.1f", latencyMs / 1000)) s")
+            Text("Antwort in \(String(format: "%.1f", latencyMs / 1000)) s generiert")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         case .failure(let error):
@@ -136,5 +145,21 @@ struct AnswerCard: View {
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         )
         return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+}
+
+struct AIEmptyState: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 30))
+                .foregroundStyle(.purple.opacity(0.5))
+            Text("Tippe auf „Letzte 30 Sekunden beantworten“, um die Antwort der KI hier zu sehen.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 }

@@ -28,11 +28,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  XCODE_PATH: /Applications/Xcode_16.4.app
+  # macos-26 ships the iOS 26 SDK (Liquid Glass). Older images (macos-15) do
+  # not have Xcode 26 due to storage limits, so this runner is required.
+  XCODE_PATH: /Applications/Xcode_26.5.app
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4

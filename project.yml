@@ -5,9 +5,12 @@ name: MossLive
 
 options:
   bundleIdPrefix: com.fourmbs
+  # iOS 26 so the UI can use the real Liquid Glass APIs (.glassEffect,
+  # .buttonStyle(.glass)) without availability gating. Built with Xcode 26 on
+  # the macos-26 GitHub runner.
   deploymentTarget:
-    iOS: "17.0"
-  xcodeVersion: "16.4"
+    iOS: "26.0"
+  xcodeVersion: "26.0"
   createIntermediateGroups: true
 
 packages:

@@ -1,35 +1,40 @@
 import SwiftUI
 
-/// The Live tab: connection status, live transcript, AI answer, and the
-/// record controls — laid out as a standard navigation screen so the app
-/// follows platform conventions (system backgrounds, light/dark adaptive).
+/// The Live tab. On iPad (regular width) it's a two-column layout — live
+/// transcript on the left, AI assistant on the right — with the record control
+/// under the transcript (left) and the answer control under the assistant
+/// (right). On iPhone it stacks. Styled with iOS 26 Liquid Glass.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var hSize
+
+    private var isWide: Bool { hSize == .regular }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 14) {
-                if let banner = model.bannerMessage {
-                    BannerView(text: banner)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+            GlassEffectContainer(spacing: 16) {
+                VStack(spacing: 14) {
+                    if let banner = model.bannerMessage {
+                        BannerView(text: banner)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    if model.timetable.enabled {
+                        CurrentLessonBanner()
+                    }
+                    if isWide {
+                        wideBody
+                    } else {
+                        compactBody
+                    }
                 }
-                if model.timetable.enabled {
-                    CurrentLessonBanner()
-                }
-                TranscriptCard()
-                AnswerCard()
-                ControlBar()
+                .padding(16)
+                .animation(.snappy, value: model.bannerMessage)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-            .animation(.snappy, value: model.bannerMessage)
-            .background(Color(.systemGroupedBackground))
+            .background(LiveBackground())
             .navigationTitle("MOSS Live")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    StatusPill()
-                }
+                ToolbarItem(placement: .topBarLeading) { StatusPill() }
                 ToolbarItem(placement: .topBarTrailing) {
                     if model.phase == .recording, let started = model.recordingStartedAt {
                         RecordingTimer(startedAt: started)
@@ -38,9 +43,40 @@ struct LiveView: View {
             }
         }
     }
+
+    // Left column controls the transcript; right column controls the assistant.
+    private var wideBody: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
+                TranscriptCard().frame(maxWidth: .infinity)
+                AIAssistantCard().frame(maxWidth: .infinity)
+            }
+            HStack(spacing: 14) {
+                RecordButton().frame(maxWidth: .infinity)
+                AnswerButton().frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var compactBody: some View {
+        VStack(spacing: 14) {
+            TranscriptCard().frame(maxHeight: .infinity)
+            AIAssistantCard()
+            RecordButton()
+            AnswerButton()
+        }
+    }
 }
 
-/// Tier 2: the lesson happening now (or the next one), from the timetable.
+/// A quiet backdrop so the glass panels read; adaptive for light/dark.
+struct LiveBackground: View {
+    var body: some View {
+        Color(.systemGroupedBackground).ignoresSafeArea()
+    }
+}
+
+/// Tier 2: the lesson happening now (or the next one). Informational — not a
+/// button (no navigation).
 struct CurrentLessonBanner: View {
     @Environment(AppModel.self) private var model
 
@@ -52,9 +88,9 @@ struct CurrentLessonBanner: View {
             content
             Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.teal.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+        .glassEffect(.regular.tint(.teal.opacity(0.18)), in: .rect(cornerRadius: 18))
     }
 
     @ViewBuilder
@@ -127,9 +163,9 @@ struct StatusPill: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .background(model.phase.color.opacity(0.12), in: Capsule())
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .glassEffect(.regular.tint(model.phase.color.opacity(0.22)), in: .capsule)
     }
 
     private var statusText: String {
@@ -153,8 +189,8 @@ struct RecordingTimer: View {
                     .font(.subheadline.monospacedDigit().weight(.semibold))
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.red.opacity(0.12), in: Capsule())
+            .padding(.vertical, 7)
+            .glassEffect(.regular.tint(.red.opacity(0.22)), in: .capsule)
         }
     }
 }
@@ -168,20 +204,11 @@ struct BannerView: View {
             .foregroundStyle(.orange)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+            .glassEffect(.regular.tint(.orange.opacity(0.2)), in: .rect(cornerRadius: 16))
     }
 }
 
-// MARK: - Controls
-
-struct ControlBar: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            AnswerButton()
-            RecordButton()
-        }
-    }
-}
+// MARK: - Record control (left, under the transcript)
 
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
@@ -201,20 +228,25 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            Label(
-                isActive ? "Stop Recording" : "Start Recording",
-                systemImage: isActive ? "stop.fill" : "record.circle"
-            )
-            .font(.body.weight(.semibold))
-            .foregroundStyle(isActive ? .red : .green)
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
-            .background(
-                (isActive ? Color.red : Color.green).opacity(0.13),
-                in: RoundedRectangle(cornerRadius: 15)
-            )
+            HStack(spacing: 14) {
+                Image(systemName: isActive ? "stop.circle.fill" : "record.circle")
+                    .font(.system(size: 26))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isActive ? "Stop Recording" : "Start Recording")
+                        .font(.headline)
+                    Text("Live-Transkript erfassen")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 18)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glassProminent)
+        .tint(isActive ? .red : .teal)
+        .buttonBorderShape(.roundedRectangle(radius: 22))
     }
 }
 
