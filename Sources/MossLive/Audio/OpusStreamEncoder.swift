@@ -12,10 +12,11 @@ enum AudioPipelineConstants {
 /// back one packet per 20 ms frame, each tagged with a monotonically
 /// increasing sequence number.
 ///
-/// The sequence number advances for every *encoded* frame, including frames
-/// dropped while offline — the server turns the resulting gaps into silence,
-/// keeping the session timeline aligned with wall time (that is what makes
-/// "the last 30 seconds" timestamp-accurate across disconnects).
+/// The sequence number advances for every *encoded* frame and never resets
+/// mid-session, so the server places audio at sample-accurate positions
+/// regardless of network jitter. Frames captured during an outage are buffered
+/// by the WebSocket client and replayed on reconnect (not dropped), so the
+/// timeline stays both continuous and aligned with wall time.
 final class OpusStreamEncoder {
     struct Packet {
         let seq: UInt32

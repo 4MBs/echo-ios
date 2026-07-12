@@ -9,6 +9,7 @@ struct LessonsView: View {
     @State private var lessons: [BackendAPI.LessonInfo] = []
     @State private var loading = true
     @State private var errorMessage: String?
+    @State private var actionError: String?
 
     private var api: BackendAPI {
         BackendAPI(
@@ -54,14 +55,31 @@ struct LessonsView: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            List(lessons) { lesson in
-                NavigationLink {
-                    LessonDetailView(api: api, info: lesson)
-                } label: {
-                    LessonRow(info: lesson)
+            List {
+                ForEach(lessons) { lesson in
+                    NavigationLink {
+                        LessonDetailView(api: api, info: lesson)
+                    } label: {
+                        LessonRow(info: lesson)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            Task { await delete(lesson) }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
             }
             .refreshable { await load() }
+            .alert(
+                "Couldn't delete lesson",
+                isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(actionError ?? "")
+            }
         }
     }
 
@@ -74,6 +92,16 @@ struct LessonsView: View {
             errorMessage = error.localizedDescription
         }
         loading = false
+    }
+
+    private func delete(_ lesson: BackendAPI.LessonInfo) async {
+        do {
+            try await api.deleteLesson(id: lesson.id)
+            BackendAPI.purgeCachedAudio(id: lesson.id)
+            lessons.removeAll { $0.id == lesson.id }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 }
 
@@ -120,6 +148,7 @@ struct LessonDetailView: View {
     @State private var summary: String?
     @State private var summarizing = false
     @State private var errorMessage: String?
+    @State private var audioPlayer = LessonAudioPlayer()
 
     var body: some View {
         Group {
@@ -147,6 +176,7 @@ struct LessonDetailView: View {
                 }
             }
         }
+        .onDisappear { audioPlayer.stop() }
         .task {
             do {
                 let loaded = try await api.lesson(id: info.id)
@@ -160,13 +190,17 @@ struct LessonDetailView: View {
 
     private func loadedContent(_ detail: BackendAPI.LessonDetail) -> some View {
         let multiSpeaker = Set(detail.segments.map(\.speaker)).count > 1
+        let activeIndex = audioPlayer.activeSegmentIndex(in: detail.segments)
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 summarySection
-                Text("Transcript")
+                if info.hasAudio {
+                    LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
+                }
+                Text(info.hasAudio ? "Transcript · tap a line to replay it" : "Transcript")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(detail.segments.enumerated()), id: \.element.id) { index, segment in
                         SegmentRow(
                             segment: segment,
@@ -177,9 +211,24 @@ struct LessonDetailView: View {
                                 ? .shown
                                 : .placeholder
                         )
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(
+                            index == activeIndex ? Color.purple.opacity(0.16) : .clear,
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard info.hasAudio else { return }
+                            Task {
+                                if await audioPlayer.ensureLoaded(api: api, lessonId: info.id) {
+                                    audioPlayer.playFrom(segment.t0)
+                                }
+                            }
+                        }
                     }
                 }
-                .padding(14)
+                .padding(10)
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
             }
             .padding(16)
@@ -259,5 +308,67 @@ struct LessonDetailView: View {
         parts.append("TRANSCRIPT")
         parts.append(contentsOf: detail.segments.map { "\($0.speaker): \($0.text)" })
         return parts.joined(separator: "\n")
+    }
+}
+
+// MARK: - Audio playback bar
+
+struct LessonAudioBar: View {
+    let player: LessonAudioPlayer
+    let api: BackendAPI
+    let lessonId: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                Task {
+                    guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
+                    if !player.isPlaying, player.currentTime == 0 {
+                        player.playFrom(0)
+                    } else {
+                        player.togglePlayPause()
+                    }
+                }
+            } label: {
+                Group {
+                    if player.isLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 32))
+                    }
+                }
+                .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.purple)
+
+            VStack(alignment: .leading, spacing: 5) {
+                ProgressView(value: player.duration > 0 ? min(player.currentTime / player.duration, 1) : 0)
+                    .tint(.purple)
+                HStack {
+                    Text(timeString(player.currentTime))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(trailingLabel)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(player.errorMessage != nil ? .red : .secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var trailingLabel: String {
+        if player.errorMessage != nil { return "Audio unavailable" }
+        if player.isReady { return timeString(player.duration) }
+        return "Play recording"
+    }
+
+    private func timeString(_ t: Double) -> String {
+        let s = Int(t.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
