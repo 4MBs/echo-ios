@@ -49,6 +49,7 @@ final class AppModel {
     var bannerMessage: String?
 
     let settings = AppSettings()
+    let timetable: TimetableStore
 
     // MARK: - Internals
 
@@ -57,9 +58,12 @@ final class AppModel {
     private let audio = AudioCaptureEngine()
     private var eventPump: Task<Void, Never>?
     private var transcribingPulse: Task<Void, Never>?
+    private var timetablePoll: Task<Void, Never>?
+    private var autoStopTask: Task<Void, Never>?
     private var wantsRecording = false
 
     init() {
+        timetable = TimetableStore(settings: settings)
         audio.onPacket = { [client] packet in
             client.sendAudioFrame(
                 WireProtocol.packAudioFrame(
@@ -87,6 +91,44 @@ final class AppModel {
                 await self?.handle(event)
             }
         }
+        // Poll the timetable so the Live tab shows the current lesson and
+        // auto-stop tracks the period boundary.
+        timetablePoll = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.timetable.refresh()
+                self?.scheduleAutoStopIfNeeded()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        Task { [weak self] in await self?.syncTimetableNotifications() }
+    }
+
+    // MARK: - Timetable (tiers 2 + 4)
+
+    /// (Re)schedule start-of-lesson notifications from the current settings.
+    func syncTimetableNotifications() async {
+        await timetable.syncNotifications(enabled: settings.lessonNotifications)
+    }
+
+    func refreshTimetable() async {
+        await timetable.refresh()
+        scheduleAutoStopIfNeeded()
+    }
+
+    /// Stop recording when the current lesson ends (if enabled). Rescheduled on
+    /// every timetable poll and when recording starts.
+    private func scheduleAutoStopIfNeeded() {
+        autoStopTask?.cancel()
+        autoStopTask = nil
+        guard wantsRecording, settings.autoStopAtLessonEnd,
+              let end = timetable.current?.endDate, end > Date()
+        else { return }
+        autoStopTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(1, end.timeIntervalSinceNow)))
+            guard !Task.isCancelled, let self, self.wantsRecording else { return }
+            self.bannerMessage = "Stunde beendet — Aufnahme automatisch gestoppt."
+            self.stopRecording()
+        }
     }
 
     // MARK: - User intents
@@ -111,6 +153,7 @@ final class AppModel {
         segments = []
         partial = []
         answers.reset()
+        scheduleAutoStopIfNeeded()
         await client.connect(to: .init(url: url, token: settings.authToken))
     }
 

@@ -115,9 +115,9 @@ struct LessonRow: View {
                 .frame(width: 34, height: 34)
                 .background(.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
-                Text(info.startedAt.formatted(date: .abbreviated, time: .shortened))
+                Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.subheadline.weight(.semibold))
-                Text("\(durationLabel) · \(info.segmentCount) segments")
+                Text(secondaryLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -135,6 +135,17 @@ struct LessonRow: View {
         let minutes = Int(info.durationSeconds) / 60
         let seconds = Int(info.durationSeconds) % 60
         return minutes > 0 ? "\(minutes) min" : "\(seconds) s"
+    }
+
+    /// When the lesson is titled from the timetable, the date/room become the
+    /// secondary line; otherwise fall back to duration + segment count.
+    private var secondaryLine: String {
+        if info.title != nil {
+            var parts = [info.startedAt.formatted(date: .abbreviated, time: .shortened), durationLabel]
+            if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
+            return parts.joined(separator: " · ")
+        }
+        return "\(durationLabel) · \(info.segmentCount) segments"
     }
 }
 

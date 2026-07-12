@@ -13,6 +13,9 @@ struct LiveView: View {
                     BannerView(text: banner)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                if model.timetable.enabled {
+                    CurrentLessonBanner()
+                }
                 TranscriptCard()
                 AnswerCard()
                 ControlBar()
@@ -34,6 +37,65 @@ struct LiveView: View {
                 }
             }
         }
+    }
+}
+
+/// Tier 2: the lesson happening now (or the next one), from the timetable.
+struct CurrentLessonBanner: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.title3)
+                .foregroundStyle(.teal)
+            content
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.teal.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let current = model.timetable.current {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(current.title).font(.subheadline.weight(.semibold))
+                    if current.cancelled {
+                        statusTag("entfällt", .red)
+                    } else if current.substitution {
+                        statusTag("Vertretung", .orange)
+                    }
+                }
+                Text(subtitle(current)).font(.caption).foregroundStyle(.secondary)
+            }
+        } else if let next = model.timetable.next {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Gerade kein Unterricht").font(.subheadline.weight(.semibold))
+                Text("Als Nächstes: \(next.title) · \(next.start)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } else {
+            Text("Kein Unterricht heute").font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+
+    private func subtitle(_ lesson: BackendAPI.Lesson) -> String {
+        var parts = ["\(lesson.start)–\(lesson.end)"]
+        if !lesson.room.isEmpty { parts.append("Raum \(lesson.room)") }
+        if !lesson.teacher.isEmpty { parts.append(lesson.teacher) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func statusTag(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15), in: Capsule())
     }
 }
 

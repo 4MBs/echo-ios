@@ -37,6 +37,16 @@ final class AppSettings {
         didSet { defaults.set(bitrate, forKey: "bitrate") }
     }
 
+    /// Tier 4: notify at the start of each lesson so recording is one tap away.
+    var lessonNotifications: Bool {
+        didSet { defaults.set(lessonNotifications, forKey: "lessonNotifications") }
+    }
+
+    /// Tier 4: automatically stop recording when the current lesson ends.
+    var autoStopAtLessonEnd: Bool {
+        didSet { defaults.set(autoStopAtLessonEnd, forKey: "autoStopAtLessonEnd") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -49,6 +59,8 @@ final class AppSettings {
         contextSeconds = ctx == 0 ? 30 : ctx
         let rate = defaults.integer(forKey: "bitrate")
         bitrate = rate == 0 ? 24000 : rate
+        lessonNotifications = defaults.bool(forKey: "lessonNotifications")
+        autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
         // propagate whatever is already configured to the widget container,
         // so widgets work immediately after this app version's first launch
         mirrorToWidget()

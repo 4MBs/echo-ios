@@ -12,9 +12,13 @@ struct BackendAPI {
         let durationSeconds: Double
         let hasSummary: Bool
         let hasAudio: Bool
+        let title: String?
+        let subject: String?
+        let teacher: String?
+        let room: String?
 
         enum CodingKeys: String, CodingKey {
-            case id
+            case id, title, subject, teacher, room
             case startedAtMs = "started_at_ms"
             case endedAtMs = "ended_at_ms"
             case segmentCount = "segment_count"
@@ -35,6 +39,10 @@ struct BackendAPI {
             hasSummary = try c.decodeIfPresent(Bool.self, forKey: .hasSummary) ?? false
             // tolerate a not-yet-updated server (field added alongside audio recording)
             hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
+            title = try c.decodeIfPresent(String.self, forKey: .title)
+            subject = try c.decodeIfPresent(String.self, forKey: .subject)
+            teacher = try c.decodeIfPresent(String.self, forKey: .teacher)
+            room = try c.decodeIfPresent(String.self, forKey: .room)
         }
 
         var startedAt: Date { Date(timeIntervalSince1970: Double(startedAtMs) / 1000) }
@@ -45,10 +53,14 @@ struct BackendAPI {
         let startedAtMs: Int64
         let summary: String?
         let hasAudio: Bool
+        let title: String?
+        let subject: String?
+        let teacher: String?
+        let room: String?
         let segments: [TranscriptSegment]
 
         enum CodingKeys: String, CodingKey {
-            case id, summary, segments
+            case id, summary, segments, title, subject, teacher, room
             case startedAtMs = "started_at_ms"
             case hasAudio = "has_audio"
         }
@@ -59,8 +71,53 @@ struct BackendAPI {
             startedAtMs = try c.decode(Int64.self, forKey: .startedAtMs)
             summary = try c.decodeIfPresent(String.self, forKey: .summary)
             hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
+            title = try c.decodeIfPresent(String.self, forKey: .title)
+            subject = try c.decodeIfPresent(String.self, forKey: .subject)
+            teacher = try c.decodeIfPresent(String.self, forKey: .teacher)
+            room = try c.decodeIfPresent(String.self, forKey: .room)
             segments = try c.decode([TranscriptSegment].self, forKey: .segments)
         }
+    }
+
+    // MARK: - Timetable
+
+    struct Lesson: Decodable, Identifiable, Sendable, Equatable {
+        let date: String
+        let start: String
+        let end: String
+        let startMs: Int64?
+        let endMs: Int64?
+        let subject: String
+        let subjectLong: String?
+        let title: String
+        let teacher: String
+        let room: String
+        let cancelled: Bool
+        let substitution: Bool
+        let info: String
+
+        enum CodingKeys: String, CodingKey {
+            case date, start, end, subject, title, teacher, room, cancelled, substitution, info
+            case startMs = "start_ms"
+            case endMs = "end_ms"
+            case subjectLong = "subject_long"
+        }
+
+        var id: String { "\(date)-\(start)-\(subject)" }
+        var startDate: Date? { startMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+        var endDate: Date? { endMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+    }
+
+    struct TimetableNow: Decodable, Sendable {
+        let enabled: Bool
+        let current: Lesson?
+        let next: Lesson?
+    }
+
+    struct TimetableDay: Decodable, Sendable {
+        let enabled: Bool
+        let date: String?
+        let lessons: [Lesson]
     }
 
     struct APIError: LocalizedError {
@@ -72,22 +129,32 @@ struct BackendAPI {
     let port: Int
     let token: String
 
-    private func url(_ path: String) throws -> URL {
+    private func url(_ path: String, query: [URLQueryItem]? = nil) throws -> URL {
         var comps = URLComponents()
         comps.scheme = "http"
         comps.host = host.trimmingCharacters(in: .whitespaces)
         comps.port = port
         comps.path = path
+        comps.queryItems = query
         guard let url = comps.url, !host.isEmpty else {
             throw APIError(message: "Server address is not configured.")
         }
         return url
     }
 
-    private func request(_ path: String, method: String = "GET") async throws -> Data {
-        var request = try URLRequest(url: url(path), timeoutInterval: 100)
+    private func request(
+        _ path: String,
+        method: String = "GET",
+        query: [URLQueryItem]? = nil,
+        jsonBody: [String: String]? = nil
+    ) async throws -> Data {
+        var request = try URLRequest(url: url(path, query: query), timeoutInterval: 100)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let jsonBody {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
@@ -98,6 +165,25 @@ struct BackendAPI {
             throw APIError(message: detail ?? "Server error (HTTP \(status)).")
         }
         return data
+    }
+
+    // MARK: - Timetable API
+
+    func timetableNow() async throws -> TimetableNow {
+        try await JSONDecoder().decode(TimetableNow.self, from: request("/timetable/now"))
+    }
+
+    func timetableDay(date: String? = nil) async throws -> TimetableDay {
+        let query = date.map { [URLQueryItem(name: "date", value: $0)] }
+        return try await JSONDecoder().decode(TimetableDay.self, from: request("/timetable/day", query: query))
+    }
+
+    func submitWebUntisCredentials(school: String, username: String, password: String) async throws {
+        _ = try await request(
+            "/timetable/credentials",
+            method: "POST",
+            jsonBody: ["school": school, "username": username, "password": password]
+        )
     }
 
     func listLessons() async throws -> [LessonInfo] {
