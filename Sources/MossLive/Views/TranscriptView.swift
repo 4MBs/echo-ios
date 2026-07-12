@@ -12,7 +12,7 @@ struct TranscriptCard: View {
             Divider()
             content
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
         .frame(maxHeight: .infinity)
     }
 
@@ -24,18 +24,8 @@ struct TranscriptCard: View {
             Text("Live Transcript")
                 .font(.subheadline.weight(.semibold))
             Spacer()
-            if model.phase == .recording {
-                HStack(spacing: 5) {
-                    Circle().fill(.green).frame(width: 7, height: 7)
-                    Text("LIVE").font(.caption2.weight(.bold))
-                }
-                .foregroundStyle(.green)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(.green.opacity(0.15), in: Capsule())
-            }
             if !model.segments.isEmpty {
-                Text("\(model.segments.count) Segmente")
+                Text("\(model.segments.count) segments")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
