@@ -12,7 +12,7 @@ struct TranscriptCard: View {
             Divider()
             content
         }
-        .background(Color(.secondarySystemGroupedBackground).opacity(0.78), in: RoundedRectangle(cornerRadius: 24))
+        .background(MossTheme.surface, in: RoundedRectangle(cornerRadius: 24))
         .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.primary.opacity(0.06)) }
         .frame(maxHeight: .infinity)
     }
@@ -22,8 +22,9 @@ struct TranscriptCard: View {
             Image(systemName: "waveform")
                 .foregroundStyle(.teal)
                 .symbolEffect(.variableColor.iterative, isActive: model.isTranscribing)
-            Text("Live Transcript")
-                .font(.subheadline.weight(.semibold))
+            Text("NOW HEARING")
+                .font(.caption.weight(.black))
+                .tracking(1.5)
             Spacer()
             if model.phase == .recording {
                 HStack(spacing: 5) {
@@ -59,7 +60,7 @@ struct TranscriptCard: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         ForEach(Array(model.segments.enumerated()), id: \.element.id) { index, segment in
                             SegmentRow(
                                 segment: segment,
@@ -82,7 +83,7 @@ struct TranscriptCard: View {
                         }
                         Color.clear.frame(height: 2).id("bottom")
                     }
-                    .padding(14)
+                    .padding(20)
                 }
                 .onChange(of: model.segments.count) {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -139,7 +140,8 @@ struct SegmentRow: View {
                     .opacity(speakerStyle == .shown ? 1 : 0)
             }
             Text(segment.text)
-                .font(.callout)
+                .font(isPartial ? .title3 : .body)
+                .fontWeight(isPartial ? .semibold : .regular)
                 .italic(isPartial)
                 .foregroundStyle(isPartial ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -32,7 +32,7 @@ struct AnswerButton: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .background(Color(.secondarySystemGroupedBackground).opacity(0.8), in: RoundedRectangle(cornerRadius: 18))
+        .background(MossTheme.raisedSurface, in: RoundedRectangle(cornerRadius: 18))
         .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(Color.purple.opacity(0.18)) }
         .buttonBorderShape(.roundedRectangle(radius: 22))
         .disabled(disabled)
@@ -53,7 +53,7 @@ struct AIAssistantCard: View {
             Divider()
             content
         }
-        .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: 24))
+        .background(MossTheme.surface, in: RoundedRectangle(cornerRadius: 24))
         .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.purple.opacity(0.15)) }
         .frame(maxHeight: .infinity)
         .animation(.default, value: model.answers.current)

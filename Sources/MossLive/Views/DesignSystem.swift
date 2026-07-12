@@ -1,25 +1,26 @@
 import SwiftUI
 
 enum MossTheme {
-    static let accent = Color.teal
-    static let assistant = Color.purple
+    static let accent = Color(red: 0.35, green: 0.95, blue: 0.72)
+    static let assistant = Color(red: 0.64, green: 0.55, blue: 1.0)
+    static let surface = Color(red: 0.07, green: 0.08, blue: 0.10)
+    static let raisedSurface = Color(red: 0.10, green: 0.11, blue: 0.14)
     static let cornerRadius: CGFloat = 24
 }
 
 struct MossBackground: View {
     var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground)
+        LinearGradient(
+            colors: [Color(red: 0.035, green: 0.04, blue: 0.055), Color.black],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay(alignment: .topTrailing) {
             Circle()
-                .fill(MossTheme.accent.opacity(0.10))
-                .frame(width: 340, height: 340)
-                .blur(radius: 90)
-                .offset(x: -150, y: -260)
-            Circle()
-                .fill(MossTheme.assistant.opacity(0.09))
-                .frame(width: 300, height: 300)
-                .blur(radius: 90)
-                .offset(x: 170, y: 320)
+                .fill(MossTheme.assistant.opacity(0.13))
+                .frame(width: 360, height: 360)
+                .blur(radius: 110)
+                .offset(x: 150, y: -190)
         }
         .ignoresSafeArea()
     }
@@ -63,7 +64,11 @@ struct MossCard<Content: View>: View {
         content
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: MossTheme.cornerRadius))
+            .background(MossTheme.raisedSurface, in: RoundedRectangle(cornerRadius: MossTheme.cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: MossTheme.cornerRadius)
+                    .strokeBorder(.white.opacity(0.08))
+            }
     }
 }
 
