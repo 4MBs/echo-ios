@@ -1,9 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The answer control (right column, under the AI assistant): asks the AI about
-/// the last 30 seconds of transcript. Secondary Liquid Glass, so the teal
-/// record button stays the primary action.
+/// Compact secondary action; recording remains the only visually dominant control.
 struct AnswerButton: View {
     @Environment(AppModel.self) private var model
 
@@ -14,7 +12,7 @@ struct AnswerButton: View {
         Button {
             model.pressAnswerButton()
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 if busy {
                     ProgressView()
                 } else {
@@ -22,23 +20,20 @@ struct AnswerButton: View {
                         .font(.system(size: 22))
                         .foregroundStyle(.purple)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(busy ? "Denkt nach…" : "Letzte 30 Sekunden beantworten")
-                        .font(.headline)
-                    Text("Antwort der KI basierend auf dem letzten Transkript.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(busy ? "Denkt nach…" : "Ask about the last 30 seconds")
+                    .font(.subheadline.weight(.semibold))
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
             }
-            .padding(.vertical, 18)
-            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.plain)
+        .background(Color(.secondarySystemGroupedBackground).opacity(0.8), in: RoundedRectangle(cornerRadius: 18))
+        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(Color.purple.opacity(0.18)) }
         .buttonBorderShape(.roundedRectangle(radius: 22))
         .disabled(disabled)
         .opacity(disabled ? 0.55 : 1)
@@ -58,7 +53,8 @@ struct AIAssistantCard: View {
             Divider()
             content
         }
-        .glassEffect(.regular.tint(.purple.opacity(0.12)), in: .rect(cornerRadius: 24))
+        .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: 24))
+        .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.purple.opacity(0.15)) }
         .frame(maxHeight: .infinity)
         .animation(.default, value: model.answers.current)
     }

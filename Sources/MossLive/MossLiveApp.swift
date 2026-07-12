@@ -35,7 +35,7 @@ struct MainTabView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(Tab.settings)
         }
-        .tint(.purple)
+        .tint(MossTheme.accent)
         .onAppear {
             if !model.settings.isConfigured {
                 selectedTab = .settings
