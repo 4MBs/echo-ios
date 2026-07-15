@@ -66,7 +66,12 @@ final class AppSettings {
         bitrate = rate == 0 ? 24000 : rate
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
-        quickSwitchURL = defaults.string(forKey: "quickSwitchURL") ?? "goodnotes://"
+        // migrate the old default: bare goodnotes:// lands in GoodNotes'
+        // file-import handler and shows an "unsupported file type" alert;
+        // the legacy launcher scheme opens the app silently
+        let storedQuickSwitch = defaults.string(forKey: "quickSwitchURL")
+        quickSwitchURL = (storedQuickSwitch == nil || storedQuickSwitch == "goodnotes://")
+            ? "goodnotes5://" : storedQuickSwitch!
         // propagate whatever is already configured to the widget container,
         // so widgets work immediately after this app version's first launch
         mirrorToWidget()

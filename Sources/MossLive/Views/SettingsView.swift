@@ -31,12 +31,12 @@ struct SettingsView: View {
 
                 Section {
                     Picker("App", selection: $settings.quickSwitchURL) {
-                        Text("GoodNotes").tag("goodnotes://")
+                        Text("GoodNotes").tag("goodnotes5://")
                         Text("Notizen").tag("mobilenotes://")
                         Text("Safari").tag("https://www.google.com")
                         Text("Bücher").tag("ibooks://")
                     }
-                    TextField("Eigenes URL-Schema (z. B. goodnotes://)", text: $settings.quickSwitchURL)
+                    TextField("Eigenes URL-Schema (z. B. goodnotes5://)", text: $settings.quickSwitchURL)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -46,7 +46,9 @@ struct SettingsView: View {
                 } footer: {
                     Text(
                         "Tippe irgendwo in der App mit drei Fingern gleichzeitig, um sofort in "
-                            + "diese App zu wechseln. Die Aufnahme läuft im Hintergrund weiter."
+                            + "diese App zu wechseln. Die Aufnahme läuft im Hintergrund weiter. "
+                            + "Zeigt die Ziel-App beim Öffnen eine Meldung, probiere hier ein "
+                            + "anderes URL-Schema."
                     )
                 }
 

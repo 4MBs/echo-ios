@@ -59,7 +59,7 @@ struct QuizView: View {
                 .multilineTextAlignment(.center)
                 .stickyNote(rotation: 1.5)
                 .padding(.top, 30)
-            Text("Abgefragt wird nur der Lernstoff —\nnicht, was sonst in der Stunde passiert ist.")
+            Text("Ein Durchgang deckt den kompletten Lernstoff ab —\nabgefragt wird nur, was wichtig ist.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
