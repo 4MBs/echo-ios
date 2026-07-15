@@ -14,58 +14,67 @@ struct SettingsView: View {
                         .autocorrectionDisabled()
                     TextField("Port", value: $settings.serverPort, format: .number.grouping(.never))
                         .keyboardType(.numberPad)
-                    SecureField("Auth token", text: $settings.authToken)
+                    SecureField("Auth-Token", text: $settings.authToken)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } header: {
-                    Text("Fedora server (Tailscale)")
+                    Text("Fedora-Server (Tailscale)")
                 } footer: {
                     Text(
                         """
-                        On the server: address = `tailscale ip -4`, \
-                        token = the MOSSLIVE_AUTH_TOKEN value in ~/.config/mosslive/env. \
-                        Both devices must be on the same tailnet.
+                        Auf dem Server: Adresse = `tailscale ip -4`, \
+                        Token = der Wert MOSSLIVE_AUTH_TOKEN in ~/.config/mosslive/env. \
+                        Beide Geräte müssen im selben Tailnet sein.
                         """
                     )
                 }
 
-                Section("AI answer") {
+                Section {
                     Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
-                        Text("Context window: \(Int(settings.contextSeconds)) s")
+                        Text("Kontextfenster: \(Int(settings.contextSeconds)) s")
                     }
+                } header: {
+                    Text("Widget-Antwort")
+                } footer: {
+                    Text(
+                        "Wie viele Sekunden Transkript ein Tipp auf das Widget an die KI schickt. "
+                            + "Die Antwort erscheint nur im Widget."
+                    )
                 }
 
                 Section {
-                    Picker("Audio bitrate", selection: $settings.bitrate) {
-                        Text("16 kbps (lowest data)").tag(16000)
-                        Text("24 kbps (recommended)").tag(24000)
-                        Text("32 kbps").tag(32000)
+                    Picker("Audio-Bitrate", selection: $settings.bitrate) {
+                        Text("16 kbit/s (wenigste Daten)").tag(16000)
+                        Text("24 kbit/s (empfohlen)").tag(24000)
+                        Text("32 kbit/s").tag(32000)
                     }
                 } footer: {
-                    Text("24 kbps ≈ 11 MiB per hour of streaming.")
+                    Text("24 kbit/s ≈ 11 MiB pro Stunde Streaming.")
                 }
 
                 TimetableSettingsSection()
 
                 Section {
-                    LabeledContent("Transcription", value: "Qwen3-ASR 1.7B")
-                    LabeledContent("Answers", value: "Gemini 3.5 Flash")
+                    LabeledContent("Transkription", value: "Qwen3-ASR 1.7B")
+                    LabeledContent("Antworten", value: "Gemini 3.5 Flash")
                     LabeledContent("Version", value: appVersion)
-                    LabeledContent("Widget link", value: SharedConfig.resolvedGroupID ?? "unavailable")
+                    LabeledContent("Widget-Verbindung", value: SharedConfig.resolvedGroupID ?? "nicht verfügbar")
                         .font(.footnote)
                 } header: {
-                    Text("About")
+                    Text("Über")
                 } footer: {
                     Text(
                         """
-                        Audio is processed only on your own server; nothing goes to third \
-                        parties except the transcript excerpt sent to Gemini when you \
-                        request an answer.
+                        Audio wird nur auf deinem eigenen Server verarbeitet; nichts geht an \
+                        Dritte, außer dem Transkript-Ausschnitt, der bei einer KI-Anfrage an \
+                        Gemini geschickt wird.
                         """
                     )
                 }
             }
-            .navigationTitle("Settings")
+            .scrollContentBackground(.hidden)
+            .background(PaperBackground())
+            .navigationTitle("Einstellungen")
         }
     }
 

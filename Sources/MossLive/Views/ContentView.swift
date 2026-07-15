@@ -1,32 +1,34 @@
 import SwiftUI
 
-/// The Live tab: connection status, live transcript, AI answer, and the
-/// record controls — laid out as a standard navigation screen so the app
-/// follows platform conventions (system backgrounds, light/dark adaptive).
+/// Aufnahme: notebook-style live transcript with the record control underneath.
+/// The stealth AI answer lives only in the widget — this screen is just the
+/// recording and what is being said.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         NavigationStack {
-            GlassEffectContainer(spacing: 14) {
-                VStack(spacing: 14) {
-                    if let banner = model.bannerMessage {
-                        BannerView(text: banner)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                    if model.timetable.enabled {
-                        CurrentLessonBanner()
-                    }
-                    TranscriptCard()
-                    AnswerCard()
-                    ControlBar()
+            VStack(spacing: 14) {
+                if let banner = model.bannerMessage {
+                    BannerView(text: banner)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-                .animation(.snappy, value: model.bannerMessage)
+                if model.timetable.enabled {
+                    CurrentLessonBanner()
+                }
+                TranscriptCard()
+                if model.phase == .recording {
+                    RecordingWaveform()
+                }
+                RecordButton()
+                    .padding(.bottom, 6)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("MOSS Live")
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .animation(.snappy, value: model.bannerMessage)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(PaperBackground())
+            .navigationTitle("Aufnahme")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -50,13 +52,13 @@ struct CurrentLessonBanner: View {
         HStack(spacing: 12) {
             Image(systemName: "calendar.badge.clock")
                 .font(.title3)
-                .foregroundStyle(.teal)
+                .foregroundStyle(Theme.accent)
             content
             Spacer(minLength: 0)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.tint(.teal.opacity(0.16)), in: .rect(cornerRadius: 16))
+        .paperCard()
     }
 
     @ViewBuilder
@@ -131,7 +133,7 @@ struct StatusPill: View {
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
-        .glassEffect(.regular.tint(model.phase.color.opacity(0.20)), in: .capsule)
+        .background(model.phase.color.opacity(0.12), in: Capsule())
     }
 
     private var statusText: String {
@@ -156,7 +158,7 @@ struct RecordingTimer: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .glassEffect(.regular.tint(.red.opacity(0.20)), in: .capsule)
+            .background(Color.red.opacity(0.12), in: Capsule())
         }
     }
 }
@@ -170,21 +172,33 @@ struct BannerView: View {
             .foregroundStyle(.orange)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular.tint(.orange.opacity(0.18)), in: .rect(cornerRadius: 16))
+            .paperCard()
     }
 }
 
 // MARK: - Controls
 
-struct ControlBar: View {
+/// Decorative ink-purple waveform strip while recording (mockup style).
+struct RecordingWaveform: View {
     var body: some View {
-        VStack(spacing: 10) {
-            AnswerButton()
-            RecordButton()
+        TimelineView(.animation(minimumInterval: 0.12)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 3) {
+                ForEach(0 ..< 48, id: \.self) { bar in
+                    let phase = time * 6 + Double(bar) * 0.9
+                    let height = 6 + abs(sin(phase)) * 16 * (0.4 + 0.6 * abs(sin(Double(bar) * 1.7)))
+                    Capsule()
+                        .fill(Theme.accent.opacity(0.75))
+                        .frame(width: 3, height: height)
+                }
+            }
+            .frame(height: 26)
         }
+        .accessibilityHidden(true)
     }
 }
 
+/// The mockup's round record/stop control with its label next to it.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
 
@@ -203,21 +217,26 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            Label(
-                isActive ? "Stop Recording" : "Start Recording",
-                systemImage: isActive ? "stop.fill" : "record.circle"
-            )
-            .font(.body.weight(.semibold))
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(isActive ? Color.red : Theme.accent)
+                        .frame(width: 52, height: 52)
+                    Image(systemName: isActive ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                Text(isActive ? "Aufnahme beenden" : "Aufnahme starten")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
         }
-        .buttonStyle(.glassProminent)
-        .tint(isActive ? .red : .teal)
-        .buttonBorderShape(.roundedRectangle(radius: 16))
+        .buttonStyle(.plain)
+        .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
     }
 }
 
 #Preview {
-    MainTabView()
+    MainSplitView()
         .environment(AppModel())
 }

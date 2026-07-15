@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Live transcript card: committed segments plus the still-changing tail.
-/// Consecutive rows by the same speaker share one avatar column so the
-/// transcript reads like a conversation, not a log file.
+/// Live transcript, notebook-style: a timestamp column on the left, the
+/// speaker named once per turn, and the still-changing tail in italics.
 struct TranscriptCard: View {
     @Environment(AppModel.self) private var model
 
@@ -12,20 +11,25 @@ struct TranscriptCard: View {
             Divider()
             content
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .paperCard(cornerRadius: 18)
         .frame(maxHeight: .infinity)
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "waveform")
-                .foregroundStyle(.teal)
-                .symbolEffect(.variableColor.iterative, isActive: model.isTranscribing)
-            Text("Live Transcript")
+            Circle()
+                .fill(model.phase == .recording ? .red : Color.secondary.opacity(0.4))
+                .frame(width: 9, height: 9)
+            Text(model.phase == .recording ? "Live" : "Transkript")
                 .font(.subheadline.weight(.semibold))
+            if model.isTranscribing {
+                Text("– wird transkribiert…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             if !model.segments.isEmpty {
-                Text("\(model.segments.count) segments")
+                Text("\(model.segments.count) Abschnitte")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -34,7 +38,7 @@ struct TranscriptCard: View {
         .padding(.vertical, 12)
     }
 
-    /// With a single speaker (the current model does not diarize) the badge
+    /// With a single speaker (the current model does not diarize) the speaker
     /// column is pure noise, so it only appears when speakers actually differ.
     private var isMultiSpeaker: Bool {
         let speakers = Set(model.segments.map(\.speaker)).union(model.partial.map(\.speaker))
@@ -99,10 +103,14 @@ struct TranscriptEmptyState: View {
             Image(systemName: isRecording ? "ear" : "mic.slash")
                 .font(.system(size: 34))
                 .foregroundStyle(.quaternary)
-            Text(isRecording ? "Listening — speech appears here." : "Start recording to see the live transcript.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            Text(
+                isRecording
+                    ? "Ich höre zu — Gesprochenes erscheint hier."
+                    : "Starte die Aufnahme, um das Live-Transkript zu sehen."
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
@@ -112,7 +120,7 @@ struct TranscriptEmptyState: View {
 struct SegmentRow: View {
     /// hidden = no speaker column at all (single-speaker transcript);
     /// placeholder = keep the column aligned but show nothing (same speaker
-    /// as the previous row); shown = badge visible.
+    /// as the previous row); shown = speaker name visible.
     enum SpeakerStyle {
         case hidden, placeholder, shown
     }
@@ -123,43 +131,40 @@ struct SegmentRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(timestamp)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: 44, alignment: .leading)
             if speakerStyle != .hidden {
-                SpeakerBadge(speaker: segment.speaker)
+                Text(speakerName)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(SpeakerBadge.color(for: segment.speaker))
                     .opacity(speakerStyle == .shown ? 1 : 0)
+                    .frame(width: 86, alignment: .leading)
             }
             Text(segment.text)
                 .font(.callout)
                 .italic(isPartial)
                 .foregroundStyle(isPartial ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(timestamp)
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.quaternary)
         }
+    }
+
+    private var speakerName: String {
+        "Sprecher \(Int(segment.speaker.dropFirst()) ?? 0)"
     }
 
     private var timestamp: String {
         let total = Int(segment.t0)
-        return String(format: "%d:%02d", total / 60, total % 60)
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 }
 
-struct SpeakerBadge: View {
-    let speaker: String
-
+enum SpeakerBadge {
     static let palette: [Color] = [.blue, .purple, .teal, .orange, .pink, .indigo, .mint, .cyan]
 
     static func color(for speaker: String) -> Color {
         let index = (Int(speaker.dropFirst()) ?? 0) - 1
         return palette[abs(index) % palette.count]
-    }
-
-    var body: some View {
-        Text(String(Int(speaker.dropFirst()) ?? 0))
-            .font(.caption2.weight(.bold).monospacedDigit())
-            .foregroundStyle(Self.color(for: speaker))
-            .frame(width: 24, height: 24)
-            .background(Self.color(for: speaker).opacity(0.16), in: Circle())
-            .accessibilityLabel("Speaker \(speaker)")
     }
 }

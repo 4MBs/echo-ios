@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Lessons browser: every past recording lives on the Fedora server; this
-/// screen lists them, shows the full transcript, and generates a summary on
-/// demand (cached server-side after the first time).
+/// "Meine Stunden": every past recording lives on the Fedora server; this
+/// screen lists them (filterable by subject), shows the full transcript and
+/// the per-lesson summary.
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
 
@@ -10,6 +10,8 @@ struct LessonsView: View {
     @State private var loading = true
     @State private var errorMessage: String?
     @State private var actionError: String?
+    @State private var subjectFilter: String?
+    @State private var newestFirst = true
 
     private var api: BackendAPI {
         BackendAPI(
@@ -22,16 +24,28 @@ struct LessonsView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Lessons")
-                .background(Color(.systemGroupedBackground))
+                .navigationTitle("Meine Stunden")
+                .background(PaperBackground())
         }
         .task { await load() }
+    }
+
+    private var subjects: [String] {
+        Array(Set(lessons.compactMap(\.subject))).sorted()
+    }
+
+    private var visibleLessons: [BackendAPI.LessonInfo] {
+        var result = lessons
+        if let subjectFilter {
+            result = result.filter { $0.subject == subjectFilter }
+        }
+        return newestFirst ? result : result.reversed()
     }
 
     @ViewBuilder
     private var content: some View {
         if loading {
-            ProgressView("Loading lessons…")
+            ProgressView("Lade Stunden…")
         } else if let errorMessage {
             VStack(spacing: 12) {
                 Image(systemName: "wifi.exclamationmark")
@@ -41,7 +55,7 @@ struct LessonsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Button("Retry") { Task { await load() } }
+                Button("Erneut versuchen") { Task { await load() } }
                     .buttonStyle(.bordered)
             }
             .padding(28)
@@ -50,30 +64,46 @@ struct LessonsView: View {
                 Image(systemName: "books.vertical")
                     .font(.system(size: 34))
                     .foregroundStyle(.quaternary)
-                Text("No recorded lessons yet.")
+                Text("Noch keine aufgenommenen Stunden.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         } else {
             List {
-                ForEach(lessons) { lesson in
-                    NavigationLink {
-                        LessonDetailView(api: api, info: lesson)
-                    } label: {
-                        LessonRow(info: lesson)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            Task { await delete(lesson) }
+                Section {
+                    ForEach(visibleLessons) { lesson in
+                        NavigationLink {
+                            LessonDetailView(api: api, info: lesson)
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            LessonRow(info: lesson)
+                        }
+                        .listRowBackground(
+                            Color.clear.overlay(
+                                Theme.card,
+                                in: RoundedRectangle(cornerRadius: 14)
+                            )
+                            .padding(.vertical, 4)
+                        )
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                Task { await delete(lesson) }
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
                         }
                     }
+                } header: {
+                    filterBar
+                        .textCase(nil)
+                        .listRowInsets(EdgeInsets())
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .refreshable { await load() }
             .alert(
-                "Couldn't delete lesson",
+                "Stunde konnte nicht gelöscht werden",
                 isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
             ) {
                 Button("OK", role: .cancel) {}
@@ -81,6 +111,41 @@ struct LessonsView: View {
                 Text(actionError ?? "")
             }
         }
+    }
+
+    /// Mockup-style filter chips: subject and sort order.
+    private var filterBar: some View {
+        HStack(spacing: 10) {
+            Menu {
+                Button("Alle Fächer") { subjectFilter = nil }
+                ForEach(subjects, id: \.self) { subject in
+                    Button(subject) { subjectFilter = subject }
+                }
+            } label: {
+                chipLabel(subjectFilter ?? "Alle Fächer", highlighted: subjectFilter != nil)
+            }
+            Menu {
+                Button("Neueste zuerst") { newestFirst = true }
+                Button("Älteste zuerst") { newestFirst = false }
+            } label: {
+                chipLabel(newestFirst ? "Neueste zuerst" : "Älteste zuerst", highlighted: false)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func chipLabel(_ text: String, highlighted: Bool) -> some View {
+        HStack(spacing: 5) {
+            Text(text)
+            Image(systemName: "chevron.down").font(.caption2)
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(highlighted ? Color.white : .primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(highlighted ? Theme.accent : Theme.card, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
     }
 
     private func load() async {
@@ -110,10 +175,10 @@ struct LessonRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "graduationcap.fill")
-                .foregroundStyle(.teal)
-                .frame(width: 34, height: 34)
-                .background(.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: subjectSymbol(for: info.subject))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 38, height: 38)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
                 Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.subheadline.weight(.semibold))
@@ -125,10 +190,10 @@ struct LessonRow: View {
             if info.hasSummary {
                 Image(systemName: "text.badge.star")
                     .font(.caption)
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(Theme.accent)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
     }
 
     private var durationLabel: String {
@@ -145,7 +210,7 @@ struct LessonRow: View {
             if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
             return parts.joined(separator: " · ")
         }
-        return "\(durationLabel) · \(info.segmentCount) segments"
+        return "\(durationLabel) · \(info.segmentCount) Abschnitte"
     }
 }
 
@@ -171,12 +236,12 @@ struct LessonDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(24)
             } else {
-                ProgressView("Loading transcript…")
+                ProgressView("Lade Transkript…")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle(info.startedAt.formatted(date: .abbreviated, time: .shortened))
+        .background(PaperBackground())
+        .navigationTitle(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let detail {
@@ -208,7 +273,7 @@ struct LessonDetailView: View {
                 if info.hasAudio {
                     LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
                 }
-                Text(info.hasAudio ? "Transcript · tap a line to replay it" : "Transcript")
+                Text(info.hasAudio ? "Transkript · Zeile antippen zum Anhören" : "Transkript")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 LazyVStack(alignment: .leading, spacing: 4) {
@@ -225,7 +290,7 @@ struct LessonDetailView: View {
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
                         .background(
-                            index == activeIndex ? Color.purple.opacity(0.16) : .clear,
+                            index == activeIndex ? Theme.accent.opacity(0.16) : .clear,
                             in: RoundedRectangle(cornerRadius: 8)
                         )
                         .contentShape(Rectangle())
@@ -240,7 +305,7 @@ struct LessonDetailView: View {
                     }
                 }
                 .padding(10)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                .paperCard()
             }
             .padding(16)
         }
@@ -250,20 +315,20 @@ struct LessonDetailView: View {
     private var summarySection: some View {
         if let summary {
             VStack(alignment: .leading, spacing: 8) {
-                Label("Summary", systemImage: "text.badge.star")
+                Label("Zusammenfassung", systemImage: "text.badge.star")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.purple)
-                Text(renderedSummary(summary))
+                    .foregroundStyle(Theme.accent)
+                Text(renderedMarkdown(summary))
                     .font(.callout)
                     .lineSpacing(3)
                     .textSelection(.enabled)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+            .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(.purple.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(Theme.accent.opacity(0.3), lineWidth: 1)
             )
         } else {
             Button {
@@ -275,13 +340,13 @@ struct LessonDetailView: View {
                     } else {
                         Image(systemName: "text.badge.star")
                     }
-                    Text(summarizing ? "Summarizing this lesson…" : "Generate Summary")
+                    Text(summarizing ? "Fasse die Stunde zusammen…" : "Zusammenfassung erstellen")
                         .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 46)
-                .foregroundStyle(.purple)
-                .background(.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                .foregroundStyle(Theme.accent)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
             }
             .buttonStyle(.plain)
             .disabled(summarizing)
@@ -304,82 +369,7 @@ struct LessonDetailView: View {
         summarizing = false
     }
 
-    private func renderedSummary(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace
-        )
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-    }
-
     private func shareText(_ detail: BackendAPI.LessonDetail) -> String {
-        var parts: [String] = []
-        if let summary {
-            parts.append("SUMMARY\n\(summary)\n")
-        }
-        parts.append("TRANSCRIPT")
-        parts.append(contentsOf: detail.segments.map { "\($0.speaker): \($0.text)" })
-        return parts.joined(separator: "\n")
-    }
-}
-
-// MARK: - Audio playback bar
-
-struct LessonAudioBar: View {
-    let player: LessonAudioPlayer
-    let api: BackendAPI
-    let lessonId: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Button {
-                Task {
-                    guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
-                    if !player.isPlaying, player.currentTime == 0 {
-                        player.playFrom(0)
-                    } else {
-                        player.togglePlayPause()
-                    }
-                }
-            } label: {
-                Group {
-                    if player.isLoading {
-                        ProgressView()
-                    } else {
-                        Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 32))
-                    }
-                }
-                .frame(width: 34, height: 34)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.purple)
-
-            VStack(alignment: .leading, spacing: 5) {
-                ProgressView(value: player.duration > 0 ? min(player.currentTime / player.duration, 1) : 0)
-                    .tint(.purple)
-                HStack {
-                    Text(timeString(player.currentTime))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(trailingLabel)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(player.errorMessage != nil ? .red : .secondary)
-                }
-            }
-        }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private var trailingLabel: String {
-        if player.errorMessage != nil { return "Audio unavailable" }
-        if player.isReady { return timeString(player.duration) }
-        return "Play recording"
-    }
-
-    private func timeString(_ t: Double) -> String {
-        let s = Int(t.rounded())
-        return String(format: "%d:%02d", s / 60, s % 60)
+        lessonShareText(summary: summary, segments: detail.segments)
     }
 }

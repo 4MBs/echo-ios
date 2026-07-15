@@ -42,7 +42,6 @@ final class AppModel {
     private(set) var isTranscribing = false
     private(set) var segments: [TranscriptSegment] = []
     private(set) var partial: [TranscriptSegment] = []
-    private(set) var answers = AnswerTracker()
     private(set) var lastRoundTripMs: Double?
     private(set) var sessionId: String?
     private(set) var recordingStartedAt: Date?
@@ -50,6 +49,7 @@ final class AppModel {
 
     let settings = AppSettings()
     let timetable: TimetableStore
+    let chat = ChatStore()
 
     // MARK: - Internals
 
@@ -136,11 +136,11 @@ final class AppModel {
     func startRecording() async {
         bannerMessage = nil
         guard settings.isConfigured, let url = settings.websocketURL else {
-            phase = .error("Set the server address and token in Settings first.")
+            phase = .error("Zuerst Serveradresse und Token in den Einstellungen setzen.")
             return
         }
         guard await AudioCaptureEngine.requestPermission() else {
-            phase = .error("Microphone access denied. Enable it in iOS Settings.")
+            phase = .error("Mikrofonzugriff verweigert. In den iOS-Einstellungen erlauben.")
             return
         }
         do {
@@ -152,7 +152,6 @@ final class AppModel {
         wantsRecording = true
         segments = []
         partial = []
-        answers.reset()
         scheduleAutoStopIfNeeded()
         await client.connect(to: .init(url: url, token: settings.authToken))
     }
@@ -162,27 +161,9 @@ final class AppModel {
         recordingStartedAt = nil
         lastRoundTripMs = nil
         audio.stop()
-        answers.failAllInflight(error: "Recording stopped")
         Task { await client.disconnect(sendStop: true) }
         phase = .disconnected
         isTranscribing = false
-    }
-
-    func pressAnswerButton() {
-        guard phase == .recording || phase == .connected else {
-            bannerMessage = "Not connected — the answer button needs a live session."
-            return
-        }
-        let id = answers.begin()
-        Task {
-            let sent = await client.sendAnswerRequest(
-                requestId: id, contextSeconds: settings.contextSeconds
-            )
-            if !sent {
-                answers.complete(id: id, ok: false, text: "",
-                                 error: "Not connected to the server", latencyMs: 0)
-            }
-        }
     }
 
     // MARK: - Event handling
@@ -205,22 +186,14 @@ final class AppModel {
             }
             partial = update.partial
             pulseTranscribing()
-        case .answerPending(let requestId):
-            answers.markAcknowledged(id: requestId)
-        case .answerDelta(let requestId, let text):
-            answers.appendDelta(id: requestId, text: text)
-        case .answer(let payload):
-            answers.complete(
-                id: payload.requestId,
-                ok: payload.ok,
-                text: payload.text,
-                error: payload.error,
-                latencyMs: payload.latency.totalMs
-            )
+        case .answerPending, .answerDelta, .answer:
+            // In-app answers are gone; the widget's HTTP answers get mirrored
+            // over this socket, so the frames must still be consumed silently.
+            break
         case .serverError(let err):
             log.warning("server error \(err.code): \(err.message)")
             if err.code == "session_limit" {
-                bannerMessage = "Maximum session length reached — recording stopped."
+                bannerMessage = "Maximale Sitzungslänge erreicht — Aufnahme gestoppt."
                 stopRecording()
             }
         case .roundTrip(let ms):

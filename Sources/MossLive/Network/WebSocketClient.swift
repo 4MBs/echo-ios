@@ -248,7 +248,7 @@ actor WebSocketClient {
             let closeCode = task.closeCode
             log.warning("connection dropped: \(error.localizedDescription) close=\(closeCode.rawValue)")
             if closeCode.rawValue == 4401 {
-                emit(.state(.failed(reason: "Server rejected the auth token. Check Settings.")))
+                emit(.state(.failed(reason: "Server hat das Auth-Token abgelehnt. Einstellungen prüfen.")))
                 return
             }
             scheduleReconnect()

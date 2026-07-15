@@ -137,7 +137,7 @@ struct BackendAPI {
         comps.path = path
         comps.queryItems = query
         guard let url = comps.url, !host.isEmpty else {
-            throw APIError(message: "Server address is not configured.")
+            throw APIError(message: "Die Serveradresse ist nicht konfiguriert.")
         }
         return url
     }
@@ -146,7 +146,7 @@ struct BackendAPI {
         _ path: String,
         method: String = "GET",
         query: [URLQueryItem]? = nil,
-        jsonBody: [String: String]? = nil
+        jsonBody: [String: Any]? = nil
     ) async throws -> Data {
         var request = try URLRequest(url: url(path, query: query), timeoutInterval: 100)
         request.httpMethod = method
@@ -162,7 +162,7 @@ struct BackendAPI {
                 let error: String?
             }
             let detail = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error
-            throw APIError(message: detail ?? "Server error (HTTP \(status)).")
+            throw APIError(message: detail ?? "Serverfehler (HTTP \(status)).")
         }
         return data
     }
@@ -206,6 +206,37 @@ struct BackendAPI {
         return try JSONDecoder().decode(Response.self, from: data).summary
     }
 
+    struct ChatTurn: Sendable {
+        let role: String // "user" | "assistant"
+        let text: String
+    }
+
+    /// Ask the AI a free-form question, optionally grounded in the live
+    /// session's transcript or a stored lesson.
+    func chat(
+        question: String,
+        history: [ChatTurn],
+        sessionId: String? = nil,
+        useLive: Bool = false
+    ) async throws -> String {
+        var body: [String: Any] = [
+            "question": question,
+            "use_live": useLive,
+            "history": history.map { ["role": $0.role, "text": $0.text] },
+        ]
+        if let sessionId { body["session_id"] = sessionId }
+        struct Response: Decodable {
+            let ok: Bool
+            let text: String?
+        }
+        let data = try await request("/chat", method: "POST", jsonBody: body)
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        guard response.ok, let text = response.text else {
+            throw APIError(message: "Der Server hat keine Antwort geliefert.")
+        }
+        return text
+    }
+
     func deleteLesson(id: String) async throws {
         _ = try await request("/sessions/\(id)", method: "DELETE")
     }
@@ -227,7 +258,7 @@ struct BackendAPI {
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
-            throw APIError(message: "Audio not available (HTTP \(status)).")
+            throw APIError(message: "Audio nicht verfügbar (HTTP \(status)).")
         }
         let ext = http?.value(forHTTPHeaderField: "Content-Type") == "audio/wav" ? "wav" : "m4a"
         let dest = dir.appendingPathComponent("\(id).\(ext)")

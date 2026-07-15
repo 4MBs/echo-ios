@@ -19,7 +19,7 @@ final class AudioCaptureEngine {
         var errorDescription: String? {
             switch self {
             case .microphoneDenied:
-                "Microphone access is denied. Enable it in Settings > Privacy > Microphone."
+                "Mikrofonzugriff verweigert. In den iOS-Einstellungen unter Datenschutz > Mikrofon erlauben."
             }
         }
     }
@@ -236,7 +236,7 @@ final class AudioCaptureEngine {
     /// down (a phone call can hold the mic for minutes). Surfaces a banner
     /// only while retrying, so a locked device recovers unattended.
     private func scheduleResumeRetries() {
-        onInterruption?("Recording paused (call or Siri) — resuming automatically…")
+        onInterruption?("Aufnahme unterbrochen (Anruf oder Siri) — wird automatisch fortgesetzt…")
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, self.running, !self.engine.isRunning else { return }
             self.attemptResume(reason: "retry")

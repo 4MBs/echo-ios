@@ -46,7 +46,7 @@ final class LessonAudioPlayer {
             return true
         } catch {
             log.warning("audio load failed: \(error.localizedDescription)")
-            errorMessage = "Audio unavailable: \(error.localizedDescription)"
+            errorMessage = "Audio nicht verfügbar: \(error.localizedDescription)"
             return false
         }
     }
