@@ -9,9 +9,10 @@ import os
 /// (called on the audio conversion queue — the consumer must be fast and
 /// non-blocking; WebSocketClient.sendAudioFrame is).
 ///
-/// Session config: `.measurement` mode disables system voice processing for
-/// the lowest capture latency; `.playAndRecord` + background mode `audio`
-/// keeps capture alive when the app is backgrounded (within iOS limits).
+/// Session config: `.default` mode keeps iOS input processing (AGC!) enabled
+/// so distant classroom speech is captured at a usable level;
+/// `.playAndRecord` + background mode `audio` keeps capture alive when the
+/// app is backgrounded (within iOS limits).
 final class AudioCaptureEngine {
     enum CaptureError: LocalizedError {
         case microphoneDenied
@@ -56,11 +57,17 @@ final class AudioCaptureEngine {
         }
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .measurement,
+        // .default keeps iOS input processing ON — most importantly automatic
+        // gain control. .measurement disabled it and classroom recordings
+        // peaked ~30 dB too low (inaudible playback, degraded transcription).
+        try session.setCategory(.playAndRecord, mode: .default,
                                 options: [.allowBluetooth, .duckOthers])
         try? session.setPreferredSampleRate(48000)
         try? session.setPreferredIOBufferDuration(0.02)
         try session.setActive(true, options: [])
+        if session.isInputGainSettable {
+            try? session.setInputGain(1.0)
+        }
 
         encoder = try OpusStreamEncoder(bitrate: bitrate)
 
