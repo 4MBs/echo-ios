@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// "Meine Stunden": every past recording lives on the Fedora server; this
-/// screen lists them (filterable by subject), shows the full transcript and
-/// the per-lesson summary.
+/// "Stunden": archive of every recording (they live on the Fedora server).
+/// One screen for everything about a lesson — the detail combines the
+/// Zusammenfassung and the Transkript as two segments.
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
 
@@ -47,45 +47,24 @@ struct LessonsView: View {
         if loading {
             ProgressView("Lade Stunden…")
         } else if let errorMessage {
-            VStack(spacing: 12) {
-                Image(systemName: "wifi.exclamationmark")
-                    .font(.system(size: 34))
-                    .foregroundStyle(.secondary)
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Button("Erneut versuchen") { Task { await load() } }
-                    .buttonStyle(.bordered)
-            }
-            .padding(28)
+            ErrorState(message: errorMessage) { await load() }
         } else if lessons.isEmpty {
-            VStack(spacing: 10) {
-                Image(systemName: "books.vertical")
-                    .font(.system(size: 34))
-                    .foregroundStyle(.quaternary)
-                Text("Noch keine aufgenommenen Stunden.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            EmptyState(
+                icon: "books.vertical",
+                text: "Noch keine aufgenommenen Stunden.\nNimm eine Stunde auf, dann erscheint sie hier."
+            )
         } else {
-            List {
-                Section {
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    filterBar
                     ForEach(visibleLessons) { lesson in
                         NavigationLink {
                             LessonDetailView(api: api, info: lesson)
                         } label: {
                             LessonRow(info: lesson)
                         }
-                        .listRowBackground(
-                            Color.clear.overlay(
-                                Theme.card,
-                                in: RoundedRectangle(cornerRadius: 14)
-                            )
-                            .padding(.vertical, 4)
-                        )
-                        .listRowSeparator(.hidden)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        .buttonStyle(.plain)
+                        .contextMenu {
                             Button(role: .destructive) {
                                 Task { await delete(lesson) }
                             } label: {
@@ -93,14 +72,9 @@ struct LessonsView: View {
                             }
                         }
                     }
-                } header: {
-                    filterBar
-                        .textCase(nil)
-                        .listRowInsets(EdgeInsets())
                 }
+                .padding(16)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
             .refreshable { await load() }
             .alert(
                 "Stunde konnte nicht gelöscht werden",
@@ -113,7 +87,7 @@ struct LessonsView: View {
         }
     }
 
-    /// Mockup-style filter chips: subject and sort order.
+    /// Filter chips: subject and sort order.
     private var filterBar: some View {
         HStack(spacing: 10) {
             Menu {
@@ -132,7 +106,7 @@ struct LessonsView: View {
             }
             Spacer()
         }
-        .padding(.vertical, 8)
+        .padding(.bottom, 4)
     }
 
     private func chipLabel(_ text: String, highlighted: Bool) -> some View {
@@ -170,56 +144,18 @@ struct LessonsView: View {
     }
 }
 
-struct LessonRow: View {
-    let info: BackendAPI.LessonInfo
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: subjectSymbol(for: info.subject))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 38, height: 38)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.subheadline.weight(.semibold))
-                Text(secondaryLine)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if info.hasSummary {
-                Image(systemName: "text.badge.star")
-                    .font(.caption)
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
-    private var durationLabel: String {
-        let minutes = Int(info.durationSeconds) / 60
-        let seconds = Int(info.durationSeconds) % 60
-        return minutes > 0 ? "\(minutes) min" : "\(seconds) s"
-    }
-
-    /// When the lesson is titled from the timetable, the date/room become the
-    /// secondary line; otherwise fall back to duration + segment count.
-    private var secondaryLine: String {
-        if info.title != nil {
-            var parts = [info.startedAt.formatted(date: .abbreviated, time: .shortened), durationLabel]
-            if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
-            return parts.joined(separator: " · ")
-        }
-        return "\(durationLabel) · \(info.segmentCount) Abschnitte"
-    }
-}
-
-// MARK: - Detail
+// MARK: - Detail (Zusammenfassung + Transkript in one screen)
 
 struct LessonDetailView: View {
+    enum Tab: String, CaseIterable {
+        case zusammenfassung = "Zusammenfassung"
+        case transkript = "Transkript"
+    }
+
     let api: BackendAPI
     let info: BackendAPI.LessonInfo
 
+    @State private var tab: Tab = .zusammenfassung
     @State private var detail: BackendAPI.LessonDetail?
     @State private var summary: String?
     @State private var summarizing = false
@@ -231,12 +167,9 @@ struct LessonDetailView: View {
             if let detail {
                 loadedContent(detail)
             } else if let errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(24)
+                ErrorState(message: errorMessage, retry: nil)
             } else {
-                ProgressView("Lade Transkript…")
+                ProgressView("Lade Stunde…")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -246,7 +179,7 @@ struct LessonDetailView: View {
         .toolbar {
             if let detail {
                 ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: shareText(detail)) {
+                    ShareLink(item: lessonShareText(summary: summary, segments: detail.segments)) {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
@@ -265,96 +198,102 @@ struct LessonDetailView: View {
     }
 
     private func loadedContent(_ detail: BackendAPI.LessonDetail) -> some View {
-        let multiSpeaker = Set(detail.segments.map(\.speaker)).count > 1
-        let activeIndex = audioPlayer.activeSegmentIndex(in: detail.segments)
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                summarySection
-                if info.hasAudio {
-                    LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
-                }
-                Text(info.hasAudio ? "Transkript · Zeile antippen zum Anhören" : "Transkript")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(detail.segments.enumerated()), id: \.element.id) { index, segment in
-                        SegmentRow(
-                            segment: segment,
-                            isPartial: false,
-                            speakerStyle: !multiSpeaker
-                                ? .hidden
-                                : (index == 0 || detail.segments[index - 1].speaker != segment.speaker)
-                                ? .shown
-                                : .placeholder
-                        )
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(
-                            index == activeIndex ? Theme.accent.opacity(0.16) : .clear,
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard info.hasAudio else { return }
-                            Task {
-                                if await audioPlayer.ensureLoaded(api: api, lessonId: info.id) {
-                                    audioPlayer.playFrom(segment.t0)
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(10)
-                .paperCard()
+        VStack(spacing: 14) {
+            header
+            Picker("Ansicht", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            .padding(16)
+            .pickerStyle(.segmented)
+            switch tab {
+            case .zusammenfassung:
+                summaryTab
+            case .transkript:
+                transcriptTab(detail)
+            }
         }
+        .padding(16)
     }
 
-    @ViewBuilder
-    private var summarySection: some View {
-        if let summary {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Zusammenfassung", systemImage: "text.badge.star")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-                Text(renderedMarkdown(summary))
-                    .font(.callout)
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Theme.accent.opacity(0.3), lineWidth: 1)
-            )
-        } else {
-            Button {
-                Task { await generateSummary() }
-            } label: {
-                HStack(spacing: 8) {
-                    if summarizing {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "text.badge.star")
-                    }
-                    Text(summarizing ? "Fasse die Stunde zusammen…" : "Zusammenfassung erstellen")
-                        .fontWeight(.semibold)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
+    private var header: some View {
+        HStack(spacing: 14) {
+            Image(systemName: subjectSymbol(for: info.subject))
+                .font(.system(size: 19))
                 .foregroundStyle(Theme.accent)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                .frame(width: 44, height: 44)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(info.title ?? "Aufnahme")
+                    .font(.headline)
+                Text(headerMeta)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .disabled(summarizing)
+            Spacer(minLength: 0)
         }
-        if let errorMessage, detail != nil {
-            Text(errorMessage)
-                .font(.caption)
-                .foregroundStyle(.red)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard(cornerRadius: 14)
+    }
+
+    private var headerMeta: String {
+        let start = info.startedAt
+        let end = start.addingTimeInterval(info.durationSeconds)
+        var parts = [
+            start.formatted(date: .long, time: .omitted),
+            "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))",
+        ]
+        if let teacher = info.teacher, !teacher.isEmpty { parts.append(teacher) }
+        if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Zusammenfassung
+
+    @ViewBuilder
+    private var summaryTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let summary {
+                    Text(renderedMarkdown(summary))
+                        .font(.callout)
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .paperCard()
+                } else {
+                    VStack(spacing: 14) {
+                        Image(systemName: "text.badge.star")
+                            .font(.system(size: 32))
+                            .foregroundStyle(Theme.accent.opacity(0.6))
+                        Text("Für diese Stunde gibt es noch keine Zusammenfassung.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            Task { await generateSummary() }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if summarizing { ProgressView().tint(.white) }
+                                Text(summarizing ? "Wird erstellt…" : "Zusammenfassung erstellen")
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 20)
+                            .frame(height: 44)
+                            .background(Theme.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(summarizing)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
         }
     }
 
@@ -369,7 +308,43 @@ struct LessonDetailView: View {
         summarizing = false
     }
 
-    private func shareText(_ detail: BackendAPI.LessonDetail) -> String {
-        lessonShareText(summary: summary, segments: detail.segments)
+    // MARK: Transkript
+
+    private func transcriptTab(_ detail: BackendAPI.LessonDetail) -> some View {
+        let activeIndex = audioPlayer.activeSegmentIndex(in: detail.segments)
+        return VStack(spacing: 12) {
+            if info.hasAudio {
+                LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if info.hasAudio {
+                        Text("Zeile antippen, um sie anzuhören")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    ForEach(Array(detail.segments.enumerated()), id: \.element.id) { index, segment in
+                        SegmentRow(segment: segment, isPartial: false)
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 8)
+                            .background(
+                                index == activeIndex ? Theme.accent.opacity(0.16) : .clear,
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard info.hasAudio else { return }
+                                Task {
+                                    if await audioPlayer.ensureLoaded(api: api, lessonId: info.id) {
+                                        audioPlayer.playFrom(segment.t0)
+                                    }
+                                }
+                            }
+                    }
+                }
+                .padding(14)
+            }
+            .paperCard()
+        }
     }
 }

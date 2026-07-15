@@ -51,12 +51,13 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.fourmbs.mosslive
         TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad
         INFOPLIST_KEY_UILaunchScreen_Generation: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: ""
     info:
       path: Sources/MossLive/Info.plist
       properties:
-        CFBundleDisplayName: MOSS Live
+        CFBundleDisplayName: Echo
         # The app talks ws:// (cleartext) to the user's own machine over a
         # Tailscale address; the link is already WireGuard-encrypted, and ATS
         # would otherwise block the in-app WebSocket (Safari is not affected,
@@ -64,7 +65,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSMicrophoneUsageDescription: >-
-          MOSS Live streams microphone audio to your own private computer for
+          Echo streams microphone audio to your own private computer for
           live transcription. Audio never goes to a third-party service.
         UIBackgroundModes: [audio]
         UILaunchScreen: {}
@@ -94,7 +95,7 @@ targets:
     info:
       path: Sources/MossLiveWidget/Info.plist
       properties:
-        CFBundleDisplayName: MOSS Live Answer
+        CFBundleDisplayName: Echo Answer
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         # widget talks ws-less plain http to the Tailscale-only server;

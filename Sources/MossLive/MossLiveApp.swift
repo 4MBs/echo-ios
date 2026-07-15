@@ -28,7 +28,6 @@ struct MainSplitView: View {
             case .aufnahme: LiveView()
             case .stunden: LessonsView()
             case .chat: ChatView()
-            case .zusammenfassungen: SummariesView()
             case .einstellungen: SettingsView()
             }
         }
@@ -41,14 +40,13 @@ struct MainSplitView: View {
 }
 
 enum SidebarItem: Hashable, CaseIterable {
-    case aufnahme, stunden, chat, zusammenfassungen, einstellungen
+    case aufnahme, stunden, chat, einstellungen
 
     var title: String {
         switch self {
         case .aufnahme: "Aufnahme"
         case .stunden: "Stunden"
         case .chat: "Chat mit KI"
-        case .zusammenfassungen: "Zusammenfassungen"
         case .einstellungen: "Einstellungen"
         }
     }
@@ -58,7 +56,6 @@ enum SidebarItem: Hashable, CaseIterable {
         case .aufnahme: "waveform"
         case .stunden: "books.vertical.fill"
         case .chat: "bubble.left.and.text.bubble.right"
-        case .zusammenfassungen: "text.book.closed"
         case .einstellungen: "gearshape.fill"
         }
     }
@@ -74,7 +71,7 @@ struct SidebarView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 22)
 
-            ForEach([SidebarItem.aufnahme, .stunden, .chat, .zusammenfassungen], id: \.self) { item in
+            ForEach([SidebarItem.aufnahme, .stunden, .chat], id: \.self) { item in
                 row(item)
             }
 
@@ -95,10 +92,10 @@ struct SidebarView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: "graduationcap.fill")
-                .font(.system(size: 30))
-                .foregroundStyle(.white)
-            Text("MOSS Live")
+            Image(systemName: "waveform.circle.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(.white, Theme.sidebarSelection)
+            Text("Echo")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(.white)
             if model.phase == .recording {

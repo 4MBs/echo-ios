@@ -1,16 +1,19 @@
 import SwiftUI
 
 /// Aufnahme: notebook-style live transcript with the record control underneath.
-/// The stealth AI answer lives only in the widget — this screen is just the
-/// recording and what is being said.
+/// The connection status lives inside the transcript card's header; problems
+/// (errors, interruptions) surface as banners above it.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
+                if case .error(let message) = model.phase {
+                    BannerView(text: message, color: .red)
+                }
                 if let banner = model.bannerMessage {
-                    BannerView(text: banner)
+                    BannerView(text: banner, color: .orange)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if model.timetable.enabled {
@@ -31,9 +34,6 @@ struct LiveView: View {
             .navigationTitle("Aufnahme")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    StatusPill()
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     if model.phase == .recording, let started = model.recordingStartedAt {
                         RecordingTimer(startedAt: started)
@@ -103,47 +103,6 @@ struct CurrentLessonBanner: View {
     }
 }
 
-struct StatusPill: View {
-    @Environment(AppModel.self) private var model
-
-    private var isBusy: Bool {
-        model.phase == .connecting || model.phase == .reconnecting
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(model.phase.color)
-                .frame(width: 8, height: 8)
-                .opacity(isBusy ? 0.35 : 1)
-                .animation(
-                    isBusy ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .default,
-                    value: isBusy
-                )
-            Text(statusText)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(model.phase == .disconnected ? .secondary : .primary)
-                .lineLimit(1)
-            if let rtt = model.lastRoundTripMs,
-               model.phase == .recording || model.phase == .connected {
-                Text("· \(Int(rtt)) ms")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .background(model.phase.color.opacity(0.12), in: Capsule())
-    }
-
-    private var statusText: String {
-        if case .error(let message) = model.phase {
-            return message
-        }
-        return model.phase.label
-    }
-}
-
 struct RecordingTimer: View {
     let startedAt: Date
 
@@ -151,25 +110,22 @@ struct RecordingTimer: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let seconds = max(0, Int(context.date.timeIntervalSince(startedAt)))
             HStack(spacing: 6) {
-                Image(systemName: "record.circle")
-                    .foregroundStyle(.red)
+                Circle().fill(.red).frame(width: 8, height: 8)
                 Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
                     .font(.subheadline.monospacedDigit().weight(.semibold))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color.red.opacity(0.12), in: Capsule())
         }
     }
 }
 
 struct BannerView: View {
     let text: String
+    var color: Color = .orange
 
     var body: some View {
         Label(text, systemImage: "exclamationmark.triangle.fill")
             .font(.footnote)
-            .foregroundStyle(.orange)
+            .foregroundStyle(color)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .paperCard()
@@ -222,6 +178,7 @@ struct RecordButton: View {
                     Circle()
                         .fill(isActive ? Color.red : Theme.accent)
                         .frame(width: 52, height: 52)
+                        .shadow(color: (isActive ? Color.red : Theme.accent).opacity(0.35), radius: 8, y: 3)
                     Image(systemName: isActive ? "stop.fill" : "mic.fill")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(.white)
