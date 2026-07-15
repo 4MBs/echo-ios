@@ -47,6 +47,11 @@ final class AppSettings {
         didSet { defaults.set(autoStopAtLessonEnd, forKey: "autoStopAtLessonEnd") }
     }
 
+    /// URL scheme opened by the three-finger tap (instant app switch).
+    var quickSwitchURL: String {
+        didSet { defaults.set(quickSwitchURL, forKey: "quickSwitchURL") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -61,6 +66,7 @@ final class AppSettings {
         bitrate = rate == 0 ? 24000 : rate
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
+        quickSwitchURL = defaults.string(forKey: "quickSwitchURL") ?? "goodnotes://"
         // propagate whatever is already configured to the widget container,
         // so widgets work immediately after this app version's first launch
         mirrorToWidget()

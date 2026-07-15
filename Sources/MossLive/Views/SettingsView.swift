@@ -29,6 +29,27 @@ struct SettingsView: View {
                     )
                 }
 
+                Section {
+                    Picker("App", selection: $settings.quickSwitchURL) {
+                        Text("GoodNotes").tag("goodnotes://")
+                        Text("Notizen").tag("mobilenotes://")
+                        Text("Safari").tag("https://www.google.com")
+                        Text("Bücher").tag("ibooks://")
+                    }
+                    TextField("Eigenes URL-Schema (z. B. goodnotes://)", text: $settings.quickSwitchURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote)
+                } header: {
+                    Text("Schneller App-Wechsel")
+                } footer: {
+                    Text(
+                        "Tippe irgendwo in der App mit drei Fingern gleichzeitig, um sofort in "
+                            + "diese App zu wechseln. Die Aufnahme läuft im Hintergrund weiter."
+                    )
+                }
+
                 TimetableSettingsSection()
 
                 Section {

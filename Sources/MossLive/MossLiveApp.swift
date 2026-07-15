@@ -31,6 +31,7 @@ struct MainSplitView: View {
             case .einstellungen: SettingsView()
             }
         }
+        .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
         .onAppear {
             if !model.settings.isConfigured {
                 selection = .einstellungen

@@ -237,6 +237,30 @@ struct BackendAPI {
         return text
     }
 
+    struct QuizQuestion: Decodable, Sendable, Identifiable, Equatable {
+        let question: String
+        let options: [String]
+        let answer: Int
+        let explanation: String
+
+        var id: String { question }
+    }
+
+    /// Generate a quiz over one lesson (one id) or a whole day (several ids).
+    /// The backend asks Gemini for exam-relevant questions only.
+    func quiz(sessionIds: [String]) async throws -> [QuizQuestion] {
+        struct Response: Decodable {
+            let ok: Bool
+            let questions: [QuizQuestion]?
+        }
+        let data = try await request("/quiz", method: "POST", jsonBody: ["session_ids": sessionIds])
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        guard response.ok, let questions = response.questions, !questions.isEmpty else {
+            throw APIError(message: "Quiz konnte nicht erstellt werden.")
+        }
+        return questions
+    }
+
     func deleteLesson(id: String) async throws {
         _ = try await request("/sessions/\(id)", method: "DELETE")
     }
