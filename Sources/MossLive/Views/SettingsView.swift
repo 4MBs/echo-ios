@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Einstellungen, iOS-Settings-style: every row leads with a small colored
-/// icon tile, sections sit as cards on the paper background.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
@@ -10,21 +8,15 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    settingsRow("server.rack", .blue) {
-                        TextField("Serveradresse", text: $settings.serverHost, prompt: Text("100.92.57.51 oder fedora"))
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                    settingsRow("number", .teal) {
-                        TextField("Port", value: $settings.serverPort, format: .number.grouping(.never))
-                            .keyboardType(.numberPad)
-                    }
-                    settingsRow("key.fill", .orange) {
-                        SecureField("Auth-Token", text: $settings.authToken)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
+                    TextField("100.92.57.51 oder fedora", text: $settings.serverHost)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Port", value: $settings.serverPort, format: .number.grouping(.never))
+                        .keyboardType(.numberPad)
+                    SecureField("Auth-Token", text: $settings.authToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 } header: {
                     Text("Fedora-Server (Tailscale)")
                 } footer: {
@@ -36,15 +28,12 @@ struct SettingsView: View {
                         """
                     )
                 }
-                .listRowBackground(Theme.card)
 
                 TimetableSettingsSection()
 
                 Section {
-                    settingsRow("sparkles", Theme.accent) {
-                        Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
-                            Text("Kontextfenster: \(Int(settings.contextSeconds)) s")
-                        }
+                    Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
+                        Text("Kontextfenster: \(Int(settings.contextSeconds)) s")
                     }
                 } header: {
                     Text("Widget-Antwort")
@@ -54,20 +43,16 @@ struct SettingsView: View {
                             + "Die Antwort erscheint nur im Widget."
                     )
                 }
-                .listRowBackground(Theme.card)
 
                 Section {
-                    settingsRow("waveform", .pink) {
-                        Picker("Audio-Bitrate", selection: $settings.bitrate) {
-                            Text("16 kbit/s (wenigste Daten)").tag(16000)
-                            Text("24 kbit/s (empfohlen)").tag(24000)
-                            Text("32 kbit/s").tag(32000)
-                        }
+                    Picker("Audio-Bitrate", selection: $settings.bitrate) {
+                        Text("16 kbit/s (wenigste Daten)").tag(16000)
+                        Text("24 kbit/s (empfohlen)").tag(24000)
+                        Text("32 kbit/s").tag(32000)
                     }
                 } footer: {
                     Text("24 kbit/s ≈ 11 MiB pro Stunde Streaming.")
                 }
-                .listRowBackground(Theme.card)
 
                 Section {
                     LabeledContent("Transkription", value: "Qwen3-ASR 1.7B")
@@ -86,10 +71,7 @@ struct SettingsView: View {
                         """
                     )
                 }
-                .listRowBackground(Theme.card)
             }
-            .scrollContentBackground(.hidden)
-            .paperScreen()
             .navigationTitle("Einstellungen")
             .task { await model.refreshTimetable() }
         }
@@ -102,21 +84,10 @@ struct SettingsView: View {
     }
 }
 
-/// One settings row: colored icon tile + content, like the iOS Settings app.
-func settingsRow(_ symbol: String, _ color: Color, @ViewBuilder content: () -> some View) -> some View {
-    HStack(spacing: 12) {
-        Image(systemName: symbol)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 29, height: 29)
-            .background(color, in: RoundedRectangle(cornerRadius: 7))
-        content()
-    }
-}
-
-/// WebUntis: shows a clear "logged in" state once the server has credentials
-/// (they live only on the Fedora server, so there is nothing to display) and
-/// hides the login fields behind "Anmeldung ändern".
+/// WebUntis login + Tier-4 toggles. Credentials are sent to the Fedora server
+/// (which stores and uses them) — they never live on the iPad, so once the
+/// server is connected this shows a clear "logged in" state instead of empty
+/// fields; re-login hides behind "Anmeldung ändern".
 struct TimetableSettingsSection: View {
     @Environment(AppModel.self) private var model
     @State private var school = ""
@@ -132,7 +103,9 @@ struct TimetableSettingsSection: View {
     var body: some View {
         Section {
             if isConnected {
-                settingsRow("checkmark.seal.fill", .green) {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Mit WebUntis verbunden")
                             .font(.body.weight(.semibold))
@@ -145,57 +118,37 @@ struct TimetableSettingsSection: View {
             if !isConnected || editingLogin {
                 loginFields
             } else {
-                Button {
-                    editingLogin = true
-                } label: {
-                    settingsRow("person.badge.key", .gray) {
-                        Text("Anmeldung ändern")
-                    }
-                }
-                .buttonStyle(.plain)
+                Button("Anmeldung ändern") { editingLogin = true }
             }
             if let message {
                 Text(message).font(.caption).foregroundStyle(ok ? .green : .red)
             }
 
-            Toggle(isOn: notificationsBinding) {
-                settingsRow("bell.badge.fill", .red) { Text("Erinnerung bei Stundenbeginn") }
-            }
-            Toggle(isOn: autoStopBinding) {
-                settingsRow("stop.circle.fill", .indigo) { Text("Aufnahme bei Stundenende stoppen") }
-            }
+            Toggle("Erinnerung bei Stundenbeginn", isOn: notificationsBinding)
+            Toggle("Aufnahme bei Stundenende stoppen", isOn: autoStopBinding)
         } header: {
             Text("Stundenplan (WebUntis)")
         } footer: {
             Text(footerText)
         }
-        .listRowBackground(Theme.card)
     }
 
     @ViewBuilder
     private var loginFields: some View {
-        settingsRow("building.2.fill", .green) {
-            TextField("Schule (z. B. avs-itzehoe)", text: $school)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        }
-        settingsRow("person.fill", .green) {
-            TextField("Benutzername", text: $username)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        }
-        settingsRow("lock.fill", .green) {
-            SecureField("Passwort", text: $password)
-        }
+        TextField("Schule (z. B. avs-itzehoe)", text: $school)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        TextField("Benutzername", text: $username)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        SecureField("Passwort", text: $password)
         Button {
             Task { await connect() }
         } label: {
             HStack(spacing: 8) {
                 if busy { ProgressView() }
                 Text(busy ? "Verbinde…" : "Mit WebUntis verbinden")
-                    .fontWeight(.medium)
             }
-            .frame(maxWidth: .infinity)
         }
         .disabled(busy || school.isEmpty || username.isEmpty || password.isEmpty)
     }
