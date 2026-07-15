@@ -15,19 +15,19 @@ enum Theme {
     /// Content-area "paper".
     static let paper = Color(
         light: Color(red: 0.972, green: 0.960, blue: 0.930),
-        dark: Color(red: 0.090, green: 0.095, blue: 0.125)
+        dark: Color(red: 0.118, green: 0.125, blue: 0.165)
     )
 
     /// Card surface on top of the paper.
     static let card = Color(
         light: .white,
-        dark: Color(red: 0.145, green: 0.155, blue: 0.20)
+        dark: Color(red: 0.170, green: 0.180, blue: 0.235)
     )
 
     /// Faint notebook grid lines.
     static let gridLine = Color(
         light: Color.black.opacity(0.045),
-        dark: Color.white.opacity(0.05)
+        dark: Color.white.opacity(0.055)
     )
 
     /// Tinted sticky-note surface (Schnellnotiz-style accent cards).
@@ -75,6 +75,14 @@ struct PaperBackground: View {
 }
 
 extension View {
+    /// Full-screen paper behind a screen's content. Expands first so the
+    /// paper always fills the window, even when the content is tiny (a
+    /// spinner, an empty state).
+    func paperScreen() -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(PaperBackground())
+    }
+
     /// Soft white card sitting on the paper.
     func paperCard(cornerRadius: CGFloat = 16) -> some View {
         background(Theme.card, in: RoundedRectangle(cornerRadius: cornerRadius))

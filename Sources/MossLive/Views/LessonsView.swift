@@ -24,8 +24,8 @@ struct LessonsView: View {
     var body: some View {
         NavigationStack {
             content
+                .paperScreen()
                 .navigationTitle("Meine Stunden")
-                .background(PaperBackground())
         }
         .task { await load() }
     }
@@ -172,8 +172,7 @@ struct LessonDetailView: View {
                 ProgressView("Lade Stunde…")
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(PaperBackground())
+        .paperScreen()
         .navigationTitle(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -34,7 +34,7 @@ struct ChatView: View {
                 }
                 inputBar
             }
-            .background(PaperBackground())
+            .paperScreen()
             .navigationTitle("Chat mit KI")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

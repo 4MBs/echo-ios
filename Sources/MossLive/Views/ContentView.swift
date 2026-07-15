@@ -29,8 +29,7 @@ struct LiveView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
             .animation(.snappy, value: model.bannerMessage)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(PaperBackground())
+            .paperScreen()
             .navigationTitle("Aufnahme")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
