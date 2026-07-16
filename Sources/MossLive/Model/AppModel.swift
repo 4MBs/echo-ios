@@ -95,9 +95,9 @@ final class AppModel {
         audio.onLevel = { [weak self] level in
             Task { @MainActor in
                 guard let self else { return }
-                micLevels.append(level)
-                if micLevels.count > 72 {
-                    micLevels.removeFirst(micLevels.count - 72)
+                self.micLevels.append(level)
+                if self.micLevels.count > 72 {
+                    self.micLevels.removeFirst(self.micLevels.count - 72)
                 }
             }
         }
