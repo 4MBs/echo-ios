@@ -11,6 +11,7 @@ struct LessonsView: View {
     @State private var errorMessage: String?
     @State private var subjectFilter: String?
     @State private var newestFirst = true
+    @State private var searchText = ""
 
     private var api: BackendAPI {
         BackendAPI(
@@ -25,6 +26,7 @@ struct LessonsView: View {
             content
                 .paperScreen()
                 .navigationTitle("Meine Stunden")
+                .searchable(text: $searchText, prompt: "Suchen")
         }
         .task { await load() }
     }
@@ -38,6 +40,14 @@ struct LessonsView: View {
         var filtered = lessons
         if let subjectFilter {
             filtered = filtered.filter { $0.subject == subjectFilter }
+        }
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        if !query.isEmpty {
+            filtered = filtered.filter {
+                ($0.title ?? "").localizedCaseInsensitiveContains(query)
+                    || ($0.subject ?? "").localizedCaseInsensitiveContains(query)
+                    || ($0.teacher ?? "").localizedCaseInsensitiveContains(query)
+            }
         }
         let grouped = Dictionary(grouping: filtered) { Calendar.current.startOfDay(for: $0.startedAt) }
         return grouped
@@ -57,23 +67,26 @@ struct LessonsView: View {
                 text: "Noch keine aufgenommenen Stunden.\nNimm eine Stunde auf, dann erscheint sie hier."
             )
         } else {
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    filterBar
-                    ForEach(days, id: \.day) { entry in
-                        NavigationLink {
-                            DayView(api: api, day: entry.day, lessons: entry.lessons) {
-                                await load()
+            HStack(spacing: 0) {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        filterBar
+                        ForEach(days, id: \.day) { entry in
+                            NavigationLink {
+                                DayView(api: api, day: entry.day, lessons: entry.lessons) {
+                                    await load()
+                                }
+                            } label: {
+                                DayRow(day: entry.day, lessons: entry.lessons)
                             }
-                        } label: {
-                            DayRow(day: entry.day, lessons: entry.lessons)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(16)
                 }
-                .padding(16)
+                .refreshable { await load() }
+                MarginDoodles()
             }
-            .refreshable { await load() }
         }
     }
 

@@ -68,9 +68,14 @@ struct ChatView: View {
         if chat.messages.isEmpty {
             VStack(spacing: 16) {
                 Spacer()
-                Text("Frag alles,\nwas du wissen willst!")
-                    .multilineTextAlignment(.center)
-                    .stickyNote(rotation: 2)
+                HStack(alignment: .top, spacing: 24) {
+                    Doodle(name: "doodle-arrow-se", size: 40, rotation: 12)
+                        .padding(.top, 30)
+                    Text("Frag alles,\nwas du wissen willst!")
+                        .multilineTextAlignment(.center)
+                        .stickyNote(rotation: 2)
+                    Doodle(name: "doodle-bulb", size: 62, rotation: 8)
+                }
                 Text("Antworten nutzen das Transkript der laufenden Aufnahme\noder einer ausgewählten Stunde.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

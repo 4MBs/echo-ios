@@ -119,10 +119,13 @@ struct LearnView: View {
             }
             .buttonStyle(.plain)
         } else if overview.cardTotal > 0 {
-            Text("Für heute alles gelernt!")
-                .stickyNote(rotation: -1)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+            HStack(spacing: 22) {
+                Text("Für heute alles gelernt!")
+                    .stickyNote(rotation: -1)
+                Doodle(name: "doodle-trophy", size: 56, rotation: 7)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
         }
     }
 

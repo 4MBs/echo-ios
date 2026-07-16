@@ -34,6 +34,10 @@ final class AudioCaptureEngine {
 
     /// Called for every encoded packet (already framed for the wire by the caller).
     var onPacket: (@Sendable (OpusStreamEncoder.Packet) -> Void)?
+    /// Real microphone level (0...1, roughly every 60 ms) for the live
+    /// waveform. Called on the audio queue.
+    var onLevel: (@Sendable (Float) -> Void)?
+    private var levelThrottle = 0
     /// Called when capture stops unexpectedly (interruption that can't resume, etc.)
     var onInterruption: (@Sendable (String) -> Void)?
     /// Called when audio capture recovers unattended after an interruption.
@@ -147,6 +151,7 @@ final class AudioCaptureEngine {
         }
 
         let samples = Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
+        publishLevel(samples)
         let nowMs = UInt64(Date().timeIntervalSince1970 * 1000)
         do {
             for packet in try encoder.feed(samples, captureTsMs: nowMs) {
@@ -155,6 +160,23 @@ final class AudioCaptureEngine {
         } catch {
             log.error("encode failed: \(String(describing: error))")
         }
+    }
+
+    /// RMS of the buffer mapped to 0...1 with a speech-friendly curve, every
+    /// third ~20 ms buffer (so the UI gets ~16 values/second).
+    private func publishLevel(_ samples: [Int16]) {
+        levelThrottle += 1
+        guard levelThrottle % 3 == 0, let onLevel, !samples.isEmpty else { return }
+        var sum: Double = 0
+        for sample in samples {
+            let value = Double(sample) / 32768
+            sum += value * value
+        }
+        let rms = (sum / Double(samples.count)).squareRoot()
+        // Map ~[-50 dB, -8 dB] onto 0...1 so normal speech uses the range.
+        let db = 20 * log10(max(rms, 1e-6))
+        let level = Float(min(max((db + 50) / 42, 0), 1))
+        onLevel(level)
     }
 
     // MARK: - Interruptions / route changes
@@ -227,7 +249,9 @@ final class AudioCaptureEngine {
         engine.stop()
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .measurement,
+            // .default, not .measurement: must match start(), or a resumed
+            // recording loses AGC and goes back to being far too quiet.
+            try session.setCategory(.playAndRecord, mode: .default,
                                     options: [.allowBluetooth, .duckOthers])
             try session.setActive(true, options: [])
             try installTapAndStart()

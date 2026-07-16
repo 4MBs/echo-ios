@@ -46,6 +46,9 @@ final class AppModel {
     /// Seconds of audio held in the offline backlog (0 while connected/caught
     /// up) — shown so an outage in class reads as "buffered", not "lost".
     private(set) var bufferedSeconds: Double = 0
+    /// Rolling window of real microphone levels (0...1) for the live
+    /// waveform; newest last.
+    private(set) var micLevels: [Float] = []
     private(set) var sessionId: String?
     private(set) var recordingStartedAt: Date?
     var bannerMessage: String?
@@ -53,6 +56,7 @@ final class AppModel {
     let settings = AppSettings()
     let timetable: TimetableStore
     let chat = ChatStore()
+    let notes = NotesStore()
 
     // MARK: - Internals
 
@@ -86,6 +90,15 @@ final class AppModel {
         audio.onResumed = { [weak self] in
             Task { @MainActor in
                 self?.bannerMessage = nil
+            }
+        }
+        audio.onLevel = { [weak self] level in
+            Task { @MainActor in
+                guard let self else { return }
+                micLevels.append(level)
+                if micLevels.count > 72 {
+                    micLevels.removeFirst(micLevels.count - 72)
+                }
             }
         }
         eventPump = Task { [weak self] in
@@ -155,6 +168,7 @@ final class AppModel {
         wantsRecording = true
         segments = []
         partial = []
+        micLevels = []
         scheduleAutoStopIfNeeded()
         await client.connect(to: .init(url: url, token: settings.authToken))
     }

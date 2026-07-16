@@ -5,6 +5,7 @@ import SwiftUI
 /// (errors, interruptions) surface as banners above it.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
+    @State private var quickNote = false
 
     var body: some View {
         NavigationStack {
@@ -27,8 +28,15 @@ struct LiveView: View {
                 if model.phase == .recording {
                     RecordingWaveform()
                 }
-                RecordButton()
-                    .padding(.bottom, 6)
+                HStack {
+                    Doodle(name: "doodle-calculator", size: 54, rotation: -8)
+                    Spacer()
+                    RecordButton()
+                    Spacer()
+                    Doodle(name: "doodle-pencil-ruler", size: 58, rotation: 10)
+                }
+                .padding(.horizontal, 26)
+                .padding(.bottom, 6)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
@@ -42,8 +50,27 @@ struct LiveView: View {
                         RecordingTimer(startedAt: started)
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        quickNote = true
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .accessibilityLabel("Schnellnotiz")
+                }
+            }
+            .sheet(isPresented: $quickNote) {
+                NoteEditorSheet(title: "Schnellnotiz", initialText: "") { text in
+                    model.notes.add(text: text, lessonTitle: currentLessonTitle)
+                }
             }
         }
+    }
+
+    /// Tag a Schnellnotiz with the lesson running right now (if any).
+    private var currentLessonTitle: String? {
+        model.phase == .recording ? model.timetable.current?.title : nil
     }
 }
 
@@ -158,24 +185,33 @@ struct BannerView: View {
 
 // MARK: - Controls
 
-/// Decorative indigo waveform strip while recording (mockup style: dense,
-/// thin bars like an audio track).
+/// Live waveform strip while recording: every bar is a real microphone level
+/// (RMS, ~16/s), so silence is flat and speech visibly moves. Newest at the
+/// right.
 struct RecordingWaveform: View {
+    @Environment(AppModel.self) private var model
+
+    private static let barCount = 72
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.12)) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 2.5) {
-                ForEach(0 ..< 72, id: \.self) { bar in
-                    let phase = time * 6 + Double(bar) * 0.9
-                    let height = 4 + abs(sin(phase)) * 18 * (0.35 + 0.65 * abs(sin(Double(bar) * 1.7)))
-                    Capsule()
-                        .fill(Theme.accent.opacity(0.85))
-                        .frame(width: 2, height: height)
-                }
+        HStack(spacing: 2.5) {
+            ForEach(0 ..< Self.barCount, id: \.self) { index in
+                Capsule()
+                    .fill(Theme.accent.opacity(0.85))
+                    .frame(width: 2, height: 3 + CGFloat(level(at: index)) * 23)
             }
-            .frame(height: 26)
         }
-        .accessibilityHidden(true)
+        .frame(height: 26)
+        .animation(.linear(duration: 0.06), value: model.micLevels)
+        .accessibilityLabel("Mikrofonpegel")
+    }
+
+    /// Levels right-aligned: the newest sample is the rightmost bar.
+    private func level(at index: Int) -> Float {
+        let levels = model.micLevels
+        let offset = Self.barCount - levels.count
+        guard index >= offset else { return 0 }
+        return levels[index - offset]
     }
 }
 

@@ -202,8 +202,7 @@ struct ReviewView: View {
 
     private var resultScreen: some View {
         VStack(spacing: 18) {
-            Text(resultEmoji)
-                .font(.system(size: 52))
+            Doodle(name: resultDoodle, size: 84, rotation: 5)
                 .padding(.top, 30)
             Text("\(score) von \(cards.count) richtig")
                 .font(.title2.weight(.bold))
@@ -216,11 +215,11 @@ struct ReviewView: View {
         .padding(20)
     }
 
-    private var resultEmoji: String {
+    private var resultDoodle: String {
         let ratio = Double(score) / Double(max(cards.count, 1))
-        if ratio >= 0.9 { return "🏆" }
-        if ratio >= 0.6 { return "💪" }
-        return "📚"
+        if ratio >= 0.9 { return "doodle-trophy" }
+        if ratio >= 0.6 { return "doodle-rocket" }
+        return "doodle-bulb"
     }
 
     private var resultText: String {
