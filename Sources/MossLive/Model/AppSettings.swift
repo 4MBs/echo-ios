@@ -52,6 +52,16 @@ final class AppSettings {
         didSet { defaults.set(quickSwitchURL, forKey: "quickSwitchURL") }
     }
 
+    /// Daily "Zeit zum Lernen" reminder for due spaced-repetition cards.
+    var learnReminderEnabled: Bool {
+        didSet { defaults.set(learnReminderEnabled, forKey: "learnReminderEnabled") }
+    }
+
+    /// Reminder time as minutes since midnight (default 16:00).
+    var learnReminderMinutes: Int {
+        didSet { defaults.set(learnReminderMinutes, forKey: "learnReminderMinutes") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -66,6 +76,9 @@ final class AppSettings {
         bitrate = rate == 0 ? 24000 : rate
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
+        learnReminderEnabled = defaults.bool(forKey: "learnReminderEnabled")
+        let reminderMinutes = defaults.integer(forKey: "learnReminderMinutes")
+        learnReminderMinutes = reminderMinutes == 0 ? 16 * 60 : reminderMinutes
         // migrate the old default: bare goodnotes:// lands in GoodNotes'
         // file-import handler and shows an "unsupported file type" alert;
         // the legacy launcher scheme opens the app silently

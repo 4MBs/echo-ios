@@ -43,6 +43,9 @@ final class AppModel {
     private(set) var segments: [TranscriptSegment] = []
     private(set) var partial: [TranscriptSegment] = []
     private(set) var lastRoundTripMs: Double?
+    /// Seconds of audio held in the offline backlog (0 while connected/caught
+    /// up) — shown so an outage in class reads as "buffered", not "lost".
+    private(set) var bufferedSeconds: Double = 0
     private(set) var sessionId: String?
     private(set) var recordingStartedAt: Date?
     var bannerMessage: String?
@@ -160,6 +163,7 @@ final class AppModel {
         wantsRecording = false
         recordingStartedAt = nil
         lastRoundTripMs = nil
+        bufferedSeconds = 0
         audio.stop()
         Task { await client.disconnect(sendStop: true) }
         phase = .disconnected
@@ -198,6 +202,8 @@ final class AppModel {
             }
         case .roundTrip(let ms):
             lastRoundTripMs = ms
+        case .buffered(let seconds):
+            bufferedSeconds = seconds
         }
     }
 

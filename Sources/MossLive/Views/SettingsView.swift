@@ -55,6 +55,21 @@ struct SettingsView: View {
                 TimetableSettingsSection()
 
                 Section {
+                    Toggle("Tägliche Lern-Erinnerung", isOn: reminderEnabledBinding(settings))
+                    if settings.learnReminderEnabled {
+                        DatePicker(
+                            "Uhrzeit",
+                            selection: reminderTimeBinding(settings),
+                            displayedComponents: .hourAndMinute
+                        )
+                    }
+                } header: {
+                    Text("Lernen")
+                } footer: {
+                    Text("Erinnert dich einmal am Tag daran, deine fälligen Karten durchzugehen.")
+                }
+
+                Section {
                     Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
                         Text("Kontextfenster: \(Int(settings.contextSeconds)) s")
                     }
@@ -98,6 +113,39 @@ struct SettingsView: View {
             .navigationTitle("Einstellungen")
             .task { await model.refreshTimetable() }
         }
+    }
+
+    private func reminderEnabledBinding(_ settings: AppSettings) -> Binding<Bool> {
+        Binding(
+            get: { settings.learnReminderEnabled },
+            set: { value in
+                settings.learnReminderEnabled = value
+                Task { await LearnReminder.sync(enabled: value, minuteOfDay: settings.learnReminderMinutes) }
+            }
+        )
+    }
+
+    private func reminderTimeBinding(_ settings: AppSettings) -> Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(
+                    bySettingHour: settings.learnReminderMinutes / 60,
+                    minute: settings.learnReminderMinutes % 60,
+                    second: 0,
+                    of: Date()
+                ) ?? Date()
+            },
+            set: { date in
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
+                settings.learnReminderMinutes = (comps.hour ?? 16) * 60 + (comps.minute ?? 0)
+                Task {
+                    await LearnReminder.sync(
+                        enabled: settings.learnReminderEnabled,
+                        minuteOfDay: settings.learnReminderMinutes
+                    )
+                }
+            }
+        )
     }
 
     private var appVersion: String {

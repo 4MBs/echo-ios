@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// "Stunden": the archive grouped into one folder per school day. A folder
-/// opens the day's lessons; a lesson opens Zusammenfassung/Transkript/Quiz,
-/// and the whole day can be quizzed at once.
+/// opens the day's lessons; a lesson opens Zusammenfassung/Transkript.
+/// Abfragen lives in the Lernen tab.
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
 
@@ -164,7 +164,7 @@ struct DayRow: View {
     }
 }
 
-/// One school day: quiz the whole day, or open a single lesson.
+/// One school day: the day's lessons, one card each.
 struct DayView: View {
     let api: BackendAPI
     let day: Date
@@ -188,17 +188,6 @@ struct DayView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
-                NavigationLink {
-                    QuizView(
-                        api: api,
-                        sessionIds: lessons.map(\.id),
-                        title: "Quiz über den ganzen Tag"
-                    )
-                } label: {
-                    dayQuizCard
-                }
-                .buttonStyle(.plain)
-
                 ForEach(lessons) { lesson in
                     NavigationLink {
                         LessonDetailView(api: api, info: lesson)
@@ -228,30 +217,6 @@ struct DayView: View {
         } message: {
             Text(actionError ?? "")
         }
-    }
-
-    private var dayQuizCard: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "questionmark.circle.fill")
-                .font(.system(size: 19))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Tag abfragen")
-                    .font(.body.weight(.semibold))
-                Text("Quiz über alle \(lessons.count == 1 ? "Inhalte" : "\(lessons.count) Stunden") dieses Tages")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .paperCard(cornerRadius: 14)
     }
 
     private func delete(_ lesson: BackendAPI.LessonInfo) async {

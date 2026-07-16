@@ -27,6 +27,9 @@ actor WebSocketClient {
         case answer(AnswerPayload)
         case serverError(ServerErrorMessage)
         case roundTrip(ms: Double)
+        /// Seconds of recorded audio waiting in the offline backlog (0 once
+        /// the replay has caught up) — drives the "wird gepuffert" banner.
+        case buffered(seconds: Double)
     }
 
     struct Endpoint: Sendable {
@@ -124,6 +127,17 @@ actor WebSocketClient {
 
     private func currentGeneration() -> Int { backlogGeneration }
 
+    private var lastReportedBufferedSeconds = 0.0
+
+    /// Emits backlog progress, throttled to whole-second changes so the UI
+    /// isn't updated 50× per second.
+    private func reportBuffered(frames: Int) {
+        let seconds = Double(frames) * Double(AudioPipelineConstants.frameMs) / 1000
+        guard seconds.rounded(.down) != lastReportedBufferedSeconds.rounded(.down) else { return }
+        lastReportedBufferedSeconds = seconds
+        emit(.buffered(seconds: seconds))
+    }
+
     /// Send one frame if connected. Returns false when the socket is down (the
     /// caller keeps the frame buffered) or the send failed. Kept on the actor so
     /// the socket never crosses an isolation boundary.
@@ -180,6 +194,7 @@ actor WebSocketClient {
                         }
                     }
                 }
+                await self.reportBuffered(frames: backlog.count - head)
                 if head > 8192 { // amortized compaction so removeFirst stays O(1)
                     backlog.removeFirst(head)
                     head = 0

@@ -16,6 +16,10 @@ struct LiveView: View {
                     BannerView(text: banner, color: .orange)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                if model.phase == .reconnecting, model.bufferedSeconds >= 1 {
+                    BufferingBanner(seconds: model.bufferedSeconds)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 if model.timetable.enabled {
                     CurrentLessonBanner()
                 }
@@ -114,6 +118,27 @@ struct RecordingTimer: View {
                     .font(.subheadline.monospacedDigit().weight(.semibold))
             }
         }
+    }
+}
+
+/// Reassurance during an outage: recording continues, audio is buffered on
+/// the iPad and replayed once the connection is back — nothing is lost.
+struct BufferingBanner: View {
+    let seconds: Double
+
+    var body: some View {
+        Label(
+            String(
+                format: "Offline — Aufnahme läuft weiter und wird gepuffert (%d:%02d)",
+                Int(seconds) / 60, Int(seconds) % 60
+            ),
+            systemImage: "arrow.triangle.2.circlepath"
+        )
+        .font(.footnote)
+        .foregroundStyle(.orange)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard()
     }
 }
 

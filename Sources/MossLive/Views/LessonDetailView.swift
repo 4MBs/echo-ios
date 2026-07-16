@@ -4,7 +4,6 @@ struct LessonDetailView: View {
     enum Tab: String, CaseIterable {
         case zusammenfassung = "Zusammenfassung"
         case transkript = "Transkript"
-        case quiz = "Quiz"
     }
 
     let api: BackendAPI
@@ -63,8 +62,6 @@ struct LessonDetailView: View {
                 summaryTab
             case .transkript:
                 transcriptTab(detail)
-            case .quiz:
-                QuizView(api: api, sessionIds: [info.id], title: nil)
             }
         }
         .padding(16)

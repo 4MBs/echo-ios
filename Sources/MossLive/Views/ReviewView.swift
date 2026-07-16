@@ -1,43 +1,51 @@
 import SwiftUI
 
-/// Multiple-choice quiz over one lesson or a whole day. Questions come from
-/// the backend (Gemini, exam-relevant content only) and are generated fresh
-/// on every run, so repeating the quiz asks new questions.
-struct QuizView: View {
+/// Plays one review or practice session over a set of spaced-repetition
+/// cards. In review mode every answer is reported to the server, which
+/// reschedules the card (richtig → Leiter hoch, falsch → morgen wieder);
+/// practice mode never touches the schedule.
+struct ReviewView: View {
+    enum Mode {
+        case review
+        case practice
+    }
+
     let api: BackendAPI
-    let sessionIds: [String]
-    /// Navigation title; nil when embedded (lesson detail's Quiz segment).
-    let title: String?
+    let title: String
+    let mode: Mode
+    /// Fetches the session's cards (due cards, a whole deck, or a freshly
+    /// generated one) — runs once when the screen appears.
+    let loader: () async throws -> [BackendAPI.LearnCard]
 
     private enum Phase {
-        case idle
         case loading
         case running
         case finished
+        case failed(String)
     }
 
-    @State private var phase: Phase = .idle
-    @State private var questions: [BackendAPI.QuizQuestion] = []
+    @State private var phase: Phase = .loading
+    @State private var cards: [BackendAPI.LearnCard] = []
     @State private var index = 0
     @State private var selected: Int?
     @State private var score = 0
-    @State private var errorMessage: String?
 
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .modifier(QuizContainer(title: title))
+            .paperScreen()
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .task { await start() }
     }
 
     @ViewBuilder
     private var content: some View {
         switch phase {
-        case .idle:
-            startScreen
         case .loading:
             VStack(spacing: 14) {
                 ProgressView()
-                Text("Quiz wird aus dem Unterricht erstellt…")
+                Text("Karten werden geladen…")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -47,68 +55,38 @@ struct QuizView: View {
             questionScreen
         case .finished:
             resultScreen
+        case .failed(let message):
+            ErrorState(message: message) { await start() }
         }
-    }
-
-    // MARK: - Start
-
-    private var startScreen: some View {
-        VStack(spacing: 18) {
-            Text("Verstanden?\nTeste dein Wissen!")
-                .font(.headline)
-                .multilineTextAlignment(.center)
-                .stickyNote(rotation: 1.5)
-                .padding(.top, 30)
-            Text("Ein Durchgang deckt den kompletten Lernstoff ab —\nabgefragt wird nur, was wichtig ist.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button {
-                Task { await start() }
-            } label: {
-                Label("Quiz starten", systemImage: "play.fill")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 22)
-                    .frame(height: 46)
-                    .background(Theme.accent, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(20)
     }
 
     private func start() async {
         phase = .loading
-        errorMessage = nil
         do {
-            questions = try await api.quiz(sessionIds: sessionIds)
+            let loaded = try await loader()
+            guard !loaded.isEmpty else {
+                phase = .failed("Keine Karten gefunden.")
+                return
+            }
+            cards = loaded
             index = 0
             score = 0
             selected = nil
             phase = .running
         } catch {
-            errorMessage = error.localizedDescription
-            phase = .idle
+            phase = .failed(error.localizedDescription)
         }
     }
 
     // MARK: - Question
 
-    private var question: BackendAPI.QuizQuestion { questions[index] }
+    private var card: BackendAPI.LearnCard { cards[index] }
 
     private var questionScreen: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("Frage \(index + 1) von \(questions.count)")
+                    Text("Frage \(index + 1) von \(cards.count)")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -116,32 +94,42 @@ struct QuizView: View {
                         .font(.footnote.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
-                ProgressView(value: Double(index), total: Double(questions.count))
+                ProgressView(value: Double(index), total: Double(cards.count))
                     .tint(Theme.accent)
 
-                Text(question.question)
+                if let origin = card.lessonTitle ?? card.subject {
+                    Text(origin)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                Text(card.question)
                     .font(.title3.weight(.semibold))
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .paperCard()
 
-                ForEach(Array(question.options.enumerated()), id: \.offset) { option, text in
+                ForEach(Array(card.options.enumerated()), id: \.offset) { option, text in
                     optionButton(option, text)
                 }
 
                 if selected != nil {
-                    if !question.explanation.isEmpty {
-                        Label(question.explanation, systemImage: "lightbulb.fill")
+                    if !card.explanation.isEmpty {
+                        Label(card.explanation, systemImage: "lightbulb.fill")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .paperCard(cornerRadius: 12)
                     }
+                    if mode == .review, selected != card.answer {
+                        Label("Diese Karte kommt morgen wieder.", systemImage: "arrow.uturn.backward")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Button {
                         next()
                     } label: {
-                        Text(index + 1 < questions.count ? "Weiter" : "Ergebnis anzeigen")
+                        Text(index + 1 < cards.count ? "Weiter" : "Ergebnis anzeigen")
                             .fontWeight(.semibold)
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
@@ -160,7 +148,13 @@ struct QuizView: View {
         Button {
             guard selected == nil else { return }
             selected = option
-            if option == question.answer { score += 1 }
+            let correct = option == card.answer
+            if correct { score += 1 }
+            if mode == .review {
+                // fire-and-forget: a lost report only means the card stays due
+                let cardId = card.id
+                Task { try? await api.reviewCard(id: cardId, correct: correct) }
+            }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: optionIcon(option))
@@ -183,20 +177,20 @@ struct QuizView: View {
 
     private func optionIcon(_ option: Int) -> String {
         guard selected != nil else { return "circle" }
-        if option == question.answer { return "checkmark.circle.fill" }
+        if option == card.answer { return "checkmark.circle.fill" }
         if option == selected { return "xmark.circle.fill" }
         return "circle"
     }
 
     private func optionColor(_ option: Int) -> Color {
         guard selected != nil else { return .secondary }
-        if option == question.answer { return .green }
+        if option == card.answer { return .green }
         if option == selected { return .red }
         return .secondary
     }
 
     private func next() {
-        if index + 1 < questions.count {
+        if index + 1 < cards.count {
             index += 1
             selected = nil
         } else {
@@ -211,55 +205,35 @@ struct QuizView: View {
             Text(resultEmoji)
                 .font(.system(size: 52))
                 .padding(.top, 30)
-            Text("\(score) von \(questions.count) richtig")
+            Text("\(score) von \(cards.count) richtig")
                 .font(.title2.weight(.bold))
             Text(resultText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            Button {
-                Task { await start() }
-            } label: {
-                Label("Neues Quiz", systemImage: "arrow.clockwise")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 22)
-                    .frame(height: 46)
-                    .background(Theme.accent, in: Capsule())
-            }
-            .buttonStyle(.plain)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(20)
     }
 
     private var resultEmoji: String {
-        let ratio = Double(score) / Double(max(questions.count, 1))
+        let ratio = Double(score) / Double(max(cards.count, 1))
         if ratio >= 0.9 { return "🏆" }
         if ratio >= 0.6 { return "💪" }
         return "📚"
     }
 
     private var resultText: String {
-        let ratio = Double(score) / Double(max(questions.count, 1))
-        if ratio >= 0.9 { return "Stark — du hast den Stoff drauf." }
-        if ratio >= 0.6 { return "Gut! Ein paar Themen lohnen noch einen Blick." }
-        return "Schau dir die Zusammenfassung nochmal an und versuch es erneut."
-    }
-}
-
-/// Standalone (day quiz) gets a paper screen + navigation title; embedded
-/// (lesson detail segment) renders inline without its own chrome.
-private struct QuizContainer: ViewModifier {
-    let title: String?
-
-    func body(content: Content) -> some View {
-        if let title {
-            content
-                .paperScreen()
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-        } else {
-            content
+        let wrong = cards.count - score
+        switch mode {
+        case .review where wrong == 0:
+            return "Stark — alles gewusst!\nDie Karten kommen in größeren Abständen wieder."
+        case .review:
+            return wrong == 1
+                ? "1 Karte kommt morgen wieder dran."
+                : "\(wrong) Karten kommen morgen wieder dran."
+        case .practice:
+            return "Übung beeinflusst den Lernplan nicht —\nfällige Karten bleiben fällig."
         }
     }
 }
