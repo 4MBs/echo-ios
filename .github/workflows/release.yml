@@ -3,7 +3,7 @@
 # Always: unsigned IPA (SideStore/AltStore installable — the default path
 # while no Apple Developer Program membership exists).
 #
-# When signing secrets are configured (see docs/SIGNING.md): signed archive +
+# When signing secrets are configured: signed archive +
 # IPA export. When App Store Connect secrets are also configured AND the
 # workflow_dispatch input enables it (or a tag is pushed with it enabled):
 # TestFlight upload. Nothing here runs on pull requests.

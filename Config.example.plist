@@ -8,7 +8,7 @@
 <plist version="1.0">
 <dict>
     <key>ServerHost</key>
-    <string>100.92.57.51</string>
+    <string>100.101.102.103</string>
     <key>ServerPort</key>
     <integer>8787</integer>
     <key>AuthToken</key>

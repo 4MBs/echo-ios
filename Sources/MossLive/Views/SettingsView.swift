@@ -8,7 +8,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("100.92.57.51 oder fedora", text: $settings.serverHost)
+                    TextField("z. B. 100.101.102.103 oder fedora", text: $settings.serverHost)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

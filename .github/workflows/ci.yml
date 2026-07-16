@@ -166,5 +166,5 @@ jobs:
             echo "- Xcode: $(xcodebuild -version | tr '\n' ' ')"
             echo "- Build number: ${{ github.run_number }}"
             echo "- Unsigned IPA artifact: install with SideStore/AltStore"
-            echo "- Code signing: **not configured** in this workflow (see release.yml + docs/SIGNING.md)"
+            echo "- Code signing: **not configured** in this workflow"
           } >> "$GITHUB_STEP_SUMMARY"

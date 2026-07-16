@@ -1,7 +1,11 @@
-LICENSE PLACEHOLDER
+Copyright (c) 2026 4MBs
 
-Choose a license for this repository (e.g. MIT, Apache-2.0) before distributing.
+All rights reserved.
 
-Dependency licenses:
-- alta/swift-opus (SPM dependency): BSD-3-Clause
-- libopus (built from source by swift-opus): BSD-3-Clause
+This source code is published for reference. No permission is granted to use,
+copy, modify, or distribute it without the author's consent.
+
+Third-party components keep their own licenses:
+- libopus, swift-opus: BSD-3-Clause
+- Doodle Icons (Khushmeen Sidhu): CC0
+- Paper textures: public domain (Wikimedia Commons)
