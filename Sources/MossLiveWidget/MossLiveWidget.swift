@@ -148,9 +148,9 @@ enum WidgetBackend {
         } catch let error as URLError {
             // network failures must never masquerade as configuration problems
             let reason = switch error.code {
-            case .timedOut: "Server not answering — is run.sh running on the computer?"
+            case .timedOut: "Server not answering: is run.sh running on the computer?"
             case .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .notConnectedToInternet:
-                "Can't reach the server — is Tailscale connected on this device?"
+                "Can't reach the server: is Tailscale connected on this device?"
             default: "Network error: \(error.localizedDescription)"
             }
             throw WidgetBackendError(message: reason)
@@ -298,7 +298,7 @@ struct AnswerWidget: Widget {
             AnswerWidgetView(entry: entry)
         }
         .configurationDisplayName("AI Answer")
-        .description("Tap to answer the last seconds of the lecture — the answer appears right here.")
+        .description("Tap to answer the last seconds of the lecture. The answer appears right here.")
         .supportedFamilies([
             .systemSmall, .systemMedium, .systemLarge, .systemExtraLarge,
             .accessoryRectangular, .accessoryInline,

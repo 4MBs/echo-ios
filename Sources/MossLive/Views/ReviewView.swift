@@ -227,13 +227,13 @@ struct ReviewView: View {
         let wrong = cards.count - score
         switch mode {
         case .review where wrong == 0:
-            return "Stark — alles gewusst!\nDie Karten kommen in größeren Abständen wieder."
+            return "Stark, alles gewusst!\nDie Karten kommen in größeren Abständen wieder."
         case .review:
             return wrong == 1
                 ? "1 Karte kommt morgen wieder dran."
                 : "\(wrong) Karten kommen morgen wieder dran."
         case .practice:
-            return "Übung beeinflusst den Lernplan nicht —\nfällige Karten bleiben fällig."
+            return "Übung beeinflusst den Lernplan nicht.\nFällige Karten bleiben fällig."
         }
     }
 }

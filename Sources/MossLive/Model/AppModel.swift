@@ -129,7 +129,7 @@ final class AppModel {
         autoStopTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(max(1, end.timeIntervalSinceNow)))
             guard !Task.isCancelled, let self, self.wantsRecording else { return }
-            self.bannerMessage = "Stunde beendet — Aufnahme automatisch gestoppt."
+            self.bannerMessage = "Stunde beendet. Die Aufnahme wurde automatisch gestoppt."
             self.stopRecording()
         }
     }
@@ -197,7 +197,7 @@ final class AppModel {
         case .serverError(let err):
             log.warning("server error \(err.code): \(err.message)")
             if err.code == "session_limit" {
-                bannerMessage = "Maximale Sitzungslänge erreicht — Aufnahme gestoppt."
+                bannerMessage = "Maximale Sitzungslänge erreicht. Die Aufnahme wurde gestoppt."
                 stopRecording()
             }
         case .roundTrip(let ms):

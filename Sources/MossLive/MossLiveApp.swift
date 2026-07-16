@@ -89,7 +89,7 @@ struct SidebarView: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.sidebarNavy.ignoresSafeArea())
+        .background(Theme.sidebar.ignoresSafeArea())
         .navigationBarHidden(true)
         .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 280)
     }

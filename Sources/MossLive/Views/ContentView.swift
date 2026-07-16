@@ -90,7 +90,7 @@ struct CurrentLessonBanner: View {
     }
 
     private func subtitle(_ lesson: BackendAPI.Lesson) -> String {
-        var parts = ["\(lesson.start)–\(lesson.end)"]
+        var parts = ["\(lesson.start)-\(lesson.end)"]
         if !lesson.room.isEmpty { parts.append("Raum \(lesson.room)") }
         if !lesson.teacher.isEmpty { parts.append(lesson.teacher) }
         return parts.joined(separator: " · ")
@@ -129,7 +129,7 @@ struct BufferingBanner: View {
     var body: some View {
         Label(
             String(
-                format: "Offline — Aufnahme läuft weiter und wird gepuffert (%d:%02d)",
+                format: "Offline: Aufnahme läuft weiter und wird gepuffert (%d:%02d)",
                 Int(seconds) / 60, Int(seconds) % 60
             ),
             systemImage: "arrow.triangle.2.circlepath"

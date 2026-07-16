@@ -243,7 +243,7 @@ final class AudioCaptureEngine {
     /// down (a phone call can hold the mic for minutes). Surfaces a banner
     /// only while retrying, so a locked device recovers unattended.
     private func scheduleResumeRetries() {
-        onInterruption?("Aufnahme unterbrochen (Anruf oder Siri) — wird automatisch fortgesetzt…")
+        onInterruption?("Aufnahme unterbrochen (Anruf oder Siri), wird automatisch fortgesetzt…")
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, self.running, !self.engine.isRunning else { return }
             self.attemptResume(reason: "retry")

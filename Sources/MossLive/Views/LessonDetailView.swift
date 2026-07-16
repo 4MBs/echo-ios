@@ -93,7 +93,7 @@ struct LessonDetailView: View {
         let end = start.addingTimeInterval(info.durationSeconds)
         var parts = [
             start.formatted(date: .long, time: .omitted),
-            "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))",
+            "\(start.formatted(date: .omitted, time: .shortened)) - \(end.formatted(date: .omitted, time: .shortened))",
         ]
         if let teacher = info.teacher, !teacher.isEmpty { parts.append(teacher) }
         if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }

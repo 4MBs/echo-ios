@@ -104,7 +104,7 @@ struct TranscriptEmptyState: View {
                 .foregroundStyle(.quaternary)
             Text(
                 isRecording
-                    ? "Ich höre zu — Gesprochenes erscheint hier."
+                    ? "Ich höre zu. Gesprochenes erscheint hier."
                     : "Starte die Aufnahme, um das Live-Transkript zu sehen."
             )
             .font(.subheadline)
