@@ -56,7 +56,6 @@ final class AppModel {
     let settings = AppSettings()
     let timetable: TimetableStore
     let chat = ChatStore()
-    let notes = NotesStore()
 
     // MARK: - Internals
 

@@ -18,33 +18,45 @@ enum Theme {
     /// Selected sidebar row pill (the accent indigo).
     static let sidebarSelection = Color(red: 0.357, green: 0.357, blue: 0.839)
 
-    /// Content-area "paper": just-off-white with a lavender hint.
+    /// Content-area "paper": warm aged ivory, like an old notebook.
     static let paper = Color(
-        light: Color(red: 0.969, green: 0.969, blue: 0.984),
-        dark: Color(red: 0.110, green: 0.114, blue: 0.157)
+        light: Color(red: 0.949, green: 0.922, blue: 0.851),
+        dark: Color(red: 0.125, green: 0.118, blue: 0.098)
     )
 
-    /// Card surface on top of the paper (never pure white).
+    /// Card surface on top of the paper: a fresher sheet, still warm.
     static let card = Color(
-        light: Color(red: 0.998, green: 0.998, blue: 1.0),
-        dark: Color(red: 0.160, green: 0.165, blue: 0.220)
+        light: Color(red: 0.980, green: 0.963, blue: 0.914),
+        dark: Color(red: 0.180, green: 0.170, blue: 0.145)
     )
 
-    /// Faint notebook ruled lines, cooled to match the ink.
+    /// Faint notebook ruled lines, sepia like faded print.
     static let gridLine = Color(
-        light: Color(red: 0.20, green: 0.20, blue: 0.45).opacity(0.055),
-        dark: Color.white.opacity(0.05)
+        light: Color(red: 0.45, green: 0.34, blue: 0.16).opacity(0.10),
+        dark: Color.white.opacity(0.06)
+    )
+
+    /// The red margin line of a classic school notebook.
+    static let marginLine = Color(
+        light: Color(red: 0.75, green: 0.28, blue: 0.22).opacity(0.35),
+        dark: Color(red: 0.85, green: 0.40, blue: 0.34).opacity(0.35)
+    )
+
+    /// Dark sepia writing ink (buttons, borders on paper).
+    static let ink = Color(
+        light: Color(red: 0.20, green: 0.16, blue: 0.12),
+        dark: Color(red: 0.92, green: 0.89, blue: 0.83)
     )
 
     /// Tinted sticky-note surface (soft butter yellow).
     static let note = Color(
-        light: Color(red: 0.965, green: 0.910, blue: 0.720),
+        light: Color(red: 0.965, green: 0.906, blue: 0.700),
         dark: Color(red: 0.290, green: 0.252, blue: 0.145)
     )
 
-    /// Shadow base, tinted to the ink hue (apply opacity at the call site).
+    /// Shadow base, tinted warm like the paper (apply opacity at call site).
     static let shadow = Color(
-        light: Color(red: 0.13, green: 0.13, blue: 0.32),
+        light: Color(red: 0.30, green: 0.23, blue: 0.10),
         dark: .black
     )
 
@@ -64,13 +76,47 @@ extension Color {
     }
 }
 
-/// Paper with faint horizontal ruled lines, used as the background of every
-/// content screen (like a lined notebook page).
+/// Aged paper: warm ivory base, faint fiber speckles, ruled lines, and a
+/// soft darkened edge (vignette) so it reads as an old notebook page rather
+/// than a flat color. Used as the background of every content screen.
 struct PaperBackground: View {
     var body: some View {
         Theme.paper
+            .overlay(PaperGrain())
             .overlay(RuledLines(spacing: 30))
+            .overlay(
+                RadialGradient(
+                    colors: [.clear, Theme.shadow.opacity(0.10)],
+                    center: .center, startRadius: 260, endRadius: 1200
+                )
+            )
             .ignoresSafeArea()
+    }
+}
+
+/// Deterministic fiber speckles that make the paper look like real stock.
+struct PaperGrain: View {
+    var body: some View {
+        Canvas { context, size in
+            var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+            func random() -> Double {
+                seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                return Double((seed >> 33) & 0xFFFFFF) / Double(0xFFFFFF)
+            }
+            for _ in 0 ..< 420 {
+                let rect = CGRect(
+                    x: random() * size.width,
+                    y: random() * size.height,
+                    width: 0.8 + random() * 1.8,
+                    height: 0.8 + random() * 1.2
+                )
+                context.fill(
+                    Path(ellipseIn: rect),
+                    with: .color(Theme.shadow.opacity(0.03 + random() * 0.05))
+                )
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

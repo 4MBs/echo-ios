@@ -59,7 +59,17 @@ struct TranscriptCard: View {
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
                 }
-                .background(RuledLines())
+                .background {
+                    // Lined page with the classic red margin: timestamps
+                    // live left of the line, the spoken text right of it.
+                    ZStack(alignment: .leading) {
+                        RuledLines()
+                        Rectangle()
+                            .fill(Theme.marginLine)
+                            .frame(width: 1.5)
+                            .padding(.leading, 66)
+                    }
+                }
                 .onChange(of: model.segments.count) {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
                 }

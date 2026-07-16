@@ -5,9 +5,9 @@ import SwiftUI
 // plus handwritten hints. Always decorative: greyed out, never hit-testable.
 
 extension Theme {
-    /// Pencil-grey for margin doodles and handwritten hints.
+    /// Faded sepia ink for margin doodles and handwritten hints.
     static let doodle = Color(
-        light: Color(red: 0.36, green: 0.36, blue: 0.50).opacity(0.50),
+        light: Color(red: 0.38, green: 0.31, blue: 0.22).opacity(0.50),
         dark: Color.white.opacity(0.30)
     )
 }

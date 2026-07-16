@@ -74,11 +74,11 @@ struct SettingsView: View {
                         Text("Kontextfenster: \(Int(settings.contextSeconds)) s")
                     }
                 } header: {
-                    Text("Widget-Antwort")
+                    Text("KI-Antwort")
                 } footer: {
                     Text(
-                        "Wie viele Sekunden Transkript ein Tipp auf das Widget an die KI schickt. "
-                            + "Die Antwort erscheint nur im Widget."
+                        "Wie viele Sekunden Transkript ein Tipp auf das Widget oder auf die "
+                            + "Antwort-Notiz (Aufnahme-Bildschirm) an die KI schickt."
                     )
                 }
 

@@ -5,7 +5,6 @@ import SwiftUI
 /// (errors, interruptions) surface as banners above it.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
-    @State private var quickNote = false
 
     var body: some View {
         NavigationStack {
@@ -25,6 +24,11 @@ struct LiveView: View {
                     CurrentLessonBanner()
                 }
                 TranscriptCard()
+                    .overlay(alignment: .topTrailing) {
+                        AnswerSticky()
+                            .frame(maxWidth: 260)
+                            .offset(x: -10, y: 52)
+                    }
                 if model.phase == .recording {
                     RecordingWaveform()
                 }
@@ -50,27 +54,8 @@ struct LiveView: View {
                         RecordingTimer(startedAt: started)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        quickNote = true
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .foregroundStyle(Theme.accent)
-                    }
-                    .accessibilityLabel("Schnellnotiz")
-                }
-            }
-            .sheet(isPresented: $quickNote) {
-                NoteEditorSheet(title: "Schnellnotiz", initialText: "") { text in
-                    model.notes.add(text: text, lessonTitle: currentLessonTitle)
-                }
             }
         }
-    }
-
-    /// Tag a Schnellnotiz with the lesson running right now (if any).
-    private var currentLessonTitle: String? {
-        model.phase == .recording ? model.timetable.current?.title : nil
     }
 }
 
@@ -183,6 +168,97 @@ struct BannerView: View {
     }
 }
 
+/// The mockup's Schnellnotiz sticky, repurposed: tapping it does exactly what
+/// the widget does (answer the last seconds of the running recording) and
+/// writes the AI answer onto the paper note.
+struct AnswerSticky: View {
+    @Environment(AppModel.self) private var model
+
+    private enum NoteState: Equatable {
+        case idle
+        case loading
+        case answer(String)
+        case error(String)
+    }
+
+    @State private var state: NoteState = .idle
+
+    var body: some View {
+        if model.phase == .recording || state != .idle {
+            Button(action: ask) {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .stickyNote(rotation: 2)
+            }
+            .buttonStyle(.plain)
+            .disabled(state == .loading)
+            .accessibilityLabel("KI-Antwort zu den letzten Sekunden")
+            .onChange(of: model.phase) {
+                if model.phase != .recording { state = .idle }
+            }
+            .animation(.snappy, value: state)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch state {
+        case .idle:
+            VStack(alignment: .leading, spacing: 4) {
+                Text("KI-Antwort:")
+                Text("Tippen, und die letzten \(Int(model.settings.contextSeconds)) s werden beantwortet.")
+                    .font(Theme.handwriting(14))
+                    .foregroundStyle(.secondary)
+            }
+        case .loading:
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Denkt nach…")
+            }
+        case .answer(let text):
+            VStack(alignment: .leading, spacing: 6) {
+                Text("KI-Antwort:")
+                Text(renderedMarkdown(text))
+                    .font(Theme.handwriting(14))
+                    .lineLimit(14)
+                Text("Erneut tippen für eine neue Antwort")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        case .error(let message):
+            Text(message)
+                .font(Theme.handwriting(14))
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func ask() {
+        guard state != .loading else { return }
+        guard model.phase == .recording else {
+            state = .error("Starte zuerst eine Aufnahme.")
+            return
+        }
+        let api = BackendAPI(
+            host: model.settings.serverHost,
+            port: model.settings.serverPort,
+            token: model.settings.authToken
+        )
+        let seconds = Int(model.settings.contextSeconds)
+        state = .loading
+        Task {
+            do {
+                state = try await .answer(api.liveAnswer(contextSeconds: seconds))
+            } catch {
+                let message = error.localizedDescription
+                state = .error(
+                    message.contains("no active recording")
+                        ? "Starte zuerst eine Aufnahme." : message
+                )
+            }
+        }
+    }
+}
+
 // MARK: - Controls
 
 /// Live waveform strip while recording: every bar is a real microphone level
@@ -236,22 +312,27 @@ struct RecordButton: View {
         } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    // Ink-dark stop circle in light mode (mockup); inverts in
-                    // dark mode so it never disappears into the paper.
+                    // Old-paper styling: idle = ink-drawn button on a paper
+                    // disc; recording = a red wax-seal stamp.
                     Circle()
-                        .fill(isActive ? Color.primary : Theme.accent)
+                        .fill(isActive ? Color(red: 0.62, green: 0.16, blue: 0.13) : Theme.card)
                         .frame(width: 62, height: 62)
-                        .shadow(
-                            color: (isActive ? Theme.shadow : Theme.accent).opacity(0.35),
-                            radius: 9, y: 4
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    isActive ? Color(red: 0.45, green: 0.10, blue: 0.08) : Theme.ink,
+                                    lineWidth: 2
+                                )
+                                .padding(3)
                         )
+                        .shadow(color: Theme.shadow.opacity(0.30), radius: 7, y: 4)
                     Image(systemName: isActive ? "stop.fill" : "mic.fill")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(isActive ? Theme.paper : Color.white)
+                        .foregroundStyle(isActive ? Theme.paper : Theme.ink)
                 }
                 Text(isActive ? "Aufnahme beenden" : "Aufnahme starten")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(Theme.handwriting(19))
+                    .foregroundStyle(Theme.ink)
             }
         }
         .buttonStyle(.plain)

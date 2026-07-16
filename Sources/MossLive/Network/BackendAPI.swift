@@ -206,6 +206,23 @@ struct BackendAPI {
         return try JSONDecoder().decode(Response.self, from: data).summary
     }
 
+    /// Same call the stealth widget makes: answer the last seconds of the
+    /// currently running recording session.
+    func liveAnswer(contextSeconds: Int) async throws -> String {
+        struct Response: Decodable {
+            let ok: Bool
+            let text: String?
+        }
+        let data = try await request(
+            "/answer", method: "POST", jsonBody: ["context_seconds": contextSeconds]
+        )
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        guard response.ok, let text = response.text, !text.isEmpty else {
+            throw APIError(message: "Der Server hat keine Antwort geliefert.")
+        }
+        return text
+    }
+
     struct ChatTurn: Sendable {
         let role: String // "user" | "assistant"
         let text: String

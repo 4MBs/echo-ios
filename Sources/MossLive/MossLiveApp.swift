@@ -45,7 +45,6 @@ struct MainSplitView: View {
             case .stunden: LessonsView()
             case .lernen: LearnView()
             case .chat: ChatView()
-            case .notizen: NotesView()
             case .einstellungen: SettingsView()
             }
         }
@@ -59,7 +58,7 @@ struct MainSplitView: View {
 }
 
 enum SidebarItem: Hashable, CaseIterable {
-    case aufnahme, stunden, lernen, chat, notizen, einstellungen
+    case aufnahme, stunden, lernen, chat, einstellungen
 
     var title: String {
         switch self {
@@ -67,7 +66,6 @@ enum SidebarItem: Hashable, CaseIterable {
         case .stunden: "Stunden"
         case .lernen: "Lernen"
         case .chat: "Chat mit KI"
-        case .notizen: "Notizen"
         case .einstellungen: "Einstellungen"
         }
     }
@@ -78,7 +76,6 @@ enum SidebarItem: Hashable, CaseIterable {
         case .stunden: "books.vertical.fill"
         case .lernen: "brain.head.profile"
         case .chat: "bubble.left.and.text.bubble.right"
-        case .notizen: "note.text"
         case .einstellungen: "gearshape.fill"
         }
     }
@@ -94,7 +91,7 @@ struct SidebarView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 22)
 
-            ForEach([SidebarItem.aufnahme, .stunden, .lernen, .chat, .notizen], id: \.self) { item in
+            ForEach([SidebarItem.aufnahme, .stunden, .lernen, .chat], id: \.self) { item in
                 row(item)
             }
 
