@@ -40,13 +40,19 @@ struct MainSplitView: View {
         NavigationSplitView {
             SidebarView(selection: $selection)
         } detail: {
-            switch selection {
-            case .aufnahme: LiveView()
-            case .stunden: LessonsView()
-            case .lernen: LearnView()
-            case .chat: ChatView()
-            case .einstellungen: SettingsView()
+            // .id(selection) forces a full detail rebuild on sidebar change;
+            // without it, a screen pushed inside the detail stack (e.g. a day
+            // in Stunden) stayed visible after switching to another tab.
+            Group {
+                switch selection {
+                case .aufnahme: LiveView()
+                case .stunden: LessonsView()
+                case .lernen: LearnView()
+                case .chat: ChatView()
+                case .einstellungen: SettingsView()
+                }
             }
+            .id(selection)
         }
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
         .onAppear {
@@ -105,31 +111,46 @@ struct SidebarView: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.sidebar.ignoresSafeArea())
+        .background {
+            // Worn notebook cover: dark leather-brown paper scan over the
+            // ink base, so the sidebar belongs to the same paper world.
+            Theme.sidebar
+                .overlay(
+                    Image("paper-dark")
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(0.85)
+                )
+                .clipped()
+                .ignoresSafeArea()
+        }
         .navigationBarHidden(true)
         .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 280)
     }
+
+    private static let coverText = Color(red: 0.93, green: 0.89, blue: 0.80)
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 34))
-                .foregroundStyle(.white, Theme.sidebarSelection)
+                .foregroundStyle(Self.coverText, Theme.accent)
             Text("Echo")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
+                .font(Theme.handwriting(26))
+                .foregroundStyle(Self.coverText)
             if model.phase == .recording {
                 HStack(spacing: 6) {
                     Circle().fill(.red).frame(width: 7, height: 7)
                     Text("Nimmt auf")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(Self.coverText.opacity(0.7))
                 }
             }
         }
         .padding(.horizontal, 8)
     }
 
+    /// Selected row = a cream paper label stuck onto the dark cover.
     private func row(_ item: SidebarItem) -> some View {
         Button {
             selection = item
@@ -142,13 +163,24 @@ struct SidebarView: View {
                     .font(.subheadline.weight(selection == item ? .semibold : .regular))
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(selection == item ? .white : .white.opacity(0.65))
+            .foregroundStyle(selection == item ? Theme.ink : Self.coverText.opacity(0.72))
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                selection == item ? Theme.sidebarSelection : .clear,
-                in: RoundedRectangle(cornerRadius: 10)
-            )
+            .background {
+                if selection == item {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.card)
+                        .overlay(
+                            Image("paper-card")
+                                .resizable()
+                                .scaledToFill()
+                                .opacity(0.5)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
+                        .rotationEffect(.degrees(-0.6))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

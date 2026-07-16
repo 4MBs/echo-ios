@@ -13,10 +13,8 @@ enum Theme {
         dark: Color(red: 0.510, green: 0.510, blue: 0.920)
     )
 
-    /// Sidebar background: near-black ink blue (same in both appearances).
-    static let sidebar = Color(red: 0.051, green: 0.075, blue: 0.129)
-    /// Selected sidebar row pill (the accent indigo).
-    static let sidebarSelection = Color(red: 0.357, green: 0.357, blue: 0.839)
+    /// Sidebar base under the dark leather-paper scan (notebook cover).
+    static let sidebar = Color(red: 0.145, green: 0.118, blue: 0.082)
 
     /// Content-area "paper": warm aged ivory, like an old notebook.
     static let paper = Color(
@@ -76,47 +74,19 @@ extension Color {
     }
 }
 
-/// Aged paper: warm ivory base, faint fiber speckles, ruled lines, and a
-/// soft darkened edge (vignette) so it reads as an old notebook page rather
-/// than a flat color. Used as the background of every content screen.
+/// Real aged paper (public-domain scan, Wikimedia Commons) with ruled lines
+/// on top. Used as the background of every content screen.
 struct PaperBackground: View {
     var body: some View {
         Theme.paper
-            .overlay(PaperGrain())
-            .overlay(RuledLines(spacing: 30))
             .overlay(
-                RadialGradient(
-                    colors: [.clear, Theme.shadow.opacity(0.10)],
-                    center: .center, startRadius: 260, endRadius: 1200
-                )
+                Image("paper-bg")
+                    .resizable()
+                    .scaledToFill()
             )
+            .overlay(RuledLines(spacing: 30))
+            .clipped()
             .ignoresSafeArea()
-    }
-}
-
-/// Deterministic fiber speckles that make the paper look like real stock.
-struct PaperGrain: View {
-    var body: some View {
-        Canvas { context, size in
-            var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
-            func random() -> Double {
-                seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-                return Double((seed >> 33) & 0xFFFFFF) / Double(0xFFFFFF)
-            }
-            for _ in 0 ..< 420 {
-                let rect = CGRect(
-                    x: random() * size.width,
-                    y: random() * size.height,
-                    width: 0.8 + random() * 1.8,
-                    height: 0.8 + random() * 1.2
-                )
-                context.fill(
-                    Path(ellipseIn: rect),
-                    with: .color(Theme.shadow.opacity(0.03 + random() * 0.05))
-                )
-            }
-        }
-        .allowsHitTesting(false)
     }
 }
 
@@ -149,24 +119,47 @@ extension View {
             .background(PaperBackground())
     }
 
-    /// Soft white card sitting on the paper.
+    /// A sheet of real paper sitting on the page: card color with the
+    /// scanned paper texture clipped into the shape.
     func paperCard(cornerRadius: CGFloat = 16) -> some View {
-        background(Theme.card, in: RoundedRectangle(cornerRadius: cornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-            )
-            .shadow(color: Theme.shadow.opacity(0.08), radius: 6, y: 2)
+        background {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Theme.card)
+                .overlay(
+                    Image("paper-card")
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(0.55)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .strokeBorder(Theme.shadow.opacity(0.14), lineWidth: 1)
+        )
+        .shadow(color: Theme.shadow.opacity(0.10), radius: 6, y: 2)
     }
 
     /// Slightly rotated sticky note with a piece of tape at the top and
-    /// handwritten text, like in the mockup.
+    /// handwritten text, like in the mockup. The paper scan is multiplied in
+    /// so the note ages with the rest of the page.
     func stickyNote(rotation: Double = -1.2) -> some View {
         font(Theme.handwriting(17))
             .padding(.horizontal, 16)
             .padding(.top, 20)
             .padding(.bottom, 14)
-            .background(Theme.note, in: RoundedRectangle(cornerRadius: 6))
+            .background {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Theme.note)
+                    .overlay(
+                        Image("paper-card")
+                            .resizable()
+                            .scaledToFill()
+                            .opacity(0.35)
+                            .blendMode(.multiply)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
             .overlay(alignment: .top) {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(Theme.accent.opacity(0.22))

@@ -11,6 +11,8 @@ struct TranscriptCard: View {
             header
             Divider()
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(LinedPage())
         }
         .paperCard(cornerRadius: 18)
         .frame(maxHeight: .infinity)
@@ -59,17 +61,6 @@ struct TranscriptCard: View {
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
                 }
-                .background {
-                    // Lined page with the classic red margin: timestamps
-                    // live left of the line, the spoken text right of it.
-                    ZStack(alignment: .leading) {
-                        RuledLines()
-                        Rectangle()
-                            .fill(Theme.marginLine)
-                            .frame(width: 1.5)
-                            .padding(.leading, 66)
-                    }
-                }
                 .onChange(of: model.segments.count) {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
@@ -78,6 +69,22 @@ struct TranscriptCard: View {
                 }
             }
         }
+    }
+}
+
+/// Lined page with the classic red margin, always visible inside the
+/// transcript card (also before the first word): timestamps live left of the
+/// line, the spoken text right of it.
+struct LinedPage: View {
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RuledLines()
+            Rectangle()
+                .fill(Theme.marginLine)
+                .frame(width: 1.5)
+                .padding(.leading, 66)
+        }
+        .allowsHitTesting(false)
     }
 }
 
