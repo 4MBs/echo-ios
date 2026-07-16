@@ -69,7 +69,6 @@ struct ChatView: View {
             VStack(spacing: 16) {
                 Spacer()
                 Text("Frag alles,\nwas du wissen willst!")
-                    .font(.headline)
                     .multilineTextAlignment(.center)
                     .stickyNote(rotation: 2)
                 Text("Antworten nutzen das Transkript der laufenden Aufnahme\noder einer ausgewählten Stunde.")
@@ -193,8 +192,17 @@ private struct MessageBubble: View {
     let message: ChatStore.Message
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            if message.role == .user { Spacer(minLength: 60) }
+        HStack(alignment: .top, spacing: 10) {
+            if message.role == .user {
+                Spacer(minLength: 60)
+            } else {
+                Image(systemName: "face.smiling")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.card, in: Circle())
+                    .overlay(Circle().strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1.5))
+            }
             VStack(alignment: .leading, spacing: 6) {
                 Text(renderedMarkdown(message.text))
                     .font(.callout)

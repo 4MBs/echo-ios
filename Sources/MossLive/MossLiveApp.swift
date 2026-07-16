@@ -4,6 +4,18 @@ import SwiftUI
 struct MossLiveApp: App {
     @State private var model = AppModel()
 
+    init() {
+        // Handwritten screen titles (mockup style). Noteworthy ships with
+        // iOS, so no font files are bundled.
+        let bar = UINavigationBar.appearance()
+        if let title = UIFont(name: "Noteworthy-Bold", size: 19) {
+            bar.titleTextAttributes = [.font: title]
+        }
+        if let large = UIFont(name: "Noteworthy-Bold", size: 32) {
+            bar.largeTitleTextAttributes = [.font: large]
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             MainSplitView()
@@ -13,7 +25,7 @@ struct MossLiveApp: App {
     }
 }
 
-/// iPad shell: navy sidebar (Aufnahme · Stunden · Chat · Zusammenfassungen ·
+/// iPad shell: ink-dark sidebar (Aufnahme, Stunden, Lernen, Chat,
 /// Einstellungen) with the notebook-style content on the right. Jumps to
 /// Einstellungen on first launch until the server connection is configured.
 struct MainSplitView: View {

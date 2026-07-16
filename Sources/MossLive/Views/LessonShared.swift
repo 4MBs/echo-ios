@@ -177,16 +177,17 @@ struct LessonRow: View {
             }
             Spacer(minLength: 8)
             HStack(spacing: 8) {
-                if info.hasAudio {
-                    Image(systemName: "waveform")
-                        .font(.footnote)
-                        .foregroundStyle(.tertiary)
-                }
                 if info.hasSummary {
                     Image(systemName: "text.badge.star")
                         .font(.footnote)
                         .foregroundStyle(Theme.accent)
                 }
+                Text(durationChip)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Theme.accent.opacity(0.12), in: Capsule())
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -197,16 +198,18 @@ struct LessonRow: View {
         .paperCard(cornerRadius: 14)
     }
 
-    private var durationLabel: String {
+    private var durationChip: String {
         let minutes = Int(info.durationSeconds) / 60
-        let seconds = Int(info.durationSeconds) % 60
-        return minutes > 0 ? "\(minutes) min" : "\(seconds) s"
+        return minutes > 0 ? "\(minutes) Min" : "\(Int(info.durationSeconds)) s"
     }
 
-    /// When the lesson is titled from the timetable, the date/room become the
-    /// secondary line; otherwise fall back to duration.
+    /// Start-end time range (mockup style), plus the room when known.
     private var secondaryLine: String {
-        var parts = [info.startedAt.formatted(date: .abbreviated, time: .shortened), durationLabel]
+        let start = info.startedAt
+        let end = start.addingTimeInterval(info.durationSeconds)
+        let range = "\(start.formatted(date: .omitted, time: .shortened)) - "
+            + end.formatted(date: .omitted, time: .shortened)
+        var parts = [range]
         if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
         return parts.joined(separator: " · ")
     }

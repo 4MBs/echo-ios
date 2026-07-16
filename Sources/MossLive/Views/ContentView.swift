@@ -158,18 +158,19 @@ struct BannerView: View {
 
 // MARK: - Controls
 
-/// Decorative ink-purple waveform strip while recording (mockup style).
+/// Decorative indigo waveform strip while recording (mockup style: dense,
+/// thin bars like an audio track).
 struct RecordingWaveform: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.12)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 3) {
-                ForEach(0 ..< 48, id: \.self) { bar in
+            HStack(spacing: 2.5) {
+                ForEach(0 ..< 72, id: \.self) { bar in
                     let phase = time * 6 + Double(bar) * 0.9
-                    let height = 6 + abs(sin(phase)) * 16 * (0.4 + 0.6 * abs(sin(Double(bar) * 1.7)))
+                    let height = 4 + abs(sin(phase)) * 18 * (0.35 + 0.65 * abs(sin(Double(bar) * 1.7)))
                     Capsule()
-                        .fill(Theme.accent.opacity(0.75))
-                        .frame(width: 3, height: height)
+                        .fill(Theme.accent.opacity(0.85))
+                        .frame(width: 2, height: height)
                 }
             }
             .frame(height: 26)
@@ -197,15 +198,20 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 ZStack {
+                    // Ink-dark stop circle in light mode (mockup); inverts in
+                    // dark mode so it never disappears into the paper.
                     Circle()
-                        .fill(isActive ? Color.red : Theme.accent)
-                        .frame(width: 52, height: 52)
-                        .shadow(color: (isActive ? Color.red : Theme.accent).opacity(0.35), radius: 8, y: 3)
+                        .fill(isActive ? Color.primary : Theme.accent)
+                        .frame(width: 62, height: 62)
+                        .shadow(
+                            color: (isActive ? Theme.shadow : Theme.accent).opacity(0.35),
+                            radius: 9, y: 4
+                        )
                     Image(systemName: isActive ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(isActive ? Theme.paper : Color.white)
                 }
                 Text(isActive ? "Aufnahme beenden" : "Aufnahme starten")
                     .font(.body.weight(.semibold))

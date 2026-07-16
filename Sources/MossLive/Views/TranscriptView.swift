@@ -18,13 +18,15 @@ struct TranscriptCard: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            StatusDot()
-            Text(statusLabel)
-                .font(.subheadline.weight(.semibold))
-            if model.isTranscribing {
-                Text("· wird transkribiert…")
+            if model.phase == .recording {
+                LivePill()
+                Text(model.isTranscribing ? "wird transkribiert…" : "Aufnahme läuft")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+            } else {
+                StatusDot()
+                Text(model.phase.label)
+                    .font(.subheadline.weight(.semibold))
             }
             Spacer()
             if let rtt = model.lastRoundTripMs,
@@ -36,10 +38,6 @@ struct TranscriptCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
-    }
-
-    private var statusLabel: String {
-        model.phase == .recording ? "Live" : model.phase.label
     }
 
     @ViewBuilder
@@ -61,6 +59,7 @@ struct TranscriptCard: View {
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
                 }
+                .background(RuledLines())
                 .onChange(of: model.segments.count) {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
@@ -69,6 +68,21 @@ struct TranscriptCard: View {
                 }
             }
         }
+    }
+}
+
+/// Red "LIVE" capsule shown in the transcript header while recording.
+struct LivePill: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(.white).frame(width: 6, height: 6)
+            Text("LIVE")
+                .font(.caption.weight(.bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.red, in: Capsule())
     }
 }
 

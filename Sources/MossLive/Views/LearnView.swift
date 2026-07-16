@@ -119,8 +119,7 @@ struct LearnView: View {
             }
             .buttonStyle(.plain)
         } else if overview.cardTotal > 0 {
-            Text("Für heute alles gelernt! 🎉")
-                .font(.headline)
+            Text("Für heute alles gelernt!")
                 .stickyNote(rotation: -1)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
