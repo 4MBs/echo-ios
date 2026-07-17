@@ -74,8 +74,9 @@ extension Color {
     }
 }
 
-/// Real aged paper (public-domain scan, Wikimedia Commons) with ruled lines
-/// on top. Used as the background of every content screen.
+/// Real aged paper (studio scan, Texturelabs) with ruled lines on top. Used
+/// as the background of every content screen. The scan sits at reduced
+/// opacity over the paper tone so its stains stay a hint, not a wall.
 struct PaperBackground: View {
     var body: some View {
         Theme.paper
@@ -83,6 +84,7 @@ struct PaperBackground: View {
                 Image("paper-bg")
                     .resizable()
                     .scaledToFill()
+                    .opacity(0.45)
             )
             .overlay(RuledLines(spacing: 30))
             .clipped()
@@ -129,7 +131,7 @@ extension View {
                     Image("paper-card")
                         .resizable()
                         .scaledToFill()
-                        .opacity(0.55)
+                        .opacity(0.40)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         }
