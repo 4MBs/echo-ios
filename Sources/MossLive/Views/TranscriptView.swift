@@ -1,52 +1,19 @@
 import SwiftUI
 
-/// Live transcript card. The connection status lives in the card header
-/// (small dot + label), and there is no speaker column — the ASR model does
-/// not diarize.
-struct TranscriptCard: View {
+/// Live transcript, full-bleed like a Notes page. Status and controls live
+/// in the bottom bar; there is no speaker column — the ASR model does not
+/// diarize.
+struct TranscriptPane: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .cardSurface()
-        .frame(maxHeight: .infinity)
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            if model.phase == .recording {
-                LivePill()
-                Text(model.isTranscribing ? "wird transkribiert…" : "Aufnahme läuft")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                StatusLabel(phase: model.phase)
-            }
-            Spacer()
-            if let rtt = model.lastRoundTripMs,
-               model.phase == .recording || model.phase == .connected {
-                Text("\(Int(rtt)) ms")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-    }
-
-    @ViewBuilder
-    private var content: some View {
         if model.segments.isEmpty && model.partial.isEmpty {
             TranscriptEmptyState()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(model.segments) { segment in
                             SegmentRow(segment: segment, isPartial: false)
                         }
@@ -55,7 +22,8 @@ struct TranscriptCard: View {
                         }
                         Color.clear.frame(height: 2).id("bottom")
                     }
-                    .padding(.horizontal, 18)
+                    .frame(maxWidth: 700)
+                    .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                 }
                 .onChange(of: model.segments.count) {
@@ -69,7 +37,7 @@ struct TranscriptCard: View {
     }
 }
 
-/// Red "LIVE" capsule shown in the transcript header while recording.
+/// Red "LIVE" capsule shown while recording.
 struct LivePill: View {
     var body: some View {
         HStack(spacing: 5) {
@@ -117,14 +85,14 @@ struct TranscriptEmptyState: View {
     var body: some View {
         ContentUnavailableView {
             Label(
-                isRecording ? "Ich höre zu" : "Noch keine Aufnahme",
-                systemImage: isRecording ? "waveform" : "mic"
+                isRecording ? "Ich höre zu" : "Bereit für die nächste Stunde",
+                systemImage: isRecording ? "waveform" : "mic.fill"
             )
         } description: {
             Text(
                 isRecording
                     ? "Gesprochenes erscheint hier."
-                    : "Tippe unten auf „Aufnahme starten“."
+                    : "Die Aufnahme wird live transkribiert und automatisch der richtigen Stunde zugeordnet."
             )
         }
     }

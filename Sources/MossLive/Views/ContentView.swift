@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// Aufnahme: live transcript with the record control underneath. The
-/// connection status lives inside the transcript card's header; problems
-/// (errors, interruptions) surface as banners above it.
+/// Aufnahme: the live transcript fills the screen (like a Notes page); the
+/// record control lives in a glass bar at the bottom, Voice-Memos style.
+/// Problems (errors, interruptions) surface as banners at the top.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 if case .error(let message) = model.phase {
                     BannerView(text: message, color: .red)
                 }
@@ -23,32 +23,72 @@ struct LiveView: View {
                 if model.timetable.enabled {
                     CurrentLessonBanner()
                 }
-                TranscriptCard()
+                TranscriptPane()
                     .overlay(alignment: .topTrailing) {
                         AnswerCard()
                             .frame(maxWidth: 280)
-                            .padding(.top, 52)
-                            .padding(.trailing, 12)
+                            .padding(.top, 8)
                     }
-                if model.phase == .recording {
-                    RecordingWaveform()
-                }
-                RecordButton()
-                    .padding(.bottom, 6)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemBackground).ignoresSafeArea())
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                RecordControlBar()
+            }
             .animation(.snappy, value: model.bannerMessage)
-            .groupedScreen()
-            .navigationTitle("Aufnahme")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if model.phase == .recording, let started = model.recordingStartedAt {
-                        RecordingTimer(startedAt: started)
-                    }
-                }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+}
+
+/// Bottom glass bar: connection status on the left, the record button in the
+/// middle, timer/latency on the right, live waveform above while recording.
+struct RecordControlBar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if model.phase == .recording {
+                RecordingWaveform()
             }
+            HStack(spacing: 12) {
+                statusView
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                RecordButton()
+                trailingView
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var statusView: some View {
+        if model.phase == .recording {
+            HStack(spacing: 8) {
+                LivePill()
+                Text(model.isTranscribing ? "wird transkribiert…" : "Aufnahme läuft")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        } else {
+            StatusLabel(phase: model.phase)
+        }
+    }
+
+    @ViewBuilder
+    private var trailingView: some View {
+        if model.phase == .recording, let started = model.recordingStartedAt {
+            RecordingTimer(startedAt: started)
+        } else if let rtt = model.lastRoundTripMs, model.phase == .connected {
+            Text("\(Int(rtt)) ms")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
         }
     }
 }
@@ -67,7 +107,7 @@ struct CurrentLessonBanner: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder
@@ -118,11 +158,9 @@ struct RecordingTimer: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let seconds = max(0, Int(context.date.timeIntervalSince(startedAt)))
-            HStack(spacing: 6) {
-                Circle().fill(.red).frame(width: 8, height: 8)
-                Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-            }
+            Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -144,7 +182,7 @@ struct BufferingBanner: View {
         .foregroundStyle(.orange)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(cornerRadius: 12)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -158,7 +196,7 @@ struct BannerView: View {
             .foregroundStyle(color)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .cardSurface(cornerRadius: 12)
+            .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -331,6 +369,6 @@ struct RecordButton: View {
 }
 
 #Preview {
-    MainSplitView()
+    MainTabView()
         .environment(AppModel())
 }

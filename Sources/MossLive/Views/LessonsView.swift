@@ -12,6 +12,8 @@ struct LessonsView: View {
     @State private var subjectFilter: String?
     @State private var newestFirst = true
     @State private var searchText = ""
+    @State private var dayToDelete: Date?
+    @State private var actionError: String?
 
     private var api: BackendAPI {
         BackendAPI(
@@ -24,7 +26,7 @@ struct LessonsView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Meine Stunden")
+                .navigationTitle("Stunden")
                 .searchable(text: $searchText, prompt: "Suchen")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -84,10 +86,40 @@ struct LessonsView: View {
                     } label: {
                         DayRow(day: entry.day, lessons: entry.lessons)
                     }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            dayToDelete = entry.day
+                        } label: {
+                            Label("Löschen", systemImage: "trash")
+                        }
+                    }
                 }
             }
             .listStyle(.insetGrouped)
             .refreshable { await load() }
+            .confirmationDialog(
+                "Alle Stunden dieses Tages löschen?",
+                isPresented: Binding(
+                    get: { dayToDelete != nil },
+                    set: { if !$0 { dayToDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Tag löschen", role: .destructive) {
+                    if let day = dayToDelete {
+                        Task { await deleteDay(day) }
+                    }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            }
+            .alert(
+                "Löschen fehlgeschlagen",
+                isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(actionError ?? "")
+            }
         }
     }
 
@@ -125,43 +157,56 @@ struct LessonsView: View {
         }
         loading = false
     }
+
+    private func deleteDay(_ day: Date) async {
+        let targets = lessons.filter { Calendar.current.isDate($0.startedAt, inSameDayAs: day) }
+        do {
+            for lesson in targets {
+                try await api.deleteLesson(id: lesson.id)
+                BackendAPI.purgeCachedAudio(id: lesson.id)
+            }
+            withAnimation(.snappy) {
+                lessons.removeAll { Calendar.current.isDate($0.startedAt, inSameDayAs: day) }
+            }
+        } catch {
+            actionError = error.localizedDescription
+            await load()
+        }
+    }
 }
 
-/// One day as a folder row: date, lesson count, and the subjects inside.
+/// One day as a folder row: date, lesson count badge, and the subjects.
 struct DayRow: View {
     let day: Date
     let lessons: [BackendAPI.LessonInfo]
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "folder.fill")
-                .font(.title3)
-                .foregroundStyle(Theme.accent)
-                .frame(width: 40, height: 40)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(day.formatted(.dateTime.weekday(.wide).day().month(.wide).year()))
-                    .font(.body.weight(.semibold))
+        HStack(spacing: 12) {
+            IconTile(systemName: "folder.fill", color: .blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(day.formatted(.dateTime.weekday(.wide).day().month(.wide)))
                 Text(subtitle)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
+        .badge(lessons.count)
     }
 
     private var subtitle: String {
-        let count = lessons.count == 1 ? "1 Stunde" : "\(lessons.count) Stunden"
         let names = lessons.compactMap { $0.subject ?? $0.title }
-        guard !names.isEmpty else { return count }
+        guard !names.isEmpty else {
+            return lessons.count == 1 ? "1 Stunde" : "\(lessons.count) Stunden"
+        }
         var seen = Set<String>()
         let unique = names.filter { seen.insert($0).inserted }
-        return "\(count) · \(unique.joined(separator: ", "))"
+        return unique.joined(separator: ", ")
     }
 }
 
-/// One school day: the day's lessons as a list.
+/// One school day: the day's lessons as a list with standard swipe-to-delete.
 struct DayView: View {
     let api: BackendAPI
     let day: Date
@@ -191,18 +236,12 @@ struct DayView: View {
                 } label: {
                     LessonRow(info: lesson)
                 }
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        Task { await delete(lesson) }
-                    } label: {
-                        Label("Löschen", systemImage: "trash")
-                    }
-                }
-                .contextMenu {
-                    Button(role: .destructive) {
-                        Task { await delete(lesson) }
-                    } label: {
-                        Label("Löschen", systemImage: "trash")
+            }
+            .onDelete { offsets in
+                let targets = offsets.map { lessons[$0] }
+                Task {
+                    for lesson in targets {
+                        await delete(lesson)
                     }
                 }
             }
@@ -210,6 +249,11 @@ struct DayView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(day.formatted(date: .complete, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                EditButton()
+            }
+        }
         .alert(
             "Stunde konnte nicht gelöscht werden",
             isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })

@@ -1,34 +1,57 @@
 import SwiftUI
 
-/// SF Symbol tile for a school subject (best-effort keyword match).
-func subjectSymbol(for subject: String?) -> String {
-    guard let subject = subject?.lowercased() else { return "graduationcap.fill" }
-    let map: [(String, String)] = [
-        ("mathe", "x.squareroot"), ("math", "x.squareroot"),
-        ("physik", "atom"),
-        ("chemie", "testtube.2"),
-        ("bio", "leaf.fill"),
-        ("informatik", "desktopcomputer"),
-        ("deutsch", "text.book.closed.fill"),
-        ("englisch", "character.book.closed.fill"),
-        ("franz", "character.book.closed.fill"),
-        ("latein", "character.book.closed.fill"),
-        ("spanisch", "character.book.closed.fill"),
-        ("geschichte", "clock.fill"),
-        ("erdkunde", "globe.europe.africa.fill"),
-        ("geo", "globe.europe.africa.fill"),
-        ("musik", "music.note"),
-        ("kunst", "paintpalette.fill"),
-        ("sport", "figure.run"),
-        ("religion", "book.closed.fill"),
-        ("ethik", "person.2.fill"),
-        ("politik", "building.columns.fill"),
-        ("wirtschaft", "chart.line.uptrend.xyaxis"),
-    ]
-    for (keyword, symbol) in map where subject.contains(keyword) {
-        return symbol
+/// SF Symbol + color for a school subject's list icon tile.
+struct SubjectStyle {
+    let symbol: String
+    let color: Color
+}
+
+/// Best-effort keyword match from subject name to icon style.
+func subjectStyle(for subject: String?) -> SubjectStyle {
+    guard let subject = subject?.lowercased() else {
+        return SubjectStyle(symbol: "graduationcap.fill", color: .gray)
     }
-    return "graduationcap.fill"
+    let map: [(String, SubjectStyle)] = [
+        ("mathe", .init(symbol: "x.squareroot", color: .blue)),
+        ("math", .init(symbol: "x.squareroot", color: .blue)),
+        ("physik", .init(symbol: "atom", color: .indigo)),
+        ("chemie", .init(symbol: "testtube.2", color: .purple)),
+        ("bio", .init(symbol: "leaf.fill", color: .green)),
+        ("informatik", .init(symbol: "desktopcomputer", color: .cyan)),
+        ("deutsch", .init(symbol: "text.book.closed.fill", color: .red)),
+        ("englisch", .init(symbol: "character.book.closed.fill", color: .orange)),
+        ("franz", .init(symbol: "character.book.closed.fill", color: .orange)),
+        ("latein", .init(symbol: "character.book.closed.fill", color: .orange)),
+        ("spanisch", .init(symbol: "character.book.closed.fill", color: .orange)),
+        ("geschichte", .init(symbol: "clock.fill", color: .brown)),
+        ("erdkunde", .init(symbol: "globe.europe.africa.fill", color: .teal)),
+        ("geo", .init(symbol: "globe.europe.africa.fill", color: .teal)),
+        ("musik", .init(symbol: "music.note", color: .pink)),
+        ("kunst", .init(symbol: "paintpalette.fill", color: .mint)),
+        ("sport", .init(symbol: "figure.run", color: .green)),
+        ("religion", .init(symbol: "book.closed.fill", color: .indigo)),
+        ("ethik", .init(symbol: "person.2.fill", color: .indigo)),
+        ("politik", .init(symbol: "building.columns.fill", color: .brown)),
+        ("wirtschaft", .init(symbol: "chart.line.uptrend.xyaxis", color: .green)),
+    ]
+    for (keyword, style) in map where subject.contains(keyword) {
+        return style
+    }
+    return SubjectStyle(symbol: "graduationcap.fill", color: .blue)
+}
+
+/// Settings-style list icon: white glyph on a colored rounded square.
+struct IconTile: View {
+    let systemName: String
+    var color: Color = .blue
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(color.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
 }
 
 /// The backend asks Gemini for plain text, but render any inline Markdown
@@ -96,8 +119,6 @@ struct LessonAudioBar: View {
                 }
             }
         }
-        .padding(12)
-        .cardSurface(cornerRadius: 12)
     }
 
     private var trailingLabel: String {
@@ -151,15 +172,11 @@ struct LessonRow: View {
     let info: BackendAPI.LessonInfo
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: subjectSymbol(for: info.subject))
-                .font(.title3)
-                .foregroundStyle(Theme.accent)
-                .frame(width: 40, height: 40)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 3) {
+        let style = subjectStyle(for: info.subject)
+        HStack(spacing: 12) {
+            IconTile(systemName: style.symbol, color: style.color)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.body.weight(.semibold))
                     .lineLimit(1)
                 Text(secondaryLine)
                     .font(.footnote)
@@ -170,14 +187,14 @@ struct LessonRow: View {
                 if info.hasSummary {
                     Image(systemName: "text.badge.star")
                         .font(.footnote)
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(.secondary)
                 }
                 Text(durationChip)
-                    .font(.caption.weight(.medium))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 
     private var durationChip: String {

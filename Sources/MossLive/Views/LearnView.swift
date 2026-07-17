@@ -93,13 +93,9 @@ struct LearnView: View {
                         try await api.dueCards()
                     }
                 } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "sparkles")
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10))
-                        VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 12) {
+                        IconTile(systemName: "sparkles", color: .blue)
+                        VStack(alignment: .leading, spacing: 2) {
                             Text("Heute lernen")
                                 .font(.body.weight(.semibold))
                             Text(overview.dueTotal == 1
@@ -138,14 +134,11 @@ struct LearnView: View {
                 try await api.generateCards(sessionId: lesson.id)
             }
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: subjectSymbol(for: lesson.subject))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
-                VStack(alignment: .leading, spacing: 3) {
+            let style = subjectStyle(for: lesson.subject)
+            HStack(spacing: 12) {
+                IconTile(systemName: style.symbol, color: style.color)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(lesson.title ?? "Aufnahme")
-                        .font(.subheadline.weight(.semibold))
                     Text(lesson.startedAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -199,20 +192,18 @@ private struct SubjectRow: View {
                 practiceDestination
             }
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: subjectSymbol(for: subject.subject))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
-                VStack(alignment: .leading, spacing: 3) {
+            let style = subjectStyle(for: subject.subject)
+            HStack(spacing: 12) {
+                IconTile(systemName: style.symbol, color: style.color)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(name)
-                        .font(.subheadline.weight(.semibold))
                     Text(subtitle)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 2)
+            .badge(subject.due)
         }
         .swipeActions(edge: .trailing) { practiceButton.tint(Theme.accent) }
         .contextMenu { practiceButton }
@@ -235,9 +226,7 @@ private struct SubjectRow: View {
 
     private var subtitle: String {
         let total = subject.total == 1 ? "1 Karte" : "\(subject.total) Karten"
-        return subject.due == 0
-            ? "Nichts fällig · \(total) · Tippen zum Üben"
-            : "\(subject.due) fällig · \(total)"
+        return subject.due == 0 ? "\(total) · Nichts fällig, tippen zum Üben" : total
     }
 }
 
