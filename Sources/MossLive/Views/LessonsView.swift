@@ -185,6 +185,7 @@ struct DayView: View {
 
     @State private var lessons: [BackendAPI.LessonInfo]
     @State private var actionError: String?
+    @Environment(\.dismiss) private var dismiss
 
     init(
         api: BackendAPI,
@@ -241,6 +242,8 @@ struct DayView: View {
                 lessons.removeAll { $0.id == lesson.id }
             }
             await onChanged()
+            // the day folder no longer exists in the archive: leave it
+            if lessons.isEmpty { dismiss() }
         } catch {
             actionError = error.localizedDescription
         }

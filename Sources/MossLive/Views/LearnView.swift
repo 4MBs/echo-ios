@@ -10,6 +10,7 @@ struct LearnView: View {
     @State private var overview: BackendAPI.LearnOverview?
     @State private var lessons: [BackendAPI.LessonInfo] = []
     @State private var loading = true
+    @State private var refreshing = false
     @State private var errorMessage: String?
 
     private var api: BackendAPI {
@@ -166,6 +167,11 @@ struct LearnView: View {
     }
 
     private func load() async {
+        guard !refreshing else { return }
+        refreshing = true
+        // Show the spinner (not a blank page) while the first load or an
+        // error retry runs; later loads refresh silently behind the content.
+        if overview == nil { loading = true }
         errorMessage = nil
         do {
             async let ov = api.learnOverview()
@@ -176,6 +182,7 @@ struct LearnView: View {
             errorMessage = error.localizedDescription
         }
         loading = false
+        refreshing = false
     }
 }
 

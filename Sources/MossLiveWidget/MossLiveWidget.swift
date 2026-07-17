@@ -220,6 +220,9 @@ struct AnswerProvider: AppIntentTimelineProvider {
     /// Answers auto-expire back to the blank tile (stealth: nothing lingers
     /// on the Home/Lock Screen after class).
     static let answerLifetime: TimeInterval = 10 * 60
+    /// A loading state older than this is an orphaned request (the widget
+    /// request itself times out after 60 s) and reads as idle again.
+    static let loadingTimeout: TimeInterval = 150
 
     func placeholder(in context: Context) -> AnswerEntry {
         AnswerEntry(
@@ -262,7 +265,17 @@ struct AnswerProvider: AppIntentTimelineProvider {
                 configured: isConfigured(configuration)
             )
             return Timeline(entries: [entry, blank], policy: .never)
-        case .idle, .loading:
+        case .loading:
+            // If the fetch dies with the extension process, no reload ever
+            // arrives — fall back to the blank tile instead of dots forever.
+            let reset = AnswerEntry(
+                date: .now + Self.loadingTimeout,
+                snapshot: .init(state: .idle, text: "", updatedAt: .now),
+                config: configuration,
+                configured: isConfigured(configuration)
+            )
+            return Timeline(entries: [entry, reset], policy: .never)
+        case .idle:
             return Timeline(entries: [entry], policy: .never)
         }
     }
@@ -280,6 +293,10 @@ struct AnswerProvider: AppIntentTimelineProvider {
         let snapshot = AnswerSnapshotStore.load()
         if snapshot.state == .answer || snapshot.state == .failure,
            Date().timeIntervalSince(snapshot.updatedAt) > Self.answerLifetime {
+            return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
+        }
+        if snapshot.state == .loading,
+           Date().timeIntervalSince(snapshot.updatedAt) > Self.loadingTimeout {
             return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
         }
         return snapshot

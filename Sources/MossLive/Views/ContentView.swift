@@ -247,8 +247,13 @@ struct AnswerSticky: View {
         state = .loading
         Task {
             do {
-                state = try await .answer(api.liveAnswer(contextSeconds: seconds))
+                let answer = try await api.liveAnswer(contextSeconds: seconds)
+                // stopping the recording resets the note to .idle — a late
+                // response must not bring it back
+                guard state == .loading else { return }
+                state = .answer(answer)
             } catch {
+                guard state == .loading else { return }
                 let message = error.localizedDescription
                 state = .error(
                     message.contains("no active recording")

@@ -36,6 +36,11 @@ struct SettingsView: View {
                         Text("Notizen").tag("mobilenotes://")
                         Text("Safari").tag("https://www.google.com")
                         Text("Bücher").tag("ibooks://")
+                        // a typed custom scheme must stay a valid selection,
+                        // or the picker silently shows nothing selected
+                        if !Self.quickSwitchPresets.contains(settings.quickSwitchURL) {
+                            Text("Eigene URL").tag(settings.quickSwitchURL)
+                        }
                     }
                     TextField("Eigenes URL-Schema (z. B. goodnotes5://)", text: $settings.quickSwitchURL)
                         .keyboardType(.URL)
@@ -122,6 +127,10 @@ struct SettingsView: View {
             .task { await model.refreshTimetable() }
         }
     }
+
+    private static let quickSwitchPresets = [
+        "goodnotes5://", "mobilenotes://", "https://www.google.com", "ibooks://",
+    ]
 
     private func reminderEnabledBinding(_ settings: AppSettings) -> Binding<Bool> {
         Binding(

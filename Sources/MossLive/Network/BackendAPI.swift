@@ -130,13 +130,14 @@ struct BackendAPI {
     let token: String
 
     private func url(_ path: String, query: [URLQueryItem]? = nil) throws -> URL {
+        let cleanHost = host.trimmingCharacters(in: .whitespaces)
         var comps = URLComponents()
         comps.scheme = "http"
-        comps.host = host.trimmingCharacters(in: .whitespaces)
+        comps.host = cleanHost
         comps.port = port
         comps.path = path
         comps.queryItems = query
-        guard let url = comps.url, !host.isEmpty else {
+        guard let url = comps.url, !cleanHost.isEmpty else {
             throw APIError(message: "Die Serveradresse ist nicht konfiguriert.")
         }
         return url
@@ -365,7 +366,8 @@ struct BackendAPI {
         guard (200 ..< 300).contains(status) else {
             throw APIError(message: "Audio nicht verfügbar (HTTP \(status)).")
         }
-        let ext = http?.value(forHTTPHeaderField: "Content-Type") == "audio/wav" ? "wav" : "m4a"
+        let contentType = http?.value(forHTTPHeaderField: "Content-Type") ?? ""
+        let ext = contentType.contains("wav") ? "wav" : "m4a"
         let dest = dir.appendingPathComponent("\(id).\(ext)")
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tmp, to: dest)

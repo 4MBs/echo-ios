@@ -26,7 +26,6 @@ final class AppModel {
             case .error: "Fehler"
             }
         }
-
     }
 
     private(set) var phase: Phase = .disconnected
@@ -58,6 +57,7 @@ final class AppModel {
     private var timetablePoll: Task<Void, Never>?
     private var autoStopTask: Task<Void, Never>?
     private var wantsRecording = false
+    private var lastNotificationSyncDay = Date.distantPast
 
     init() {
         timetable = TimetableStore(settings: settings)
@@ -103,6 +103,7 @@ final class AppModel {
             while !Task.isCancelled {
                 await self?.timetable.refresh()
                 self?.scheduleAutoStopIfNeeded()
+                await self?.resyncNotificationsIfDayChanged()
                 try? await Task.sleep(for: .seconds(60))
             }
         }
@@ -113,7 +114,18 @@ final class AppModel {
 
     /// (Re)schedule start-of-lesson notifications from the current settings.
     func syncTimetableNotifications() async {
+        lastNotificationSyncDay = Date()
         await timetable.syncNotifications(enabled: settings.lessonNotifications)
+    }
+
+    /// Notifications only cover the day they were scheduled on. When the app
+    /// stays open (or suspended) past midnight, the next day's lessons must
+    /// be scheduled too — checked on every timetable poll.
+    private func resyncNotificationsIfDayChanged() async {
+        guard settings.lessonNotifications,
+              !Calendar.current.isDate(lastNotificationSyncDay, inSameDayAs: Date())
+        else { return }
+        await syncTimetableNotifications()
     }
 
     func refreshTimetable() async {

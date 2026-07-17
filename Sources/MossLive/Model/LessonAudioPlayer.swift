@@ -20,6 +20,9 @@ final class LessonAudioPlayer {
     @ObservationIgnored private let log = Logger(subsystem: "com.fourmbs.mosslive", category: "audio-playback")
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var ticker: Task<Void, Never>?
+    /// Whether this player configured the audio session itself (it must never
+    /// touch the session while the capture engine owns it — see below).
+    @ObservationIgnored private var configuredSession = false
 
     /// True once the recording is downloaded and ready to seek/play.
     var isReady: Bool { player != nil }
@@ -35,8 +38,15 @@ final class LessonAudioPlayer {
         defer { isLoading = false }
         do {
             let fileURL = try await api.downloadAudio(id: lessonId)
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try AVAudioSession.sharedInstance().setActive(true)
+            // While a live recording runs, the capture engine owns the shared
+            // session (.playAndRecord — which already permits playback).
+            // Reconfiguring it here would cut off the microphone mid-lesson.
+            let session = AVAudioSession.sharedInstance()
+            if session.category != .playAndRecord {
+                try session.setCategory(.playback, mode: .default)
+                try session.setActive(true)
+                configuredSession = true
+            }
             let player = try AVAudioPlayer(contentsOf: fileURL)
             player.prepareToPlay()
             self.player = player
@@ -78,7 +88,13 @@ final class LessonAudioPlayer {
         isPlaying = false
         ticker?.cancel()
         ticker = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // Deactivating the session while the capture engine holds it would
+        // stop a running recording; only release what this player activated.
+        let session = AVAudioSession.sharedInstance()
+        if configuredSession, session.category != .playAndRecord {
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        }
+        configuredSession = false
     }
 
     /// Index of the segment covering the playhead, for highlighting.

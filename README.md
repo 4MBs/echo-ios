@@ -13,7 +13,7 @@ grounded in what was said, and spaced-repetition quizzes.
 [![CI](https://github.com/4MBs/echo-ios/actions/workflows/ci.yml/badge.svg)](https://github.com/4MBs/echo-ios/actions/workflows/ci.yml)
 [![Lint](https://github.com/4MBs/echo-ios/actions/workflows/lint.yml/badge.svg)](https://github.com/4MBs/echo-ios/actions/workflows/lint.yml)
 ![Swift](https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white)
-![Platform](https://img.shields.io/badge/iPadOS-17%2B-000000?logo=apple&logoColor=white)
+![Platform](https://img.shields.io/badge/iPadOS-26%2B-000000?logo=apple&logoColor=white)
 ![Built on Linux](https://img.shields.io/badge/built%20on-Fedora%20Linux-51A2DA?logo=fedora&logoColor=white)
 
 </div>

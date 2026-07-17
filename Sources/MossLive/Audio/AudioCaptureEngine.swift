@@ -85,8 +85,12 @@ final class AudioCaptureEngine {
         running = false
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        converter = nil
-        encoder = nil
+        // Tear down on the processing queue: tap callbacks already enqueued
+        // still read converter/encoder, so nil-ing them from here would race.
+        processingQueue.sync {
+            converter = nil
+            encoder = nil
+        }
         NotificationCenter.default.removeObserver(self)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         log.info("capture stopped")
@@ -110,7 +114,8 @@ final class AudioCaptureEngine {
             throw CaptureError.microphoneDenied
         }
         converter.sampleRateConverterQuality = .max
-        self.converter = converter
+        // Swap on the processing queue — handleTap reads this property there.
+        processingQueue.sync { self.converter = converter }
 
         // ~20 ms of hardware audio per tap callback keeps latency minimal.
         let tapFrames = AVAudioFrameCount(hardwareFormat.sampleRate * 0.02)
