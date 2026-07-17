@@ -3,7 +3,8 @@ import SwiftUI
 /// Which AI backend the server uses. With ChatGPT, the model and the
 /// reasoning effort are picked here; the choice is stored on the server (like
 /// the WebUntis login) and applies immediately, no restart needed. The model
-/// list comes from the server, so new models appear without an app update.
+/// list — including which reasoning efforts each model supports — comes from
+/// the server, so new models appear without an app update.
 struct AIModelSection: View {
     @Environment(AppModel.self) private var model
 
@@ -17,10 +18,11 @@ struct AIModelSection: View {
                 LabeledContent("Anbieter", value: settings.provider == "chatgpt" ? "ChatGPT" : "Gemini")
                 if settings.provider == "chatgpt" {
                     Picker("Modell", selection: modelBinding) {
-                        ForEach(modelChoices, id: \.self) { slug in
-                            Text(Self.modelLabel(slug)).tag(slug)
+                        ForEach(modelChoices) { choice in
+                            Text(displayName(for: choice)).tag(choice.id)
                         }
                     }
+                    // only the efforts the selected model actually supports
                     Picker("Denkaufwand", selection: effortBinding) {
                         ForEach(effortChoices, id: \.self) { effort in
                             Text(Self.effortLabel(effort)).tag(effort)
@@ -53,29 +55,47 @@ struct AIModelSection: View {
         )
     }
 
-    // A stored value the list doesn't know (e.g. set via config file) must
+    // A stored model the list doesn't know (e.g. set via config file) must
     // stay a valid tag, or the picker silently shows nothing selected.
-    private var modelChoices: [String] {
-        var choices = settings?.chatgptModels ?? [""]
-        if let current = settings?.chatgptModel, !choices.contains(current) {
-            choices.append(current)
+    private var modelChoices: [BackendAPI.ModelChoice] {
+        guard let settings else { return [] }
+        var choices = settings.chatgptModels
+        if !choices.contains(where: { $0.id == settings.chatgptModel }) {
+            choices.append(.init(id: settings.chatgptModel, label: "", efforts: []))
         }
         return choices
     }
 
+    /// "" (Standard) plus what the selected model supports; a custom model
+    /// without catalog data falls back to the full list.
     private var effortChoices: [String] {
-        var choices = settings?.reasoningEfforts ?? [""]
-        if let current = settings?.chatgptReasoningEffort, !choices.contains(current) {
-            choices.append(current)
+        guard let settings else { return [""] }
+        let known = supportedEfforts(for: settings.chatgptModel, in: settings)
+        let efforts = known.isEmpty ? settings.reasoningEfforts.filter { !$0.isEmpty } : known
+        var choices = [""] + efforts
+        if !choices.contains(settings.chatgptReasoningEffort) {
+            choices.append(settings.chatgptReasoningEffort)
         }
         return choices
+    }
+
+    private func supportedEfforts(for modelID: String, in settings: BackendAPI.AnswerSettings) -> [String] {
+        settings.chatgptModels.first { $0.id == modelID }?.efforts ?? []
     }
 
     private var modelBinding: Binding<String> {
         Binding(
             get: { settings?.chatgptModel ?? "" },
             set: { value in
-                settings?.chatgptModel = value
+                guard var updated = settings else { return }
+                updated.chatgptModel = value
+                // an effort the new model doesn't support goes back to Standard
+                let known = supportedEfforts(for: value, in: updated)
+                if !known.isEmpty, !updated.chatgptReasoningEffort.isEmpty,
+                   !known.contains(updated.chatgptReasoningEffort) {
+                    updated.chatgptReasoningEffort = ""
+                }
+                settings = updated
                 save()
             }
         )
@@ -104,9 +124,14 @@ struct AIModelSection: View {
             + "answer.provider = \"chatgpt\" in ~/.config/mosslive/config.toml."
     }
 
-    /// "gpt-5.6-luna" -> "GPT-5.6 Luna"; "" -> Standard.
+    private func displayName(for choice: BackendAPI.ModelChoice) -> String {
+        if choice.id.isEmpty { return "Standard (empfohlen)" }
+        return choice.label.isEmpty ? Self.modelLabel(choice.id) : choice.label
+    }
+
+    /// Fallback prettifier for models the server has no label for:
+    /// "gpt-5.6-luna" -> "GPT-5.6 Luna".
     static func modelLabel(_ slug: String) -> String {
-        if slug.isEmpty { return "Standard (empfohlen)" }
         var parts = slug.split(separator: "-").map(String.init)
         guard parts.count > 1 else { return slug.uppercased() }
         if parts[0].lowercased() == "gpt" { parts[0] = "GPT" }
@@ -122,7 +147,9 @@ struct AIModelSection: View {
         case "low": "Niedrig – schnell"
         case "medium": "Mittel"
         case "high": "Hoch – gründlich"
-        case "xhigh": "Sehr hoch – am gründlichsten"
+        case "xhigh": "Sehr hoch"
+        case "max": "Maximal – am gründlichsten"
+        case "ultra": "Ultra – delegiert Teilaufgaben"
         default: effort
         }
     }
