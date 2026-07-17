@@ -26,9 +26,7 @@ struct TranscriptCard: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                StatusDot()
-                Text(model.phase.label)
-                    .font(.subheadline.weight(.semibold))
+                StatusStamp(text: model.phase.label)
             }
             Spacer()
             if let rtt = model.lastRoundTripMs,
@@ -103,45 +101,51 @@ struct LivePill: View {
     }
 }
 
-/// Colored connection indicator; pulses while connecting/reconnecting.
-struct StatusDot: View {
-    @Environment(AppModel.self) private var model
-
-    private var isBusy: Bool {
-        model.phase == .connecting || model.phase == .reconnecting
-    }
+/// Connection status as a faded rubber stamp pressed onto the page, instead
+/// of a colored dot that has no meaning on paper.
+struct StatusStamp: View {
+    let text: String
 
     var body: some View {
-        Circle()
-            .fill(model.phase.color)
-            .frame(width: 9, height: 9)
-            .opacity(isBusy ? 0.35 : 1)
-            .animation(
-                isBusy ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .default,
-                value: isBusy
+        Text(text.uppercased())
+            .font(.caption.weight(.bold))
+            .tracking(1.4)
+            .foregroundStyle(Theme.ink.opacity(0.42))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Theme.ink.opacity(0.30), lineWidth: 1.2)
             )
+            .rotationEffect(.degrees(-2))
     }
 }
 
+/// Empty page: handwritten hint instead of a gray system icon, with a doodle
+/// arrow pointing down toward the record control.
 struct TranscriptEmptyState: View {
     @Environment(AppModel.self) private var model
 
     private var isRecording: Bool { model.phase == .recording }
 
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: isRecording ? "ear" : "waveform.slash")
-                .font(.system(size: 36))
-                .foregroundStyle(.quaternary)
+        VStack(spacing: 8) {
+            Text(isRecording ? "Ich höre zu …" : "Noch ist die Seite leer.")
+                .font(Theme.handwriting(22))
+                .foregroundStyle(Theme.ink.opacity(0.6))
             Text(
                 isRecording
-                    ? "Ich höre zu. Gesprochenes erscheint hier."
-                    : "Starte die Aufnahme, um das Live-Transkript zu sehen."
+                    ? "Gesprochenes erscheint hier."
+                    : "Tippe unten auf „Aufnahme starten“."
             )
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
+            .font(Theme.handwriting(15))
+            .foregroundStyle(Theme.ink.opacity(0.42))
+            if !isRecording {
+                Doodle(name: "doodle-arrow-se", size: 40, rotation: 40)
+                    .padding(.top, 4)
+            }
         }
+        .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
     }

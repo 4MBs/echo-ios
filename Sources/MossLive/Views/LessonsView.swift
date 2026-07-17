@@ -79,7 +79,7 @@ struct LessonsView: View {
                             } label: {
                                 DayRow(day: entry.day, lessons: entry.lessons)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PaperPressStyle())
                         }
                     }
                     .padding(16)
@@ -207,7 +207,8 @@ struct DayView: View {
                     } label: {
                         LessonRow(info: lesson)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PaperPressStyle())
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .contextMenu {
                         Button(role: .destructive) {
                             Task { await delete(lesson) }
@@ -236,7 +237,9 @@ struct DayView: View {
         do {
             try await api.deleteLesson(id: lesson.id)
             BackendAPI.purgeCachedAudio(id: lesson.id)
-            lessons.removeAll { $0.id == lesson.id }
+            withAnimation(.snappy) {
+                lessons.removeAll { $0.id == lesson.id }
+            }
             await onChanged()
         } catch {
             actionError = error.localizedDescription

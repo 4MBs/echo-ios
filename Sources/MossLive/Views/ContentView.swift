@@ -291,9 +291,15 @@ struct RecordingWaveform: View {
     }
 }
 
-/// The mockup's round record/stop control with its label next to it.
+/// Record control: one paper label with a wax seal pressed into it. Idle the
+/// seal is ink; while recording it turns wax-red with a stop mark, so the
+/// whole control reads as a single crafted object instead of a floating
+/// circle next to loose text.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
+
+    private static let wax = Color(red: 0.60, green: 0.17, blue: 0.13)
+    private static let waxDark = Color(red: 0.42, green: 0.10, blue: 0.08)
 
     private var isActive: Bool {
         switch model.phase {
@@ -312,30 +318,51 @@ struct RecordButton: View {
         } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    // Old-paper styling: idle = ink-drawn button on a paper
-                    // disc; recording = a red wax-seal stamp.
                     Circle()
-                        .fill(isActive ? Color(red: 0.62, green: 0.16, blue: 0.13) : Theme.card)
-                        .frame(width: 62, height: 62)
+                        .fill(
+                            RadialGradient(
+                                colors: isActive
+                                    ? [Self.wax, Self.waxDark]
+                                    : [Theme.ink.opacity(0.88), Theme.ink],
+                                center: UnitPoint(x: 0.38, y: 0.3),
+                                startRadius: 2,
+                                endRadius: 36
+                            )
+                        )
+                        .frame(width: 52, height: 52)
                         .overlay(
                             Circle()
-                                .strokeBorder(
-                                    isActive ? Color(red: 0.45, green: 0.10, blue: 0.08) : Theme.ink,
-                                    lineWidth: 2
-                                )
-                                .padding(3)
+                                .strokeBorder(Theme.card.opacity(0.4), lineWidth: 1.4)
+                                .padding(4)
                         )
-                        .shadow(color: Theme.shadow.opacity(0.30), radius: 7, y: 4)
+                        .shadow(color: Theme.shadow.opacity(0.28), radius: 4, y: 2)
                     Image(systemName: isActive ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(isActive ? Theme.paper : Theme.ink)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Theme.card)
                 }
                 Text(isActive ? "Aufnahme beenden" : "Aufnahme starten")
                     .font(Theme.handwriting(19))
                     .foregroundStyle(Theme.ink)
+                    .padding(.trailing, 10)
             }
+            .padding(.leading, 9)
+            .padding(.trailing, 16)
+            .padding(.vertical, 9)
+            .background {
+                Capsule()
+                    .fill(Theme.card)
+                    .overlay(
+                        Image("paper-card")
+                            .resizable()
+                            .scaledToFill()
+                            .opacity(0.4)
+                    )
+                    .clipShape(Capsule())
+            }
+            .overlay(Capsule().strokeBorder(Theme.ink.opacity(0.28), lineWidth: 1.2))
+            .shadow(color: Theme.shadow.opacity(0.16), radius: 8, y: 4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PaperPressStyle())
         .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
     }
 }

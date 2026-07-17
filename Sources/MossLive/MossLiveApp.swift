@@ -132,9 +132,12 @@ struct SidebarView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Embossed into the leather: cream disc, dark glyph — no app
+            // accent on the cover, it lives on the paper side.
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 34))
-                .foregroundStyle(Self.coverText, Theme.accent)
+                .foregroundStyle(Theme.sidebar, Self.coverText)
+                .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
             Text("Echo")
                 .font(Theme.handwriting(26))
                 .foregroundStyle(Self.coverText)
@@ -183,6 +186,6 @@ struct SidebarView: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PaperPressStyle())
     }
 }

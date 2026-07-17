@@ -27,15 +27,6 @@ final class AppModel {
             }
         }
 
-        var color: Color {
-            switch self {
-            case .disconnected: .gray
-            case .connecting, .reconnecting: .orange
-            case .connected: .blue
-            case .recording: .green
-            case .error: .red
-            }
-        }
     }
 
     private(set) var phase: Phase = .disconnected

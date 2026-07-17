@@ -6,11 +6,13 @@ import SwiftUI
 /// hierarchy and contrast hold in dark mode (ink-tinted dark paper, lifted
 /// indigo). No pure black; shadows are ink-tinted, never plain black.
 enum Theme {
-    /// Indigo, the single accent of the whole app. White labels on it pass
+    /// Deep wax-seal red, the single accent of the whole app — the same
+    /// family as the notebook's margin line and the recording seal, so
+    /// nothing digital-looking sits on the paper. White labels on it pass
     /// WCAG AA in light mode; lifted on dark paper for parity.
     static let accent = Color(
-        light: Color(red: 0.357, green: 0.357, blue: 0.839),
-        dark: Color(red: 0.510, green: 0.510, blue: 0.920)
+        light: Color(red: 0.573, green: 0.200, blue: 0.152),
+        dark: Color(red: 0.780, green: 0.380, blue: 0.320)
     )
 
     /// Sidebar base under the dark leather-paper scan (notebook cover).
@@ -62,6 +64,17 @@ enum Theme {
     /// ships with iOS; no bundled font needed).
     static func handwriting(_ size: CGFloat) -> Font {
         .custom("Noteworthy-Bold", size: size)
+    }
+}
+
+/// Gentle press feedback shared by every tappable paper element (record
+/// label, sidebar rows, folder cards), so taps feel physical instead of dead.
+struct PaperPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.965 : 1)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .animation(.snappy(duration: 0.18), value: configuration.isPressed)
     }
 }
 
