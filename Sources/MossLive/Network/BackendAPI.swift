@@ -143,7 +143,8 @@ struct BackendAPI {
         return url
     }
 
-    private func request(
+    // internal: BackendAPI extensions in other files build on this
+    func request(
         _ path: String,
         method: String = "GET",
         query: [URLQueryItem]? = nil,
