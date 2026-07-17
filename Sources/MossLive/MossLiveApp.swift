@@ -40,20 +40,20 @@ struct MainSplitView: View {
         NavigationSplitView {
             SidebarView(selection: $selection)
         } detail: {
-            // .id(selection) forces a full detail rebuild on sidebar change;
-            // without it, a screen pushed inside the detail stack (e.g. a day
-            // in Stunden) stayed visible after switching to another tab.
-            Group {
-                switch selection {
-                case .aufnahme: LiveView()
-                case .stunden: LessonsView()
-                case .lernen: LearnView()
-                case .chat: ChatView()
-                case .einstellungen: SettingsView()
-                }
+            switch selection {
+            case .aufnahme: LiveView()
+            case .stunden: LessonsView()
+            case .lernen: LearnView()
+            case .chat: ChatView()
+            case .einstellungen: SettingsView()
             }
-            .id(selection)
         }
+        // The id must sit on the split view itself: its detail column is a
+        // UIKit navigation controller that keeps pushed screens (a day in
+        // Stunden) alive across detail swaps, so an id on the detail content
+        // alone replaced the root underneath while the pushed screen stayed
+        // on top. Recreating the whole split view drops that stack.
+        .id(selection)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
         .onAppear {
             if !model.settings.isConfigured {
