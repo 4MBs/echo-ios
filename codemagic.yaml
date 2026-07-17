@@ -1,0 +1,95 @@
+# Codemagic CI (free tier: 500 macOS M2 minutes/month, no 10x multiplier).
+# Mirrors .github/workflows/ci.yml: xcodegen -> tests -> unsigned device build
+# -> ad-hoc sign with entitlements -> IPA artifact for SideStore.
+# BUILD_NUMBER is Codemagic's per-app counter; offset by 100 so versions never
+# collide with the GitHub Actions run numbers already installed via SideStore.
+workflows:
+  ios-build:
+    name: Build & test (unsigned IPA)
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      xcode: latest
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+      cancel_previous_builds: true
+    scripts:
+      - name: Versions
+        script: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Install XcodeGen
+        script: brew install xcodegen
+
+      - name: Generate Xcode project
+        script: xcodegen generate
+
+      - name: Stamp build version
+        script: |
+          BUILD=$((BUILD_NUMBER + 100))
+          V="1.0.$BUILD"
+          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST" \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$PLIST"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD" "$PLIST"
+          done
+
+      - name: Resolve dependencies
+        script: |
+          xcodebuild -resolvePackageDependencies \
+            -project MossLive.xcodeproj -scheme MossLive \
+            -clonedSourcePackagesDirPath .spm-packages
+
+      - name: Unit tests (iOS Simulator)
+        script: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available | grep -E '^ +iPhone' | head -1 \
+            | sed -E 's/^ +//; s/ \([0-9A-Fa-f-]+\) \((Shutdown|Booted)\).*$//')
+          [ -n "$DEVICE" ] || { echo "no iOS simulator on this image"; exit 1; }
+          echo "picked simulator: $DEVICE"
+          xcodebuild test \
+            -project MossLive.xcodeproj \
+            -scheme MossLive \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -clonedSourcePackagesDirPath .spm-packages \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO | tail -100
+
+      - name: Build unsigned device binary
+        script: |
+          set -o pipefail
+          BUILD=$((BUILD_NUMBER + 100))
+          xcodebuild build \
+            -project MossLive.xcodeproj \
+            -scheme MossLive \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            -clonedSourcePackagesDirPath .spm-packages \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=$BUILD | tail -60
+
+      # Ad-hoc signatures carry the app-group entitlement, which sideloading
+      # tools read and rewrite during their own re-signing. Inner bundle
+      # first, then the app (not --deep, which would clobber it).
+      - name: Ad-hoc sign with entitlements
+        script: |
+          APP=build/dd/Build/Products/Release-iphoneos/MossLive.app
+          codesign --force --sign - --entitlements MossLiveWidget.entitlements \
+            "$APP/PlugIns/MossLiveWidget.appex"
+          codesign --force --sign - --entitlements MossLive.entitlements "$APP"
+          codesign -d --entitlements - "$APP" 2>&1 | head -20
+
+      - name: Package unsigned IPA (installable via SideStore)
+        script: |
+          scripts/ci/make_unsigned_ipa.sh \
+            build/dd/Build/Products/Release-iphoneos/MossLive.app \
+            MossLive-unsigned.ipa
+    artifacts:
+      - MossLive-unsigned.ipa
+      - TestResults.xcresult
