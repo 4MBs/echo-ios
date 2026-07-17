@@ -24,7 +24,6 @@ struct LearnView: View {
     var body: some View {
         NavigationStack {
             content
-                .paperScreen()
                 .navigationTitle("Lernen")
         }
     }
@@ -41,92 +40,89 @@ struct LearnView: View {
     private var content: some View {
         if loading, overview == nil {
             ProgressView("Lade Lernstand…")
+                .groupedScreen()
                 .onAppear { Task { await load() } }
         } else if let errorMessage {
             ErrorState(message: errorMessage) { await load() }
+                .groupedScreen()
         } else if let overview {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    todayCard(overview)
+            if overview.cardTotal == 0, pendingLessons.isEmpty {
+                ContentUnavailableView {
+                    Label("Noch nichts zu lernen", systemImage: "brain.head.profile")
+                } description: {
+                    Text("Nimm eine Stunde auf, dann erscheinen hier ihre Karten.")
+                }
+                .groupedScreen()
+            } else {
+                List {
+                    todaySection(overview)
                     if !overview.subjects.isEmpty {
-                        sectionTitle("Fächer")
-                        ForEach(overview.subjects) { subject in
-                            SubjectRow(api: api, subject: subject)
+                        Section("Fächer") {
+                            ForEach(overview.subjects) { subject in
+                                SubjectRow(api: api, subject: subject)
+                            }
                         }
                     }
                     if !pendingLessons.isEmpty {
-                        sectionTitle("Noch nicht abgefragt")
-                        Text("Beim ersten Abfragen entsteht der Kartensatz der Stunde.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        ForEach(pendingLessons) { lesson in
-                            pendingRow(lesson)
+                        Section {
+                            ForEach(pendingLessons) { lesson in
+                                pendingRow(lesson)
+                            }
+                        } header: {
+                            Text("Noch nicht abgefragt")
+                        } footer: {
+                            Text("Beim ersten Abfragen entsteht der Kartensatz der Stunde.")
                         }
                     }
-                    if overview.cardTotal == 0, pendingLessons.isEmpty {
-                        EmptyState(
-                            icon: "brain.head.profile",
-                            text: "Noch nichts zu lernen.\nNimm eine Stunde auf, dann erscheinen hier ihre Karten."
-                        )
-                        .padding(.top, 40)
-                    }
                 }
-                .padding(16)
+                .listStyle(.insetGrouped)
+                .refreshable { await load() }
+                .onAppear { Task { await load() } }
             }
-            .refreshable { await load() }
-            .onAppear { Task { await load() } }
         }
-    }
-
-    private func sectionTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.headline)
-            .padding(.top, 10)
     }
 
     // MARK: - Heute lernen
 
     @ViewBuilder
-    private func todayCard(_ overview: BackendAPI.LearnOverview) -> some View {
+    private func todaySection(_ overview: BackendAPI.LearnOverview) -> some View {
         if overview.dueTotal > 0 {
-            NavigationLink {
-                ReviewView(api: api, title: "Heute lernen", mode: .review) {
-                    try await api.dueCards()
-                }
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 19))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Heute lernen")
-                            .font(.body.weight(.semibold))
-                        Text(overview.dueTotal == 1
-                            ? "1 Karte ist fällig"
-                            : "\(overview.dueTotal) Karten sind fällig")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+            Section {
+                NavigationLink {
+                    ReviewView(api: api, title: "Heute lernen", mode: .review) {
+                        try await api.dueCards()
                     }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "sparkles")
+                            .font(.title3)
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Heute lernen")
+                                .font(.body.weight(.semibold))
+                            Text(overview.dueTotal == 1
+                                ? "1 Karte ist fällig"
+                                : "\(overview.dueTotal) Karten sind fällig")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .paperCard(cornerRadius: 14)
             }
-            .buttonStyle(.plain)
         } else if overview.cardTotal > 0 {
-            HStack(spacing: 22) {
-                Text("Für heute alles gelernt!")
-                    .stickyNote(rotation: -1)
-                Doodle(name: "doodle-trophy", size: 56, rotation: 7)
+            Section {
+                Label {
+                    Text("Für heute alles gelernt!")
+                        .font(.body.weight(.semibold))
+                } icon: {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                }
+                .padding(.vertical, 4)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
         }
     }
 
@@ -144,10 +140,9 @@ struct LearnView: View {
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: subjectSymbol(for: lesson.subject))
-                    .font(.system(size: 17))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 40, height: 40)
-                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+                    .frame(width: 36, height: 36)
+                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(lesson.title ?? "Aufnahme")
                         .font(.subheadline.weight(.semibold))
@@ -159,11 +154,8 @@ struct LearnView: View {
                 Image(systemName: "plus.circle")
                     .foregroundStyle(Theme.accent)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .paperCard(cornerRadius: 14)
+            .padding(.vertical, 2)
         }
-        .buttonStyle(.plain)
     }
 
     private func load() async {
@@ -186,62 +178,66 @@ struct LearnView: View {
     }
 }
 
-/// One subject's deck: tap reviews what's due; "Üben" runs the whole deck
-/// without touching the schedule.
+/// One subject's deck: tap reviews what's due (or practices the whole deck
+/// when nothing is due); "Üben" via swipe or long-press never touches the
+/// schedule.
 private struct SubjectRow: View {
     let api: BackendAPI
     let subject: BackendAPI.LearnSubject
 
     private var name: String { subject.subject ?? "Ohne Fach" }
 
+    @State private var practicing = false
+
     var body: some View {
-        HStack(spacing: 14) {
-            NavigationLink {
+        NavigationLink {
+            if subject.due > 0 {
                 ReviewView(api: api, title: name, mode: .review) {
                     try await api.dueCards(subject: subject.subject)
                 }
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: subjectSymbol(for: subject.subject))
-                        .font(.system(size: 17))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 40, height: 40)
-                        .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(name)
-                            .font(.subheadline.weight(.semibold))
-                        Text(subtitle)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 8)
-                }
-                .contentShape(Rectangle())
+            } else {
+                practiceDestination
             }
-            .buttonStyle(.plain)
-            .disabled(subject.due == 0)
-
-            NavigationLink {
-                ReviewView(api: api, title: "\(name) üben", mode: .practice) {
-                    try await api.allCards(subject: subject.subject)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: subjectSymbol(for: subject.subject))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-            } label: {
-                Text("Üben")
-                    .font(.footnote.weight(.medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Theme.accent.opacity(0.12), in: Capsule())
             }
-            .buttonStyle(.plain)
+            .padding(.vertical, 2)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .paperCard(cornerRadius: 14)
+        .swipeActions(edge: .trailing) { practiceButton.tint(Theme.accent) }
+        .contextMenu { practiceButton }
+        .navigationDestination(isPresented: $practicing) { practiceDestination }
+    }
+
+    private var practiceButton: some View {
+        Button {
+            practicing = true
+        } label: {
+            Label("Üben", systemImage: "arrow.clockwise")
+        }
+    }
+
+    private var practiceDestination: some View {
+        ReviewView(api: api, title: "\(name) üben", mode: .practice) {
+            try await api.allCards(subject: subject.subject)
+        }
     }
 
     private var subtitle: String {
         let total = subject.total == 1 ? "1 Karte" : "\(subject.total) Karten"
-        return subject.due == 0 ? "Nichts fällig · \(total)" : "\(subject.due) fällig · \(total)"
+        return subject.due == 0
+            ? "Nichts fällig · \(total) · Tippen zum Üben"
+            : "\(subject.due) fällig · \(total)"
     }
 }
 

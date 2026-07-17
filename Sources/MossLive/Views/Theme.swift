@@ -1,188 +1,27 @@
 import SwiftUI
 
-/// Design tokens for the StudyFlow-style notebook look: near-black ink
-/// sidebar, white paper with faint ruled lines, one locked indigo accent,
-/// handwritten headers, butter-yellow sticky notes. Every color is dynamic so
-/// hierarchy and contrast hold in dark mode (ink-tinted dark paper, lifted
-/// indigo). No pure black; shadows are ink-tinted, never plain black.
+/// The app uses the native iPadOS design language throughout: system colors,
+/// SF Pro, grouped backgrounds and materials — no custom skin. This file only
+/// keeps the few shared pieces the screens agree on.
 enum Theme {
-    /// Deep wax-seal red, the single accent of the whole app — the same
-    /// family as the notebook's margin line and the recording seal, so
-    /// nothing digital-looking sits on the paper. White labels on it pass
-    /// WCAG AA in light mode; lifted on dark paper for parity.
-    static let accent = Color(
-        light: Color(red: 0.573, green: 0.200, blue: 0.152),
-        dark: Color(red: 0.780, green: 0.380, blue: 0.320)
-    )
-
-    /// Sidebar base under the dark leather-paper scan (notebook cover).
-    static let sidebar = Color(red: 0.145, green: 0.118, blue: 0.082)
-
-    /// Content-area "paper": warm aged ivory, like an old notebook.
-    static let paper = Color(
-        light: Color(red: 0.949, green: 0.922, blue: 0.851),
-        dark: Color(red: 0.125, green: 0.118, blue: 0.098)
-    )
-
-    /// Card surface on top of the paper: a fresher sheet, still warm.
-    static let card = Color(
-        light: Color(red: 0.980, green: 0.963, blue: 0.914),
-        dark: Color(red: 0.180, green: 0.170, blue: 0.145)
-    )
-
-    /// Faint notebook ruled lines, sepia like faded print.
-    static let gridLine = Color(
-        light: Color(red: 0.45, green: 0.34, blue: 0.16).opacity(0.10),
-        dark: Color.white.opacity(0.06)
-    )
-
-    /// The red margin line of a classic school notebook.
-    static let marginLine = Color(
-        light: Color(red: 0.75, green: 0.28, blue: 0.22).opacity(0.35),
-        dark: Color(red: 0.85, green: 0.40, blue: 0.34).opacity(0.35)
-    )
-
-    /// Dark sepia writing ink (buttons, borders on paper).
-    static let ink = Color(
-        light: Color(red: 0.20, green: 0.16, blue: 0.12),
-        dark: Color(red: 0.92, green: 0.89, blue: 0.83)
-    )
-
-    /// Tinted sticky-note surface (soft butter yellow).
-    static let note = Color(
-        light: Color(red: 0.965, green: 0.906, blue: 0.700),
-        dark: Color(red: 0.290, green: 0.252, blue: 0.145)
-    )
-
-    /// Shadow base, tinted warm like the paper (apply opacity at call site).
-    static let shadow = Color(
-        light: Color(red: 0.30, green: 0.23, blue: 0.10),
-        dark: .black
-    )
-
-    /// Handwritten display font for headers and sticky notes (Noteworthy
-    /// ships with iOS; no bundled font needed).
-    static func handwriting(_ size: CGFloat) -> Font {
-        .custom("Noteworthy-Bold", size: size)
-    }
-}
-
-/// Gentle press feedback shared by every tappable paper element (record
-/// label, sidebar rows, folder cards), so taps feel physical instead of dead.
-struct PaperPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.965 : 1)
-            .opacity(configuration.isPressed ? 0.9 : 1)
-            .animation(.snappy(duration: 0.18), value: configuration.isPressed)
-    }
-}
-
-extension Color {
-    /// Dynamic color from a light and a dark variant.
-    init(light: Color, dark: Color) {
-        self.init(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
-        })
-    }
-}
-
-/// Real aged paper (studio scan, Texturelabs) with ruled lines on top. Used
-/// as the background of every content screen. The scan sits at reduced
-/// opacity over the paper tone so its stains stay a hint, not a wall.
-struct PaperBackground: View {
-    var body: some View {
-        Theme.paper
-            .overlay(
-                Image("paper-bg")
-                    .resizable()
-                    .scaledToFill()
-                    .opacity(0.45)
-            )
-            .overlay(RuledLines(spacing: 30))
-            .clipped()
-            .ignoresSafeArea()
-    }
-}
-
-/// Horizontal notebook rules. Also used inside the live-transcript card so
-/// the transcript reads like writing on a lined page.
-struct RuledLines: View {
-    var spacing: CGFloat = 30
-
-    var body: some View {
-        Canvas { context, size in
-            var lines = Path()
-            var posY = spacing
-            while posY < size.height {
-                lines.move(to: CGPoint(x: 0, y: posY))
-                lines.addLine(to: CGPoint(x: size.width, y: posY))
-                posY += spacing
-            }
-            context.stroke(lines, with: .color(Theme.gridLine), lineWidth: 1)
-        }
-        .allowsHitTesting(false)
-    }
+    /// Single accent token so every screen highlights the same way. Follows
+    /// the app tint (system blue); recording state uses `.red` directly,
+    /// matching the system convention.
+    static let accent = Color.accentColor
 }
 
 extension View {
-    /// Full-screen paper behind a screen's content. Expands first so the
-    /// paper always fills the window, even when the content is tiny (a
-    /// spinner, an empty state).
-    func paperScreen() -> some View {
+    /// Standard grouped screen background (the Settings-style canvas).
+    func groupedScreen() -> some View {
         frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(PaperBackground())
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
     }
 
-    /// A sheet of real paper sitting on the page: card color with the
-    /// scanned paper texture clipped into the shape.
-    func paperCard(cornerRadius: CGFloat = 16) -> some View {
-        background {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Theme.card)
-                .overlay(
-                    Image("paper-card")
-                        .resizable()
-                        .scaledToFill()
-                        .opacity(0.40)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .strokeBorder(Theme.shadow.opacity(0.14), lineWidth: 1)
+    /// A native inset-grouped card: the same surface a grouped List row uses.
+    func cardSurface(cornerRadius: CGFloat = 16) -> some View {
+        background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
-        .shadow(color: Theme.shadow.opacity(0.10), radius: 6, y: 2)
-    }
-
-    /// Slightly rotated sticky note with a piece of tape at the top and
-    /// handwritten text, like in the mockup. The paper scan is multiplied in
-    /// so the note ages with the rest of the page.
-    func stickyNote(rotation: Double = -1.2) -> some View {
-        font(Theme.handwriting(17))
-            .padding(.horizontal, 16)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
-            .background {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Theme.note)
-                    .overlay(
-                        Image("paper-card")
-                            .resizable()
-                            .scaledToFill()
-                            .opacity(0.35)
-                            .blendMode(.multiply)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .overlay(alignment: .top) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Theme.accent.opacity(0.22))
-                    .frame(width: 56, height: 15)
-                    .rotationEffect(.degrees(-3))
-                    .offset(y: -7)
-            }
-            .shadow(color: Theme.shadow.opacity(0.16), radius: 5, y: 3)
-            .rotationEffect(.degrees(rotation))
     }
 }

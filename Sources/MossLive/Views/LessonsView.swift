@@ -24,9 +24,13 @@ struct LessonsView: View {
     var body: some View {
         NavigationStack {
             content
-                .paperScreen()
                 .navigationTitle("Meine Stunden")
                 .searchable(text: $searchText, prompt: "Suchen")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        filterMenu
+                    }
+                }
         }
         .task { await load() }
     }
@@ -59,70 +63,56 @@ struct LessonsView: View {
     private var content: some View {
         if loading {
             ProgressView("Lade Stunden…")
+                .groupedScreen()
         } else if let errorMessage {
             ErrorState(message: errorMessage) { await load() }
+                .groupedScreen()
         } else if lessons.isEmpty {
-            EmptyState(
-                icon: "books.vertical",
-                text: "Noch keine aufgenommenen Stunden.\nNimm eine Stunde auf, dann erscheint sie hier."
-            )
+            ContentUnavailableView {
+                Label("Noch keine Stunden", systemImage: "books.vertical")
+            } description: {
+                Text("Nimm eine Stunde auf, dann erscheint sie hier.")
+            }
+            .groupedScreen()
         } else {
-            HStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        filterBar
-                        ForEach(days, id: \.day) { entry in
-                            NavigationLink {
-                                DayView(api: api, day: entry.day, lessons: entry.lessons) {
-                                    await load()
-                                }
-                            } label: {
-                                DayRow(day: entry.day, lessons: entry.lessons)
-                            }
-                            .buttonStyle(PaperPressStyle())
+            List {
+                ForEach(days, id: \.day) { entry in
+                    NavigationLink {
+                        DayView(api: api, day: entry.day, lessons: entry.lessons) {
+                            await load()
                         }
+                    } label: {
+                        DayRow(day: entry.day, lessons: entry.lessons)
                     }
-                    .padding(16)
                 }
-                .refreshable { await load() }
-                MarginDoodles()
             }
+            .listStyle(.insetGrouped)
+            .refreshable { await load() }
         }
     }
 
-    /// Filter chips: subject and sort order.
-    private var filterBar: some View {
-        HStack(spacing: 10) {
-            Menu {
-                Button("Alle Fächer") { subjectFilter = nil }
+    /// Subject filter and sort order, as a standard toolbar menu.
+    private var filterMenu: some View {
+        Menu {
+            Picker("Fach", selection: $subjectFilter) {
+                Text("Alle Fächer").tag(String?.none)
                 ForEach(subjects, id: \.self) { subject in
-                    Button(subject) { subjectFilter = subject }
+                    Text(subject).tag(String?.some(subject))
                 }
-            } label: {
-                chipLabel(subjectFilter ?? "Alle Fächer", highlighted: subjectFilter != nil)
             }
-            Menu {
-                Button("Neueste zuerst") { newestFirst = true }
-                Button("Älteste zuerst") { newestFirst = false }
-            } label: {
-                chipLabel(newestFirst ? "Neueste zuerst" : "Älteste zuerst", highlighted: false)
+            Divider()
+            Picker("Sortierung", selection: $newestFirst) {
+                Text("Neueste zuerst").tag(true)
+                Text("Älteste zuerst").tag(false)
             }
-            Spacer()
+        } label: {
+            Label(
+                "Filter",
+                systemImage: subjectFilter == nil
+                    ? "line.3.horizontal.decrease.circle"
+                    : "line.3.horizontal.decrease.circle.fill"
+            )
         }
-        .padding(.bottom, 4)
-    }
-
-    private func chipLabel(_ text: String, highlighted: Bool) -> some View {
-        HStack(spacing: 5) {
-            Text(text)
-            Image(systemName: "chevron.down").font(.caption2)
-        }
-        .font(.footnote.weight(.medium))
-        .foregroundStyle(highlighted ? Color.white : .primary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(highlighted ? Theme.accent : Theme.card, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
     }
 
     private func load() async {
@@ -137,7 +127,7 @@ struct LessonsView: View {
     }
 }
 
-/// One day as a folder card: date, lesson count, and the subjects inside.
+/// One day as a folder row: date, lesson count, and the subjects inside.
 struct DayRow: View {
     let day: Date
     let lessons: [BackendAPI.LessonInfo]
@@ -145,10 +135,10 @@ struct DayRow: View {
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: "folder.fill")
-                .font(.system(size: 19))
+                .font(.title3)
                 .foregroundStyle(Theme.accent)
-                .frame(width: 44, height: 44)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .frame(width: 40, height: 40)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
                 Text(day.formatted(.dateTime.weekday(.wide).day().month(.wide).year()))
                     .font(.body.weight(.semibold))
@@ -157,14 +147,8 @@ struct DayRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 8)
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .paperCard(cornerRadius: 14)
+        .padding(.vertical, 4)
     }
 
     private var subtitle: String {
@@ -177,7 +161,7 @@ struct DayRow: View {
     }
 }
 
-/// One school day: the day's lessons, one card each.
+/// One school day: the day's lessons as a list.
 struct DayView: View {
     let api: BackendAPI
     let day: Date
@@ -200,28 +184,30 @@ struct DayView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(lessons) { lesson in
-                    NavigationLink {
-                        LessonDetailView(api: api, info: lesson)
+        List {
+            ForEach(lessons) { lesson in
+                NavigationLink {
+                    LessonDetailView(api: api, info: lesson)
+                } label: {
+                    LessonRow(info: lesson)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        Task { await delete(lesson) }
                     } label: {
-                        LessonRow(info: lesson)
+                        Label("Löschen", systemImage: "trash")
                     }
-                    .buttonStyle(PaperPressStyle())
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            Task { await delete(lesson) }
-                        } label: {
-                            Label("Löschen", systemImage: "trash")
-                        }
+                }
+                .contextMenu {
+                    Button(role: .destructive) {
+                        Task { await delete(lesson) }
+                    } label: {
+                        Label("Löschen", systemImage: "trash")
                     }
                 }
             }
-            .padding(16)
         }
-        .paperScreen()
+        .listStyle(.insetGrouped)
         .navigationTitle(day.formatted(date: .complete, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
         .alert(

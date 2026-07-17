@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Live transcript on a notebook card. The connection status lives in the
-/// card header (small dot + label) instead of a separate pill, and there is
-/// no speaker column — the ASR model does not diarize.
+/// Live transcript card. The connection status lives in the card header
+/// (small dot + label), and there is no speaker column — the ASR model does
+/// not diarize.
 struct TranscriptCard: View {
     @Environment(AppModel.self) private var model
 
@@ -12,9 +12,8 @@ struct TranscriptCard: View {
             Divider()
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(LinedPage())
         }
-        .paperCard(cornerRadius: 18)
+        .cardSurface()
         .frame(maxHeight: .infinity)
     }
 
@@ -26,7 +25,7 @@ struct TranscriptCard: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                StatusStamp(text: model.phase.label)
+                StatusLabel(phase: model.phase)
             }
             Spacer()
             if let rtt = model.lastRoundTripMs,
@@ -70,22 +69,6 @@ struct TranscriptCard: View {
     }
 }
 
-/// Lined page with the classic red margin, always visible inside the
-/// transcript card (also before the first word): timestamps live left of the
-/// line, the spoken text right of it.
-struct LinedPage: View {
-    var body: some View {
-        ZStack(alignment: .leading) {
-            RuledLines()
-            Rectangle()
-                .fill(Theme.marginLine)
-                .frame(width: 1.5)
-                .padding(.leading, 66)
-        }
-        .allowsHitTesting(false)
-    }
-}
-
 /// Red "LIVE" capsule shown in the transcript header while recording.
 struct LivePill: View {
     var body: some View {
@@ -101,53 +84,49 @@ struct LivePill: View {
     }
 }
 
-/// Connection status as a faded rubber stamp pressed onto the page, instead
-/// of a colored dot that has no meaning on paper.
-struct StatusStamp: View {
-    let text: String
+/// Connection status: small colored dot + label, like a system status row.
+struct StatusLabel: View {
+    let phase: AppModel.Phase
+
+    private var color: Color {
+        switch phase {
+        case .disconnected: .gray
+        case .connecting, .reconnecting: .orange
+        case .connected: .green
+        case .recording: .red
+        case .error: .red
+        }
+    }
 
     var body: some View {
-        Text(text.uppercased())
-            .font(.caption.weight(.bold))
-            .tracking(1.4)
-            .foregroundStyle(Theme.ink.opacity(0.42))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(Theme.ink.opacity(0.30), lineWidth: 1.2)
-            )
-            .rotationEffect(.degrees(-2))
+        HStack(spacing: 7) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(phase.label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
-/// Empty page: handwritten hint instead of a gray system icon, with a doodle
-/// arrow pointing down toward the record control.
+/// Empty transcript area, using the system empty-state layout.
 struct TranscriptEmptyState: View {
     @Environment(AppModel.self) private var model
 
     private var isRecording: Bool { model.phase == .recording }
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text(isRecording ? "Ich höre zu …" : "Noch ist die Seite leer.")
-                .font(Theme.handwriting(22))
-                .foregroundStyle(Theme.ink.opacity(0.6))
+        ContentUnavailableView {
+            Label(
+                isRecording ? "Ich höre zu" : "Noch keine Aufnahme",
+                systemImage: isRecording ? "waveform" : "mic"
+            )
+        } description: {
             Text(
                 isRecording
                     ? "Gesprochenes erscheint hier."
                     : "Tippe unten auf „Aufnahme starten“."
             )
-            .font(Theme.handwriting(15))
-            .foregroundStyle(Theme.ink.opacity(0.42))
-            if !isRecording {
-                Doodle(name: "doodle-arrow-se", size: 40, rotation: 40)
-                    .padding(.top, 4)
-            }
         }
-        .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
     }
 }
 

@@ -28,7 +28,6 @@ struct SettingsView: View {
                         """
                     )
                 }
-                .listRowBackground(Theme.card)
 
                 Section {
                     Picker("App", selection: $settings.quickSwitchURL) {
@@ -57,7 +56,6 @@ struct SettingsView: View {
                             + "anderes URL-Schema."
                     )
                 }
-                .listRowBackground(Theme.card)
 
                 TimetableSettingsSection()
 
@@ -75,7 +73,6 @@ struct SettingsView: View {
                 } footer: {
                     Text("Erinnert dich einmal am Tag daran, deine fälligen Karten durchzugehen.")
                 }
-                .listRowBackground(Theme.card)
 
                 Section {
                     Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
@@ -89,7 +86,6 @@ struct SettingsView: View {
                             + "Antwort-Notiz (Aufnahme-Bildschirm) an die KI schickt."
                     )
                 }
-                .listRowBackground(Theme.card)
 
                 Section {
                     Picker("Audio-Bitrate", selection: $settings.bitrate) {
@@ -100,7 +96,6 @@ struct SettingsView: View {
                 } footer: {
                     Text("24 kbit/s ≈ 11 MiB pro Stunde Streaming.")
                 }
-                .listRowBackground(Theme.card)
 
                 Section {
                     LabeledContent("Transkription", value: "Qwen3-ASR 1.7B")
@@ -119,10 +114,7 @@ struct SettingsView: View {
                         """
                     )
                 }
-                .listRowBackground(Theme.card)
             }
-            .scrollContentBackground(.hidden)
-            .background(PaperBackground())
             .navigationTitle("Einstellungen")
             .task { await model.refreshTimetable() }
         }
@@ -219,7 +211,6 @@ struct TimetableSettingsSection: View {
         } footer: {
             Text(footerText)
         }
-        .listRowBackground(Theme.card)
     }
 
     @ViewBuilder

@@ -34,7 +34,7 @@ struct ChatView: View {
                 }
                 inputBar
             }
-            .paperScreen()
+            .groupedScreen()
             .navigationTitle("Chat mit KI")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -66,23 +66,12 @@ struct ChatView: View {
     @ViewBuilder
     private var messagesArea: some View {
         if chat.messages.isEmpty {
-            VStack(spacing: 16) {
-                Spacer()
-                HStack(alignment: .top, spacing: 24) {
-                    Doodle(name: "doodle-arrow-se", size: 40, rotation: 12)
-                        .padding(.top, 30)
-                    Text("Frag alles,\nwas du wissen willst!")
-                        .multilineTextAlignment(.center)
-                        .stickyNote(rotation: 2)
-                    Doodle(name: "doodle-bulb", size: 62, rotation: 8)
-                }
-                Text("Antworten nutzen das Transkript der laufenden Aufnahme\noder einer ausgewählten Stunde.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Spacer()
+            ContentUnavailableView {
+                Label("Frag alles, was du wissen willst", systemImage: "bubble.left.and.text.bubble.right")
+            } description: {
+                Text("Antworten nutzen das Transkript der laufenden Aufnahme oder einer ausgewählten Stunde.")
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -125,7 +114,7 @@ struct ChatView: View {
                     .onSubmit(send)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .paperCard(cornerRadius: 22)
+                    .cardSurface(cornerRadius: 22)
                 Button(action: send) {
                     Image(systemName: "paperplane.fill")
                         .font(.system(size: 17, weight: .semibold))
@@ -201,18 +190,18 @@ private struct MessageBubble: View {
             if message.role == .user {
                 Spacer(minLength: 60)
             } else {
-                Image(systemName: "face.smiling")
-                    .font(.system(size: 17))
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 34, height: 34)
-                    .background(Theme.card, in: Circle())
-                    .overlay(Circle().strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1.5))
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accent.opacity(0.12), in: Circle())
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(renderedMarkdown(message.text))
                     .font(.callout)
                     .lineSpacing(3)
                     .textSelection(.enabled)
+                    .foregroundStyle(message.role == .user ? Color.white : .primary)
                 if message.role == .assistant {
                     Button {
                         UIPasteboard.general.string = message.text
@@ -227,12 +216,10 @@ private struct MessageBubble: View {
             }
             .padding(12)
             .background(
-                message.role == .user ? Theme.accent.opacity(0.14) : Theme.card,
-                in: RoundedRectangle(cornerRadius: 14)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                message.role == .user
+                    ? AnyShapeStyle(Theme.accent)
+                    : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             if message.role == .assistant { Spacer(minLength: 60) }
         }

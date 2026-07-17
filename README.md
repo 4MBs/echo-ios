@@ -24,7 +24,7 @@ grounded in what was said, and spaced-repetition quizzes.
 
 | | |
 |---|---|
-| 🎙️ **Live transcription** | Streams mic audio as Opus over a private [Tailscale](https://tailscale.com) network to your own server, which transcribes locally (Qwen3-ASR). The transcript appears live on a lined-paper notebook UI. Nothing leaves your machines except AI requests you trigger. |
+| 🎙️ **Live transcription** | Streams mic audio as Opus over a private [Tailscale](https://tailscale.com) network to your own server, which transcribes locally (Qwen3-ASR). The transcript appears live in the app. Nothing leaves your machines except AI requests you trigger. |
 | 📅 **Timetable-aware** | Connects to WebUntis: recordings are auto-named by subject, teacher and room, and a recording spanning several periods is split into one lesson each. |
 | 📚 **Lesson archive** | Every lesson is stored on the server with transcript and audio. Tap any transcript line to replay exactly what was said at that moment. |
 | ✍️ **Summaries** | One tap per lesson generates a focused summary of what was taught (cached after the first request). |
@@ -33,8 +33,9 @@ grounded in what was said, and spaced-repetition quizzes.
 | 📝 **Answer sticky note** | While recording, a sticky note on the page answers the last N seconds on demand — and a deliberately anonymous Home/Lock-Screen widget does the same. |
 | 📶 **Dead-zone safe** | If the network drops mid-lesson, recording continues and the audio backlog (up to ~100 min) is replayed on reconnect. Nothing said during an outage is lost. |
 
-The whole UI is an old-paper notebook: scanned paper textures, ruled pages with a
-red margin, handwritten headings, sticky notes and hand-drawn margin doodles.
+The UI follows the native iPadOS design language: system sidebar, grouped
+lists, SF Symbols and system typography — it looks and behaves like a
+first-party Apple app.
 
 ## Architecture
 
@@ -90,7 +91,7 @@ Sources/MossLive/            app source
   Audio/                     AVAudioEngine capture → Opus streaming encoder
   Network/                   wire protocol, WebSocket client with resume + backlog
   Model/                     app state machine, settings, stores
-  Views/                     SwiftUI (paper theme, transcript, learn, chat)
+  Views/                     SwiftUI (transcript, lessons, learn, chat)
 Sources/MossLiveWidget/      Home/Lock-Screen answer widget
 LocalPackages/OpusShim/      C shim over libopus (SPM)
 Tests/MossLiveTests/         unit tests
@@ -99,9 +100,6 @@ Tests/MossLiveTests/         unit tests
 
 ## Credits
 
-- Paper and leather textures: [Texturelabs](https://texturelabs.org) (free license)
-- Margin doodles: [Doodle Icons](https://khushmeen.com/icons.html) by
-  Khushmeen Sidhu (CC0)
 - Audio: [libopus](https://opus-codec.org) and
   [swift-opus](https://github.com/alta/swift-opus) (BSD-3-Clause)
 

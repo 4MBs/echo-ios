@@ -33,7 +33,7 @@ struct ReviewView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .paperScreen()
+            .groupedScreen()
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .task { await start() }
@@ -95,7 +95,6 @@ struct ReviewView: View {
                         .foregroundStyle(.tertiary)
                 }
                 ProgressView(value: Double(index), total: Double(cards.count))
-                    .tint(Theme.accent)
 
                 if let origin = card.lessonTitle ?? card.subject {
                     Text(origin)
@@ -106,7 +105,7 @@ struct ReviewView: View {
                     .font(.title3.weight(.semibold))
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .paperCard()
+                    .cardSurface()
 
                 ForEach(Array(card.options.enumerated()), id: \.offset) { option, text in
                     optionButton(option, text)
@@ -119,7 +118,7 @@ struct ReviewView: View {
                             .foregroundStyle(.secondary)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .paperCard(cornerRadius: 12)
+                            .cardSurface(cornerRadius: 12)
                     }
                     if mode == .review, selected != card.answer {
                         Label("Diese Karte kommt morgen wieder.", systemImage: "arrow.uturn.backward")
@@ -131,12 +130,12 @@ struct ReviewView: View {
                     } label: {
                         Text(index + 1 < cards.count ? "Weiter" : "Ergebnis anzeigen")
                             .fontWeight(.semibold)
-                            .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(Theme.accent, in: Capsule())
+                            .padding(.vertical, 6)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.large)
                 }
             }
             .padding(16)
@@ -165,11 +164,12 @@ struct ReviewView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(14)
-            .background(
-                optionColor(option).opacity(selected == nil ? 0 : 0.10),
-                in: RoundedRectangle(cornerRadius: 12)
+            .cardSurface(cornerRadius: 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(optionColor(option).opacity(selected == nil ? 0 : 0.10))
+                    .allowsHitTesting(false)
             )
-            .paperCard(cornerRadius: 12)
         }
         .buttonStyle(.plain)
         .disabled(selected != nil)
@@ -202,7 +202,9 @@ struct ReviewView: View {
 
     private var resultScreen: some View {
         VStack(spacing: 18) {
-            Doodle(name: resultDoodle, size: 84, rotation: 5)
+            Image(systemName: resultSymbol)
+                .font(.system(size: 56))
+                .foregroundStyle(resultColor)
                 .padding(.top, 30)
             Text("\(score) von \(cards.count) richtig")
                 .font(.title2.weight(.bold))
@@ -215,11 +217,18 @@ struct ReviewView: View {
         .padding(20)
     }
 
-    private var resultDoodle: String {
+    private var resultSymbol: String {
         let ratio = Double(score) / Double(max(cards.count, 1))
-        if ratio >= 0.9 { return "doodle-trophy" }
-        if ratio >= 0.6 { return "doodle-rocket" }
-        return "doodle-bulb"
+        if ratio >= 0.9 { return "trophy.fill" }
+        if ratio >= 0.6 { return "hand.thumbsup.fill" }
+        return "lightbulb.fill"
+    }
+
+    private var resultColor: Color {
+        let ratio = Double(score) / Double(max(cards.count, 1))
+        if ratio >= 0.9 { return .yellow }
+        if ratio >= 0.6 { return .green }
+        return .orange
     }
 
     private var resultText: String {

@@ -85,7 +85,6 @@ struct LessonAudioBar: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 ProgressView(value: player.duration > 0 ? min(player.currentTime / player.duration, 1) : 0)
-                    .tint(Theme.accent)
                 HStack {
                     Text(timeString(player.currentTime))
                         .font(.caption2.monospacedDigit())
@@ -98,7 +97,7 @@ struct LessonAudioBar: View {
             }
         }
         .padding(12)
-        .paperCard(cornerRadius: 14)
+        .cardSurface(cornerRadius: 12)
     }
 
     private var trailingLabel: String {
@@ -120,20 +119,16 @@ struct ErrorState: View {
     let retry: (() async -> Void)?
 
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 34))
-                .foregroundStyle(.secondary)
+        ContentUnavailableView {
+            Label("Verbindung fehlgeschlagen", systemImage: "wifi.exclamationmark")
+        } description: {
             Text(message)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        } actions: {
             if let retry {
                 Button("Erneut versuchen") { Task { await retry() } }
                     .buttonStyle(.bordered)
             }
         }
-        .padding(28)
     }
 }
 
@@ -142,31 +137,26 @@ struct EmptyState: View {
     let text: String
 
     var body: some View {
-        VStack(spacing: 12) {
+        ContentUnavailableView {
             Image(systemName: icon)
-                .font(.system(size: 34))
-                .foregroundStyle(.quaternary)
+        } description: {
             Text(text)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
         }
-        .padding(28)
     }
 }
 
-/// One lesson as a notebook card: subject tile, title, meta line, and small
-/// icons for what the lesson already has (audio, summary).
+/// One lesson as a list row: subject tile, title, meta line, and small
+/// icons for what the lesson already has (summary, duration).
 struct LessonRow: View {
     let info: BackendAPI.LessonInfo
 
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: subjectSymbol(for: info.subject))
-                .font(.system(size: 19))
+                .font(.title3)
                 .foregroundStyle(Theme.accent)
-                .frame(width: 44, height: 44)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .frame(width: 40, height: 40)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
                 Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.body.weight(.semibold))
@@ -184,18 +174,10 @@ struct LessonRow: View {
                 }
                 Text(durationChip)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Theme.accent.opacity(0.12), in: Capsule())
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .paperCard(cornerRadius: 14)
+        .padding(.vertical, 4)
     }
 
     private var durationChip: String {
@@ -203,7 +185,7 @@ struct LessonRow: View {
         return minutes > 0 ? "\(minutes) Min" : "\(Int(info.durationSeconds)) s"
     }
 
-    /// Start-end time range (mockup style), plus the room when known.
+    /// Start-end time range, plus the room when known.
     private var secondaryLine: String {
         let start = info.startedAt
         let end = start.addingTimeInterval(info.durationSeconds)

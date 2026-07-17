@@ -26,7 +26,7 @@ struct LessonDetailView: View {
                 ProgressView("Lade Stunde…")
             }
         }
-        .paperScreen()
+        .groupedScreen()
         .navigationTitle(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -85,7 +85,7 @@ struct LessonDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .paperCard(cornerRadius: 14)
+        .cardSurface()
     }
 
     private var headerMeta: String {
@@ -113,7 +113,7 @@ struct LessonDetailView: View {
                         .textSelection(.enabled)
                         .padding(18)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .paperCard()
+                        .cardSurface()
                 } else {
                     VStack(spacing: 14) {
                         Image(systemName: "text.badge.star")
@@ -126,16 +126,13 @@ struct LessonDetailView: View {
                             Task { await generateSummary() }
                         } label: {
                             HStack(spacing: 8) {
-                                if summarizing { ProgressView().tint(.white) }
+                                if summarizing { ProgressView() }
                                 Text(summarizing ? "Wird erstellt…" : "Zusammenfassung erstellen")
-                                    .fontWeight(.semibold)
                             }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 20)
-                            .frame(height: 44)
-                            .background(Theme.accent, in: Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.large)
                         .disabled(summarizing)
                     }
                     .frame(maxWidth: .infinity)
@@ -197,7 +194,7 @@ struct LessonDetailView: View {
                 }
                 .padding(14)
             }
-            .paperCard()
+            .cardSurface()
         }
     }
 }
