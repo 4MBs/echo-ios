@@ -99,8 +99,7 @@ Tests/MossLiveTests/         unit tests
 
 ## Credits
 
-- Paper textures: [Texturelabs](https://texturelabs.org) (free license) and
-  public-domain scans from [Wikimedia Commons](https://commons.wikimedia.org)
+- Paper and leather textures: [Texturelabs](https://texturelabs.org) (free license)
 - Margin doodles: [Doodle Icons](https://khushmeen.com/icons.html) by
   Khushmeen Sidhu (CC0)
 - Audio: [libopus](https://opus-codec.org) and
