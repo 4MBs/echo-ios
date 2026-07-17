@@ -87,6 +87,8 @@ struct SettingsView: View {
                     )
                 }
 
+                AIModelSection()
+
                 Section {
                     Picker("Audio-Bitrate", selection: $settings.bitrate) {
                         Text("16 kbit/s (wenigste Daten)").tag(16000)
@@ -99,7 +101,6 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Transkription", value: "Qwen3-ASR 1.7B")
-                    LabeledContent("Antworten", value: "Gemini 3.5 Flash")
                     LabeledContent("Version", value: appVersion)
                     LabeledContent("Widget-Verbindung", value: SharedConfig.resolvedGroupID ?? "nicht verfügbar")
                         .font(.footnote)
@@ -110,7 +111,7 @@ struct SettingsView: View {
                         """
                         Audio wird nur auf deinem eigenen Server verarbeitet; nichts geht an \
                         Dritte, außer dem Transkript-Ausschnitt, der bei einer KI-Anfrage an \
-                        Gemini geschickt wird.
+                        die gewählte KI (Gemini oder ChatGPT) geschickt wird.
                         """
                     )
                 }
