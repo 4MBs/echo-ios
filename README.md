@@ -54,7 +54,11 @@ displays, and asks.
 
 1. **Backend**: run the companion backend on a Linux or Windows machine with a
    GPU (NVIDIA or AMD) and note its auth token and Tailscale address. Both
-   devices must be in the same tailnet.
+   devices must be in the same tailnet: install the free
+   [Tailscale app](https://apps.apple.com/app/tailscale/id1470499037) on the
+   iPad, sign in with the same account as on the server, and keep it connected
+   while using Echo (the backend README walks through the whole Tailscale
+   setup).
 2. **App**: build the IPA (see below) and install it on the iPad.
 3. **Connect**: on first launch the app opens its settings — enter the server's
    Tailscale address, port (default `8787`) and auth token
