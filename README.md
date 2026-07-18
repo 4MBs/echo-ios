@@ -41,8 +41,8 @@ first-party Apple app.
 
 ```mermaid
 flowchart LR
-    A["📱 Echo (iPad)\nSwiftUI · AVAudioEngine · Opus"] -- "WebSocket over Tailscale\naudio ⬆ · transcript ⬇" --> B["🖥️ Backend (your Linux box)\nFastAPI · Qwen3-ASR"]
-    B -- "summaries · chat · quiz cards" --> C["Gemini CLI"]
+    A["📱 Echo (iPad)\nSwiftUI · AVAudioEngine · Opus"] -- "WebSocket over Tailscale\naudio ⬆ · transcript ⬇" --> B["🖥️ Backend (your Linux/Windows machine)\nFastAPI · Qwen3-ASR"]
+    B -- "summaries · chat · quiz cards" --> C["ChatGPT (Codex CLI)\nor Gemini (Antigravity CLI)"]
     B -- "timetable" --> D["WebUntis"]
 ```
 
@@ -52,9 +52,9 @@ displays, and asks.
 
 ## Setup
 
-1. **Backend**: run the companion backend on a Linux machine with a GPU and note
-   its auth token and Tailscale address. Both devices must be in the same
-   tailnet.
+1. **Backend**: run the companion backend on a Linux or Windows machine with a
+   GPU (NVIDIA or AMD) and note its auth token and Tailscale address. Both
+   devices must be in the same tailnet.
 2. **App**: build the IPA (see below) and install it on the iPad.
 3. **Connect**: on first launch the app opens its settings — enter the server's
    Tailscale address, port (default `8787`) and auth token
