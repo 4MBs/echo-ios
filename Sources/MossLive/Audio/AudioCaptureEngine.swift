@@ -16,13 +16,30 @@ import os
 final class AudioCaptureEngine {
     enum CaptureError: LocalizedError {
         case microphoneDenied
+        case audioSessionBusy
 
         var errorDescription: String? {
             switch self {
             case .microphoneDenied:
                 "Mikrofonzugriff verweigert. In den iOS-Einstellungen unter Datenschutz > Mikrofon erlauben."
+            case .audioSessionBusy:
+                "Mikrofon wird von einer anderen App belegt (z. B. ein Discord- oder Telefon-Anruf). "
+                    + "Bitte diese App schließen oder den Anruf beenden und erneut starten."
             }
         }
+    }
+
+    /// A failed `setActive` often means another app (a Discord/FaceTime/phone
+    /// call) owns the audio session; translate those OSStatus codes into a
+    /// clear message instead of surfacing a cryptic activation error.
+    private static func activationError(_ error: Error) -> Error {
+        let busy: Set<Int> = [
+            AVAudioSession.ErrorCode.insufficientPriority.rawValue,
+            AVAudioSession.ErrorCode.isBusy.rawValue,
+            AVAudioSession.ErrorCode.cannotStartRecording.rawValue,
+            AVAudioSession.ErrorCode.cannotInterruptOthers.rawValue,
+        ]
+        return busy.contains((error as NSError).code) ? CaptureError.audioSessionBusy : error
     }
 
     private let log = Logger(subsystem: "com.fourmbs.mosslive", category: "audio")
@@ -68,7 +85,11 @@ final class AudioCaptureEngine {
                                 options: [.allowBluetooth, .duckOthers])
         try? session.setPreferredSampleRate(48000)
         try? session.setPreferredIOBufferDuration(0.02)
-        try session.setActive(true, options: [])
+        do {
+            try session.setActive(true, options: [])
+        } catch {
+            throw Self.activationError(error)
+        }
         if session.isInputGainSettable {
             try? session.setInputGain(1.0)
         }
