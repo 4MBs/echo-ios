@@ -53,6 +53,7 @@ struct LearnView: View {
                     Text("Nimm eine Stunde auf, dann erscheinen hier ihre Karten.")
                 }
                 .groupedScreen()
+                .onAppear { Task { await load() } }
             } else {
                 List {
                     todaySection(overview)
