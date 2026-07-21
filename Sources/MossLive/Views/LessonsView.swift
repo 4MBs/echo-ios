@@ -27,17 +27,7 @@ struct LessonsView: View {
         NavigationStack {
             content
                 .navigationTitle("Stunden")
-                // Pinned explicitly (not .automatic): DayView pushes with
-                // .inline, and leaving this ambiguous made the title/search
-                // bar visibly lag a beat behind the list content when
-                // popping back — this locks the size so there's nothing to
-                // resolve mid-transition.
-                .navigationBarTitleDisplayMode(.large)
-                .searchable(
-                    text: $searchText,
-                    placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Suchen"
-                )
+                .searchable(text: $searchText, prompt: "Suchen")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         filterMenu
