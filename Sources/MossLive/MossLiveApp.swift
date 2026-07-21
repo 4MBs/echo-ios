@@ -31,6 +31,9 @@ struct MainTabView: View {
             Tab("Lernen", systemImage: "brain.head.profile", value: .lernen) {
                 LearnView()
             }
+            Tab("Bibliothek", systemImage: "book.closed", value: .bibliothek) {
+                LibraryView()
+            }
             Tab("Chat mit KI", systemImage: "bubble.left.and.text.bubble.right", value: .chat) {
                 ChatView()
             }
@@ -49,5 +52,5 @@ struct MainTabView: View {
 }
 
 enum AppTab: Hashable {
-    case aufnahme, stunden, lernen, chat, einstellungen
+    case aufnahme, stunden, lernen, bibliothek, chat, einstellungen
 }

@@ -129,7 +129,8 @@ struct BackendAPI {
     let port: Int
     let token: String
 
-    private func url(_ path: String, query: [URLQueryItem]? = nil) throws -> URL {
+    // internal: BackendAPI extensions in other files build on this
+    func url(_ path: String, query: [URLQueryItem]? = nil) throws -> URL {
         let cleanHost = host.trimmingCharacters(in: .whitespaces)
         var comps = URLComponents()
         comps.scheme = "http"
