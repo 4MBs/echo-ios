@@ -1,8 +1,8 @@
 import Foundation
 
 /// Bibliothek: the schoolbook PDFs live in one folder on the server machine.
-/// The app lists them and downloads each book once into its cache — after
-/// that it opens instantly and works offline.
+/// The app lists them and downloads each book once into persistent app storage
+/// on the iPad — after that it opens instantly and works offline.
 extension BackendAPI {
     struct Book: Decodable, Identifiable, Hashable, Sendable {
         let id: String
@@ -25,19 +25,48 @@ extension BackendAPI {
     }
 
     private static func booksDirectory() -> URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("library-books", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
+    private static func legacyCachedBook(id: String) -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("library-books", isDirectory: true)
+            .appendingPathComponent("\(id).pdf")
+    }
+
     /// The already-downloaded copy of a book, if there is one.
     static func cachedBook(id: String) -> URL? {
         let url = booksDirectory().appendingPathComponent("\(id).pdf")
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+
+        // Preserve downloads made by earlier versions, which incorrectly used
+        // iOS's purgeable Caches directory.
+        let legacy = legacyCachedBook(id: id)
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return nil }
+        do {
+            try FileManager.default.moveItem(at: legacy, to: url)
+            return url
+        } catch {
+            return nil
+        }
     }
 
-    /// Download a book into the cache, reporting progress (0...1). Books are
+    func bookCover(_ book: Book) async throws -> Data {
+        var coverRequest = try URLRequest(url: url("/library/\(book.id)/cover"))
+        coverRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        coverRequest.cachePolicy = .returnCacheDataElseLoad
+        let (data, response) = try await URLSession.shared.data(for: coverRequest)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200 ..< 300).contains(status) else {
+            throw APIError(message: "Buchcover nicht verfügbar (HTTP \(status)).")
+        }
+        return data
+    }
+
+    /// Download a book into persistent app storage, reporting progress (0...1). Books are
     /// large (up to a few hundred MB), so a download task streams straight to
     /// disk instead of going through memory.
     func downloadBook(

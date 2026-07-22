@@ -4,7 +4,7 @@ import SwiftUI
 /// One book, presented like the web reader the schoolbooks come from: pages
 /// fill the screen, and a bottom bar carries page navigation (‹ 2 – 3 ›) plus
 /// the one-page / two-page switcher. The first open downloads the PDF from
-/// the server (once); after that the cached copy opens instantly.
+/// the server once; after that the persistent on-device copy opens instantly.
 struct BookReaderView: View {
     let api: BackendAPI
     let book: BackendAPI.Book
@@ -79,20 +79,16 @@ private struct PDFReader: View {
 
     var body: some View {
         PDFKitView(url: url, twoUp: twoUp, proxy: proxy, pageLabel: $pageLabel)
-            .safeAreaInset(edge: .bottom, spacing: 0) { controlBar }
-    }
-
-    private var controlBar: some View {
-        ZStack {
-            pageControls
-            HStack {
-                modeToggle
-                Spacer()
+            .background(Color(.systemGroupedBackground))
+            .toolbar {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    modeToggle
+                    Spacer()
+                    pageControls
+                    Spacer()
+                    Color.clear.frame(width: 112, height: 1)
+                }
             }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.bar)
     }
 
     /// ‹ [2 – 3] › — the same center group as the web reader.
@@ -120,39 +116,17 @@ private struct PDFReader: View {
             }
             .accessibilityLabel("Nächste Seite")
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.glass)
     }
 
     /// Einzelseite / Doppelseite, like the reader's view-mode group.
     private var modeToggle: some View {
-        HStack(spacing: 4) {
-            modeButton("rectangle.portrait", label: "Einzelseite", active: !twoUp) { twoUp = false }
-            modeButton("book", label: "Doppelseite", active: twoUp) { twoUp = true }
+        Picker("Seitendarstellung", selection: $twoUp) {
+            Image(systemName: "rectangle.portrait").tag(false)
+            Image(systemName: "book.pages").tag(true)
         }
-        .padding(4)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func modeButton(
-        _ icon: String,
-        label: String,
-        active: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.body)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    active ? Theme.accent.opacity(0.18) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                )
-                .foregroundStyle(active ? Theme.accent : Color.secondary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityAddTraits(active ? .isSelected : [])
+        .pickerStyle(.segmented)
+        .frame(width: 112)
     }
 }
 
@@ -176,9 +150,8 @@ private struct PDFKitView: UIViewRepresentable {
         proxy.pdfView = pdfView
         pdfView.autoScales = true
         pdfView.displayDirection = .horizontal
-        pdfView.usePageViewController(true, withViewOptions: [
-            UIPageViewController.OptionsKey.interPageSpacing: 12,
-        ])
+        pdfView.displaysPageBreaks = true
+        pdfView.pageBreakMargins = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         pdfView.document = PDFDocument(url: url)
         applyMode(pdfView)
         context.coordinator.observe(pdfView)
@@ -193,10 +166,12 @@ private struct PDFKitView: UIViewRepresentable {
     /// re-setting the display mode would visibly re-layout the page.
     private func applyMode(_ view: PDFView) {
         let mode: PDFDisplayMode = twoUp ? .twoUp : .singlePage
-        guard view.displayMode != mode else { return }
+        guard view.displayMode != mode || view.displaysAsBook != twoUp else { return }
         let page = view.currentPage
-        view.displayMode = mode
         view.displaysAsBook = twoUp
+        view.displayMode = mode
+        view.layoutDocumentView()
+        view.autoScales = true
         if let page { view.go(to: page) }
     }
 

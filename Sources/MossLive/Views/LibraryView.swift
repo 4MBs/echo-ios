@@ -1,21 +1,13 @@
 import SwiftUI
 
-/// "Bibliothek": the schoolbook shelf. The books are PDFs in one folder on
-/// the server machine; tapping one opens it in the reader (downloaded once,
-/// then cached on the iPad).
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
-
     @State private var books: [BackendAPI.Book] = []
     @State private var loading = true
     @State private var errorMessage: String?
 
     private var api: BackendAPI {
-        BackendAPI(
-            host: model.settings.serverHost,
-            port: model.settings.serverPort,
-            token: model.settings.authToken
-        )
+        BackendAPI(host: model.settings.serverHost, port: model.settings.serverPort, token: model.settings.authToken)
     }
 
     var body: some View {
@@ -29,32 +21,27 @@ struct LibraryView: View {
         .task { await load() }
     }
 
-    @ViewBuilder
-    private var content: some View {
+    @ViewBuilder private var content: some View {
         if loading {
-            ProgressView("Lade Bücher…")
-                .groupedScreen()
+            ProgressView("Lade Bücher…").groupedScreen()
         } else if let errorMessage {
-            ErrorState(message: errorMessage) { await load() }
-                .groupedScreen()
+            ErrorState(message: errorMessage) { await load() }.groupedScreen()
         } else if books.isEmpty {
-            ContentUnavailableView {
-                Label("Keine Bücher", systemImage: "books.vertical")
-            } description: {
-                Text("Lege PDF-Dateien in den Bibliotheks-Ordner auf dem Server, dann erscheinen sie hier.")
-            }
-            .groupedScreen()
+            ContentUnavailableView("Keine Bücher", systemImage: "books.vertical", description: Text("Lege PDF-Dateien in den Bibliotheks-Ordner auf dem Server."))
+                .groupedScreen()
         } else {
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 148, maximum: 210), spacing: 24)], spacing: 28) {
                     ForEach(books) { book in
                         NavigationLink(value: book) {
-                            BookCard(book: book)
+                            BookCover(api: api, book: book)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(book.title)
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
             }
             .groupedScreen()
             .refreshable { await load() }
@@ -62,60 +49,44 @@ struct LibraryView: View {
     }
 
     private func load() async {
-        loading = books.isEmpty // pull-to-refresh must not blank the shelf
+        loading = books.isEmpty
         errorMessage = nil
-        do {
-            books = try await api.listBooks()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        do { books = try await api.listBooks() }
+        catch { errorMessage = error.localizedDescription }
         loading = false
     }
 }
 
-/// One shelf tile. Schoolbook file names follow a "Titel - Reihe - Verlag"
-/// pattern, so the first segment becomes the headline and the rest the
-/// subtitle line.
-private struct BookCard: View {
+private struct BookCover: View {
+    let api: BackendAPI
     let book: BackendAPI.Book
-
-    private var parts: (title: String, subtitle: String?) {
-        let pieces = book.title.components(separatedBy: " - ")
-        guard pieces.count > 1 else { return (book.title, nil) }
-        return (pieces[0], pieces.dropFirst().joined(separator: " · "))
-    }
+    @State private var image: UIImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: "book.closed.fill")
-                .font(.largeTitle)
-                .foregroundStyle(Theme.accent)
-            Text(parts.title)
-                .font(.headline)
-                .multilineTextAlignment(.leading)
-                .lineLimit(3)
-            if let subtitle = parts.subtitle {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            Spacer(minLength: 0)
-            HStack {
-                Text(ByteCountFormatter.string(fromByteCount: book.sizeBytes, countStyle: .file))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                if BackendAPI.cachedBook(id: book.id) != nil {
-                    Label("Geladen", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.iconOnly)
-                        .font(.caption)
-                        .foregroundStyle(.green)
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Color(.secondarySystemGroupedBackground)
+                    Image(systemName: "book.closed")
+                        .font(.system(size: 36, weight: .light))
+                        .foregroundStyle(.tertiary)
                 }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
-        .cardSurface()
+        .aspectRatio(0.72, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 8, y: 4)
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .task(id: book.id) {
+            guard let data = try? await api.bookCover(book), !Task.isCancelled else { return }
+            image = UIImage(data: data)
+        }
     }
 }
