@@ -89,20 +89,23 @@ private struct PDFReader: View {
         )
             .id(twoUp)
             .background(Color(.systemGroupedBackground))
-            .toolbar {
-                ToolbarItemGroup(placement: .bottomBar) {
-                    modeToggle
-                    Spacer()
-                    pageControls
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Öffnen") {
-                        proxy.go(toPage: currentPage)
-                        pageFieldFocused = false
-                    }
-                }
+            .simultaneousGesture(TapGesture().onEnded { pageFieldFocused = false })
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                controlBar
             }
+    }
+
+    private var controlBar: some View {
+        ZStack {
+            pageControls
+            HStack {
+                modeToggle
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     /// Previous/next buttons plus an editable current-page field.
@@ -117,13 +120,14 @@ private struct PDFReader: View {
 
             HStack(spacing: 4) {
                 TextField("Seite", value: $currentPage, format: .number)
-                    .multilineTextAlignment(.trailing)
+                    .multilineTextAlignment(.center)
                     .font(.subheadline.monospacedDigit().weight(.semibold))
                     .frame(width: 44)
                     .keyboardType(.numberPad)
                     .focused($pageFieldFocused)
-                    .submitLabel(.go)
-                    .onSubmit { proxy.go(toPage: currentPage) }
+                    .onChange(of: currentPage) { _, page in
+                        if pageFieldFocused { proxy.go(toPage: page) }
+                    }
                     .accessibilityLabel("Seitennummer")
 
                 Text("/ \(pageCount)")
@@ -162,6 +166,7 @@ private struct PDFReader: View {
         } label: {
             Image(systemName: twoUp ? "rectangle.portrait.on.rectangle.portrait" : "rectangle.portrait")
         }
+        .buttonStyle(.glass)
         .accessibilityLabel("Seitendarstellung")
     }
 }
@@ -191,14 +196,15 @@ private struct PDFKitView: UIViewRepresentable {
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
         proxy.pdfView = pdfView
-        pdfView.autoScales = true
         pdfView.displayDirection = .horizontal
-        pdfView.displaysAsBook = twoUp
-        pdfView.displayMode = twoUp ? .twoUp : .singlePage
-        pdfView.usePageViewController(true, withViewOptions: [
-            UIPageViewController.OptionsKey.interPageSpacing: 12,
-        ])
         pdfView.document = PDFDocument(url: url)
+        pdfView.displaysAsBook = twoUp
+        // Continuous horizontal modes preserve native finger scrolling while
+        // reliably laying out either one page or a real two-page spread.
+        pdfView.displayMode = twoUp ? .twoUpContinuous : .singlePageContinuous
+        pdfView.displaysPageBreaks = true
+        pdfView.pageBreakMargins = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        pdfView.autoScales = true
         if let page = pdfView.document?.page(at: max(currentPage - 1, 0)) {
             pdfView.go(to: page)
         }
