@@ -74,24 +74,38 @@ private struct PDFReader: View {
     let url: URL
 
     @State private var twoUp = true
-    @State private var pageLabel = ""
+    @State private var currentPage = 1
+    @State private var pageCount = 0
     @State private var proxy = PDFViewProxy()
+    @FocusState private var pageFieldFocused: Bool
 
     var body: some View {
-        PDFKitView(url: url, twoUp: twoUp, proxy: proxy, pageLabel: $pageLabel)
+        PDFKitView(
+            url: url,
+            twoUp: twoUp,
+            proxy: proxy,
+            currentPage: $currentPage,
+            pageCount: $pageCount
+        )
+            .id(twoUp)
             .background(Color(.systemGroupedBackground))
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     modeToggle
                     Spacer()
                     pageControls
+                }
+                ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Color.clear.frame(width: 112, height: 1)
+                    Button("Öffnen") {
+                        proxy.go(toPage: currentPage)
+                        pageFieldFocused = false
+                    }
                 }
             }
     }
 
-    /// ‹ [2 – 3] › — the same center group as the web reader.
+    /// Previous/next buttons plus an editable current-page field.
     private var pageControls: some View {
         HStack(spacing: 12) {
             Button {
@@ -101,13 +115,24 @@ private struct PDFReader: View {
             }
             .accessibilityLabel("Vorherige Seite")
 
-            Text(pageLabel)
-                .font(.subheadline.monospacedDigit().weight(.semibold))
-                .frame(minWidth: 64)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .accessibilityLabel("Seite \(pageLabel)")
+            HStack(spacing: 4) {
+                TextField("Seite", value: $currentPage, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                    .frame(width: 44)
+                    .keyboardType(.numberPad)
+                    .focused($pageFieldFocused)
+                    .submitLabel(.go)
+                    .onSubmit { proxy.go(toPage: currentPage) }
+                    .accessibilityLabel("Seitennummer")
+
+                Text("/ \(pageCount)")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
 
             Button {
                 proxy.pdfView?.goToNextPage(nil)
@@ -119,14 +144,25 @@ private struct PDFReader: View {
         .buttonStyle(.glass)
     }
 
-    /// Einzelseite / Doppelseite, like the reader's view-mode group.
+    /// A compact native menu keeps the toolbar quiet while making both layouts
+    /// explicit when opened.
     private var modeToggle: some View {
-        Picker("Seitendarstellung", selection: $twoUp) {
-            Image(systemName: "rectangle.portrait").tag(false)
-            Image(systemName: "book.pages").tag(true)
+        Menu {
+            Button {
+                twoUp = false
+            } label: {
+                Label("Einzelseite", systemImage: "rectangle.portrait")
+            }
+
+            Button {
+                twoUp = true
+            } label: {
+                Label("Doppelseite", systemImage: "rectangle.portrait.on.rectangle.portrait")
+            }
+        } label: {
+            Image(systemName: twoUp ? "rectangle.portrait.on.rectangle.portrait" : "rectangle.portrait")
         }
-        .pickerStyle(.segmented)
-        .frame(width: 112)
+        .accessibilityLabel("Seitendarstellung")
     }
 }
 
@@ -134,6 +170,12 @@ private struct PDFReader: View {
 /// exists once makeUIView has run).
 private final class PDFViewProxy {
     weak var pdfView: PDFView?
+
+    func go(toPage number: Int) {
+        guard let pdfView, let document = pdfView.document, document.pageCount > 0 else { return }
+        let index = min(max(number - 1, 0), document.pageCount - 1)
+        if let page = document.page(at: index) { pdfView.go(to: page) }
+    }
 }
 
 /// PDFKit wrapper: horizontal page-curl navigation, auto-scaled pages, and
@@ -143,50 +185,41 @@ private struct PDFKitView: UIViewRepresentable {
     let url: URL
     let twoUp: Bool
     let proxy: PDFViewProxy
-    @Binding var pageLabel: String
+    @Binding var currentPage: Int
+    @Binding var pageCount: Int
 
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
         proxy.pdfView = pdfView
         pdfView.autoScales = true
         pdfView.displayDirection = .horizontal
-        pdfView.displaysPageBreaks = true
-        pdfView.pageBreakMargins = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        pdfView.displaysAsBook = twoUp
+        pdfView.displayMode = twoUp ? .twoUp : .singlePage
+        pdfView.usePageViewController(true, withViewOptions: [
+            UIPageViewController.OptionsKey.interPageSpacing: 12,
+        ])
         pdfView.document = PDFDocument(url: url)
-        applyMode(pdfView)
+        if let page = pdfView.document?.page(at: max(currentPage - 1, 0)) {
+            pdfView.go(to: page)
+        }
         context.coordinator.observe(pdfView)
+        DispatchQueue.main.async { updatePageState(pdfView) }
         return pdfView
     }
 
-    func updateUIView(_ view: PDFView, context: Context) {
-        applyMode(view)
-    }
-
-    /// Idempotent: updateUIView also runs for unrelated state changes, and
-    /// re-setting the display mode would visibly re-layout the page.
-    private func applyMode(_ view: PDFView) {
-        let mode: PDFDisplayMode = twoUp ? .twoUp : .singlePage
-        guard view.displayMode != mode || view.displaysAsBook != twoUp else { return }
-        let page = view.currentPage
-        view.displaysAsBook = twoUp
-        view.displayMode = mode
-        view.layoutDocumentView()
-        view.autoScales = true
-        if let page { view.go(to: page) }
-    }
+    func updateUIView(_ view: PDFView, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator { view in
-            pageLabel = Self.label(for: view)
+            updatePageState(view)
         }
     }
 
-    /// "3" in single-page mode, "2 – 3" for a spread.
-    private static func label(for view: PDFView) -> String {
-        guard let document = view.document else { return "" }
-        let numbers = view.visiblePages.map { document.index(for: $0) + 1 }.sorted()
-        guard let first = numbers.first, let last = numbers.last else { return "" }
-        return first == last ? "\(first)" : "\(first) – \(last)"
+    private func updatePageState(_ view: PDFView) {
+        guard let document = view.document else { return }
+        pageCount = document.pageCount
+        let visible = view.visiblePages.map { document.index(for: $0) + 1 }
+        if let first = visible.min() { currentPage = first }
     }
 
     final class Coordinator {
