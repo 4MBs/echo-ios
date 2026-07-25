@@ -10,7 +10,7 @@ struct LessonDetailView: View {
     let info: BackendAPI.LessonInfo
 
     @Environment(AppModel.self) private var model
-    @State private var savedAt: Date?
+    @State private var loadError: Error?
     @State private var tab: Tab = .zusammenfassung
     @State private var detail: BackendAPI.LessonDetail?
     @State private var summary: String?
@@ -22,8 +22,8 @@ struct LessonDetailView: View {
         Group {
             if let detail {
                 loadedContent(detail)
-            } else if let errorMessage {
-                ErrorState(message: errorMessage, retry: nil)
+            } else if let loadError {
+                ErrorState(loadError)
                     .groupedScreen()
             } else {
                 ProgressView("Lade Stunde…")
@@ -50,7 +50,6 @@ struct LessonDetailView: View {
             }
         }
         .onDisappear { audioPlayer.stop() }
-        .offlineBar(savedAt: savedAt)
         .task { await load() }
     }
 
@@ -61,16 +60,14 @@ struct LessonDetailView: View {
         if let stored = OfflineCache.load(BackendAPI.LessonDetail.self, key: key) {
             detail = stored
             summary = stored.summary
-            savedAt = OfflineCache.savedAt(key: key)
         }
         do {
             let loaded = try await api.lesson(id: info.id)
             detail = loaded
             summary = loaded.summary
             OfflineCache.save(loaded, as: key)
-            savedAt = OfflineCache.savedAt(key: key)
         } catch {
-            if detail == nil { errorMessage = error.localizedDescription }
+            if detail == nil { loadError = error }
         }
     }
 
@@ -167,7 +164,9 @@ struct LessonDetailView: View {
                     .disabled(summarizing || !model.connectivity.isOnline)
                     // Writing one is the AI's job, and the AI is on the server.
                     if !model.connectivity.isOnline {
-                        OfflineHint("Dafür wird eine Verbindung gebraucht.")
+                        Text("Dafür wird eine Verbindung zum Server gebraucht.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity)

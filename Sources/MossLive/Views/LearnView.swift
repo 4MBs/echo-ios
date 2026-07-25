@@ -14,8 +14,7 @@ struct LearnView: View {
     @State private var cards: [BackendAPI.LearnCard] = []
     @State private var loading = true
     @State private var refreshing = false
-    @State private var errorMessage: String?
-    @State private var savedAt: Date?
+    @State private var loadError: Error?
 
     private var api: BackendAPI { model.api }
 
@@ -32,7 +31,6 @@ struct LearnView: View {
         NavigationStack {
             content
                 .navigationTitle("Lernen")
-                .offlineBar(savedAt: savedAt)
         }
     }
 
@@ -108,8 +106,8 @@ struct LearnView: View {
             ProgressView("Lade Lernstand…")
                 .groupedScreen()
                 .onAppear { Task { await load() } }
-        } else if shownOverview == nil, let errorMessage {
-            ErrorState(message: errorMessage) { await load() }
+        } else if shownOverview == nil, let loadError {
+            ErrorState(loadError) { await load() }
                 .groupedScreen()
         } else if let overview = shownOverview {
             if overview.cardTotal == 0, pendingLessons.isEmpty {
@@ -231,8 +229,8 @@ struct LearnView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: model.connectivity.isOnline ? "plus.circle" : "wifi.slash")
-                    .foregroundStyle(model.connectivity.isOnline ? Theme.accent : .secondary)
+                Image(systemName: "plus.circle")
+                    .foregroundStyle(Theme.accent)
             }
             .padding(.vertical, 2)
         }
@@ -274,10 +272,9 @@ struct LearnView: View {
             overview = OfflineCache.load(BackendAPI.LearnOverview.self, key: overviewKey)
             cards = OfflineCache.load([BackendAPI.LearnCard].self, key: cardsKey) ?? []
             lessons = OfflineCache.load([BackendAPI.LessonInfo].self, key: lessonsKey) ?? []
-            savedAt = OfflineCache.savedAt(key: cardsKey)
         }
         if shownOverview == nil { loading = true }
-        errorMessage = nil
+        loadError = nil
         do {
             async let remoteOverview = api.learnOverview()
             async let remoteLessons = api.listLessons()
@@ -293,10 +290,9 @@ struct LearnView: View {
             OfflineCache.save(fetchedOverview, as: overviewKey)
             OfflineCache.save(lessons, as: lessonsKey)
             OfflineCache.save(fetchedCards, as: cardsKey)
-            savedAt = OfflineCache.savedAt(key: cardsKey)
             await model.flushQueuedReviews()
         } catch {
-            if shownOverview == nil { errorMessage = error.localizedDescription }
+            if shownOverview == nil { loadError = error }
         }
         loading = false
     }

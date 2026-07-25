@@ -8,13 +8,12 @@ struct LessonsView: View {
 
     @State private var lessons: [BackendAPI.LessonInfo] = []
     @State private var loading = true
-    @State private var errorMessage: String?
+    @State private var loadError: Error?
     @State private var subjectFilter: String?
     @State private var newestFirst = true
     @State private var searchText = ""
     @State private var dayToDelete: Date?
     @State private var actionError: String?
-    @State private var savedAt: Date?
 
     private var api: BackendAPI { model.api }
 
@@ -22,7 +21,6 @@ struct LessonsView: View {
         NavigationStack {
             content
                 .navigationTitle("Stunden")
-                .offlineBar(savedAt: savedAt)
                 .searchable(text: $searchText, prompt: "Suchen")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -62,8 +60,8 @@ struct LessonsView: View {
         if loading {
             ProgressView("Lade Stunden…")
                 .groupedScreen()
-        } else if lessons.isEmpty, let errorMessage {
-            ErrorState(message: errorMessage) { await load() }
+        } else if lessons.isEmpty, let loadError {
+            ErrorState(loadError) { await load() }
                 .groupedScreen()
         } else if lessons.isEmpty {
             ContentUnavailableView {
@@ -151,19 +149,17 @@ struct LessonsView: View {
         let key = OfflineCache.Key.lessons
         if lessons.isEmpty, let cached = OfflineCache.load([BackendAPI.LessonInfo].self, key: key) {
             lessons = cached
-            savedAt = OfflineCache.savedAt(key: key)
         }
         loading = lessons.isEmpty
-        errorMessage = nil
+        loadError = nil
         do {
             let fresh = try await api.listLessons().filter { $0.segmentCount > 0 }
             lessons = fresh
             OfflineCache.save(fresh, as: key)
-            savedAt = OfflineCache.savedAt(key: key)
         } catch {
             // The archive is a list of what was recorded on this iPad. Keeping
             // it readable without the server is the whole point of storing it.
-            if lessons.isEmpty { errorMessage = error.localizedDescription }
+            if lessons.isEmpty { loadError = error }
         }
         loading = false
     }

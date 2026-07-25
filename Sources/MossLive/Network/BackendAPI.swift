@@ -128,6 +128,10 @@ struct BackendAPI {
         /// with bad news. Screens treat the two differently: one falls back to
         /// what is stored on the iPad, the other is a real error worth showing.
         var isOffline = false
+        /// The HTTP status, when the server did answer. This is how a screen
+        /// tells a refusal it should explain ("this lesson is too short for a
+        /// quiz") from a fault it should offer to retry.
+        var status: Int?
         var errorDescription: String? { message }
     }
 
@@ -189,7 +193,7 @@ struct BackendAPI {
                 let error: String?
             }
             let detail = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error
-            throw APIError(message: detail ?? "Serverfehler (HTTP \(status)).")
+            throw APIError(message: detail ?? "Serverfehler (HTTP \(status)).", status: status)
         }
         return data
     }

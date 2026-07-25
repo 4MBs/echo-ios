@@ -21,7 +21,7 @@ struct ReviewView: View {
         case loading
         case running
         case finished
-        case failed(String)
+        case failed(Error)
     }
 
     @Environment(AppModel.self) private var model
@@ -56,8 +56,8 @@ struct ReviewView: View {
             questionScreen
         case .finished:
             resultScreen
-        case .failed(let message):
-            ErrorState(message: message) { await start() }
+        case .failed(let error):
+            ErrorState(error) { await start() }
         }
     }
 
@@ -66,7 +66,7 @@ struct ReviewView: View {
         do {
             let loaded = try await loader()
             guard !loaded.isEmpty else {
-                phase = .failed("Keine Karten gefunden.")
+                phase = .failed(BackendAPI.APIError(message: "Keine Karten gefunden."))
                 return
             }
             cards = loaded
@@ -75,7 +75,7 @@ struct ReviewView: View {
             selected = nil
             phase = .running
         } catch {
-            phase = .failed(error.localizedDescription)
+            phase = .failed(error)
         }
     }
 

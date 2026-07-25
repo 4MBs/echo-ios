@@ -253,7 +253,9 @@ struct TimetableSettingsSection: View {
         }
         .disabled(busy || school.isEmpty || username.isEmpty || password.isEmpty || !model.connectivity.isOnline)
         if !model.connectivity.isOnline {
-            OfflineHint("Zum Anmelden wird eine Verbindung gebraucht.")
+            Text("Zum Anmelden wird eine Verbindung zum Server gebraucht.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -268,9 +270,9 @@ struct TimetableSettingsSection: View {
         // the ability to ask about it is missing.
         if !model.connectivity.isOnline {
             guard let savedAt = model.timetable.savedAt else {
-                return "Offline · die Anmeldung bleibt bestehen."
+                return "Die Anmeldung bleibt bestehen."
             }
-            return "Offline · Stundenplan von \(CacheAge.phrase(savedAt))"
+            return "Stundenplan von \(CacheAge.phrase(savedAt))"
         }
         return "Stundenplan wird vom Server abgerufen."
     }
