@@ -81,13 +81,9 @@ struct RecordDeck: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            if isRecording {
-                RecordingWaveform()
-                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
-                if let started = model.recordingStartedAt {
-                    RecordingTimer(startedAt: started)
-                        .transition(.opacity)
-                }
+            if isRecording, let started = model.recordingStartedAt {
+                RecordingTimer(startedAt: started)
+                    .transition(.opacity)
             }
             caption
             RecordButton()
@@ -158,28 +154,6 @@ struct RecordButton: View {
     /// second, so thirty frames carries all of it.
     private static let frameRate = 30.0
 
-    /// One bar of the waveform. Four things differ per bar — its idle clock, how
-    /// far back it listens, its gain and how much it averages — which is what
-    /// stops the five of them moving as one object.
-    private struct Bar: Identifiable {
-        let id: Int
-        let base: CGFloat
-        let frequency: Double
-        let phase: Double
-        let lag: Int
-        let window: Int
-        let gain: Double
-    }
-
-    /// Heights straight from the shot, tallest bar in the centre.
-    private static let bars: [Bar] = [
-        Bar(id: 0, base: 12, frequency: 0.83, phase: 0.0, lag: 5, window: 5, gain: 0.95),
-        Bar(id: 1, base: 22, frequency: 1.27, phase: 1.7, lag: 3, window: 4, gain: 1.20),
-        Bar(id: 2, base: 32, frequency: 0.61, phase: 3.1, lag: 1, window: 2, gain: 1.40),
-        Bar(id: 3, base: 22, frequency: 1.09, phase: 4.4, lag: 3, window: 4, gain: 1.10),
-        Bar(id: 4, base: 12, frequency: 1.51, phase: 5.6, lag: 6, window: 5, gain: 0.85),
-    ]
-
     private var isActive: Bool {
         switch model.phase {
         case .recording, .connecting, .reconnecting, .connected: true
@@ -203,8 +177,11 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            TimelineView(.animation(minimumInterval: 1.0 / Self.frameRate)) { context in
-                content(at: context.date.timeIntervalSinceReferenceDate)
+            ZStack {
+                TimelineView(.animation(minimumInterval: 1.0 / Self.frameRate)) { context in
+                    content(at: context.date.timeIntervalSinceReferenceDate)
+                }
+                Waveform(color: tint(Self.deep).opacity(0.85))
             }
             .frame(width: 108, height: 108)
             .contentShape(Circle())
@@ -232,10 +209,10 @@ struct RecordButton: View {
                 )
                 .frame(width: 78, height: 78)
                 .shadow(color: tint(Self.vivid).opacity(0.45), radius: 16, y: 6)
-
-            waveform(at: time)
         }
-        // One rasterisation for the lot, on the GPU, instead of a pass per blur.
+        // One rasterisation for the blob and its halo, on the GPU, instead of a
+        // pass per blur. The waveform is deliberately outside it: rasterising a
+        // view every frame is the opposite of what its animation wants.
         .drawingGroup()
     }
 
@@ -254,31 +231,96 @@ struct RecordButton: View {
         }
     }
 
-    /// The waveform from the shot, with every bar on its own clock.
-    private func waveform(at time: TimeInterval) -> some View {
-        HStack(alignment: .center, spacing: 4) {
-            ForEach(Self.bars) { bar in
-                Capsule()
-                    .fill(tint(Self.deep).opacity(0.85))
-                    .frame(width: 5, height: height(of: bar, at: time))
-            }
-        }
-    }
-
-    /// Idle, every bar drifts on its own frequency and phase, so they are never
-    /// in step even in silence. Recording, each adds its own slice of the level
-    /// history at its own gain, so a loud moment changes the shape of the
-    /// waveform rather than just its size.
-    private func height(of bar: Bar, at time: TimeInterval) -> CGFloat {
-        let idle = 1 + 0.085 * sin(time * bar.frequency * 1.6 + bar.phase)
-        let live = 1 + level(lag: bar.lag, window: bar.window) * bar.gain * 0.85
-        return max(5, bar.base * CGFloat(idle * live))
-    }
-
     /// The room's loudness `lag` samples ago, averaged over `window` of them.
     /// Averaging is the smoothing, and a different window per bar is why they
     /// settle raggedly instead of together. Levels arrive about sixteen times a
     /// second, so six samples is a bit over a third of a second behind.
+    private func level(lag: Int, window: Int) -> Double {
+        guard model.phase == .recording else { return 0 }
+        let levels = model.micLevels
+        let end = levels.count - lag
+        let start = max(0, end - window)
+        guard end > start else { return 0 }
+        let slice = levels[start ..< end]
+        return min(1, Double(slice.reduce(0, +)) / Double(slice.count) * 1.7)
+    }
+}
+
+/// The waveform in the middle of the control.
+///
+/// It is not drawn frame by frame. Recomputing a height on every tick of a
+/// timeline caps the motion at that timeline's rate, and the microphone only
+/// reports sixteen times a second, so the bars could only ever step — which is
+/// what made them look slower than everything around them.
+///
+/// Instead each bar declares where it is going and lets the system get it there:
+/// the idle sway is a repeating animation, and the level sets a target that is
+/// eased towards. Both are interpolated on the render server at the display's
+/// own rate, so the bars run at 120Hz on a ProMotion iPad while costing nothing
+/// per frame.
+struct Waveform: View {
+    @Environment(AppModel.self) private var model
+
+    let color: Color
+
+    /// One bar. Every field differs between the five, so nothing about them can
+    /// move in step: their resting height, how far and how fast they sway, when
+    /// their sway starts, how far back they listen, and how hard they react.
+    private struct Bar: Identifiable {
+        let id: Int
+        let base: CGFloat
+        let sway: CGFloat
+        let period: Double
+        let delay: Double
+        let lag: Int
+        let window: Int
+        let gain: Double
+    }
+
+    /// Resting heights straight from the shot, tallest bar in the centre.
+    private static let bars: [Bar] = [
+        Bar(id: 0, base: 12, sway: 1.10, period: 1.20, delay: 0.00, lag: 5, window: 5, gain: 0.95),
+        Bar(id: 1, base: 22, sway: 1.07, period: 0.78, delay: 0.35, lag: 3, window: 4, gain: 1.20),
+        Bar(id: 2, base: 32, sway: 1.05, period: 1.60, delay: 0.15, lag: 1, window: 2, gain: 1.40),
+        Bar(id: 3, base: 22, sway: 1.08, period: 0.92, delay: 0.55, lag: 3, window: 4, gain: 1.10),
+        Bar(id: 4, base: 12, sway: 1.11, period: 0.66, delay: 0.25, lag: 6, window: 5, gain: 0.85),
+    ]
+
+    @State private var swaying = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(Self.bars) { bar in
+                let height = height(of: bar)
+                Capsule()
+                    .fill(color)
+                    .frame(width: 5, height: height)
+                    // The level moves the bar's real height, eased so the
+                    // sixteen samples a second arrive as motion, not as steps.
+                    .animation(.easeOut(duration: 0.16), value: height)
+                    // The sway is a scale, so it never touches layout, and it
+                    // reverses rather than restarting — nothing to jump at.
+                    .scaleEffect(y: swaying ? bar.sway : 1 / bar.sway, anchor: .center)
+                    .animation(
+                        .easeInOut(duration: bar.period)
+                            .repeatForever(autoreverses: true)
+                            .delay(bar.delay),
+                        value: swaying
+                    )
+            }
+        }
+        .onAppear { swaying = true }
+        .accessibilityHidden(true)
+    }
+
+    private func height(of bar: Bar) -> CGFloat {
+        max(5, bar.base * (1 + CGFloat(level(lag: bar.lag, window: bar.window) * bar.gain * 0.85)))
+    }
+
+    /// The room's loudness `lag` samples ago, averaged over `window` of them.
+    /// A different window per bar is why they settle raggedly rather than
+    /// together. Levels arrive about sixteen times a second, so six samples is a
+    /// bit over a third of a second behind.
     private func level(lag: Int, window: Int) -> Double {
         guard model.phase == .recording else { return 0 }
         let levels = model.micLevels
@@ -333,37 +375,6 @@ private struct RecordButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.92 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
-    }
-}
-
-/// Live level meter: every bar is a real microphone reading (RMS, ~16/s),
-/// centred on its own axis so speech opens symmetrically and silence is a thin
-/// line. Newest sample at the right.
-struct RecordingWaveform: View {
-    @Environment(AppModel.self) private var model
-
-    private static let barCount = 72
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 3) {
-            ForEach(0 ..< Self.barCount, id: \.self) { index in
-                Capsule()
-                    .fill(Color.red.gradient)
-                    .frame(width: 3, height: 4 + CGFloat(level(at: index)) * 36)
-            }
-        }
-        .frame(height: 40)
-        .frame(maxWidth: .infinity)
-        .animation(.linear(duration: 0.06), value: model.micLevels)
-        .accessibilityLabel("Mikrofonpegel")
-    }
-
-    /// Levels right-aligned: the newest sample is the rightmost bar.
-    private func level(at index: Int) -> Float {
-        let levels = model.micLevels
-        let offset = Self.barCount - levels.count
-        guard index >= offset else { return 0 }
-        return levels[index - offset]
     }
 }
 
