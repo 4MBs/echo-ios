@@ -136,7 +136,7 @@ struct RecordDeck: View {
 }
 
 /// The record control: an inflated rounded square blended with a circle, under a
-/// luminous red gradient, with five translucent duplicates offset around it and a
+/// luminous gradient, with five translucent duplicates offset around it and a
 /// five-bar waveform at the centre. Modelled on Don Pardon's "Record Button
 /// (Voice Messanger App)" and tuned against a live preview of this same maths.
 ///
@@ -146,12 +146,21 @@ struct RecordDeck: View {
 /// travelling together. And every layer hears the microphone at its own delay,
 /// so a loud syllable sweeps outwards through them rather than inflating the
 /// whole control at once.
+///
+/// The whole thing is drawn in one Metal pass with a single blur. The obvious
+/// way to build it — a blur on each of the five layers, and the middle masked
+/// and blurred again — costs eight offscreen passes a frame, which is what made
+/// it stutter.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
 
     /// Everything is a multiple of this, so the control scales as one piece.
     private static let coreRadius: CGFloat = 39
     private static let extent: CGFloat = 136
+    /// The drift, spin and breathing are all slow, and the microphone only
+    /// reports sixteen times a second, so thirty frames carries it. Steady
+    /// frames at thirty read as smoother than sixty with drops.
+    private static let frameRate = 30.0
 
     // MARK: the layers
 
@@ -159,55 +168,63 @@ struct RecordButton: View {
     private struct Layer: Identifiable {
         let id: Int
         let skeleton: [Blob.Harmonic]
+        /// The outline's silhouette, sampled once at build time rather than
+        /// recomputed from powers on every frame.
+        let profile: [Double]
         let scale: CGFloat
-        let color: Color
+        /// Hue, saturation and brightness rather than a colour: the tint setting
+        /// rotates the whole family at once and they keep their relationships.
+        let hue: Double
+        let saturation: Double
+        let brightness: Double
         let opacity: Double
-        let blur: CGFloat
         /// Speed and direction the outline morphs at.
         let drift: Double
-        /// Radians per second the whole silhouette turns; this is what slides
-        /// the overlaps across each other.
+        /// Radians per second the silhouette turns; this is what slides the
+        /// overlaps across each other.
         let spin: Double
         let breathRate: Double
         let breathPhase: Double
         let offset: CGSize
-        let squareness: Double
         /// Microphone samples behind the core, and how much level it takes up.
         let lag: Int
         let response: Double
     }
 
-    private static func rgb(_ r: Double, _ g: Double, _ b: Double) -> Color {
-        Color(red: r / 255, green: g / 255, blue: b / 255)
-    }
-
     private static let layers: [Layer] = [
         Layer(
-            id: 0, skeleton: Blob.skeleton(seed: 7), scale: 1.16, color: rgb(255, 198, 188),
-            opacity: 0.15, blur: 1.54, drift: -0.50, spin: 0.07, breathRate: 0.31, breathPhase: 0.0,
-            offset: CGSize(width: -0.048, height: -0.238), squareness: 0.50, lag: 10, response: 0.20
+            id: 0, skeleton: Blob.skeleton(seed: 7), profile: Blob.profile(squareness: 0.50),
+            scale: 1.16, hue: 0.0247, saturation: 0.263, brightness: 1, opacity: 0.15,
+            drift: -0.50, spin: 0.07, breathRate: 0.31, breathPhase: 0.0,
+            offset: CGSize(width: -0.048, height: -0.238), lag: 10, response: 0.20
         ),
         Layer(
-            id: 1, skeleton: Blob.skeleton(seed: 23), scale: 1.12, color: rgb(255, 166, 152),
-            opacity: 0.17, blur: 1.23, drift: 0.70, spin: -0.11, breathRate: 0.23, breathPhase: 1.9,
-            offset: CGSize(width: 0.238, height: 0.095), squareness: 0.56, lag: 7, response: 0.17
+            id: 1, skeleton: Blob.skeleton(seed: 23), profile: Blob.profile(squareness: 0.56),
+            scale: 1.12, hue: 0.0227, saturation: 0.404, brightness: 1, opacity: 0.17,
+            drift: 0.70, spin: -0.11, breathRate: 0.23, breathPhase: 1.9,
+            offset: CGSize(width: 0.238, height: 0.095), lag: 7, response: 0.17
         ),
         Layer(
-            id: 2, skeleton: Blob.skeleton(seed: 61), scale: 1.10, color: rgb(255, 126, 108),
-            opacity: 0.19, blur: 1.02, drift: -0.95, spin: 0.15, breathRate: 0.41, breathPhase: 3.4,
-            offset: CGSize(width: -0.226, height: 0.131), squareness: 0.60, lag: 5, response: 0.14
+            id: 2, skeleton: Blob.skeleton(seed: 61), profile: Blob.profile(squareness: 0.60),
+            scale: 1.10, hue: 0.0203, saturation: 0.576, brightness: 1, opacity: 0.19,
+            drift: -0.95, spin: 0.15, breathRate: 0.41, breathPhase: 3.4,
+            offset: CGSize(width: -0.226, height: 0.131), lag: 5, response: 0.14
         ),
         Layer(
-            id: 3, skeleton: Blob.skeleton(seed: 97), scale: 1.07, color: rgb(255, 98, 80),
-            opacity: 0.21, blur: 0.82, drift: 1.20, spin: -0.09, breathRate: 0.27, breathPhase: 5.0,
-            offset: CGSize(width: 0.107, height: 0.226), squareness: 0.64, lag: 3, response: 0.11
+            id: 3, skeleton: Blob.skeleton(seed: 97), profile: Blob.profile(squareness: 0.64),
+            scale: 1.07, hue: 0.0170, saturation: 0.686, brightness: 1, opacity: 0.21,
+            drift: 1.20, spin: -0.09, breathRate: 0.27, breathPhase: 5.0,
+            offset: CGSize(width: 0.107, height: 0.226), lag: 3, response: 0.11
         ),
         Layer(
-            id: 4, skeleton: Blob.skeleton(seed: 131), scale: 1.04, color: rgb(255, 82, 66),
-            opacity: 0.22, blur: 0.61, drift: -1.45, spin: 0.19, breathRate: 0.35, breathPhase: 2.4,
-            offset: CGSize(width: -0.119, height: -0.107), squareness: 0.66, lag: 2, response: 0.08
+            id: 4, skeleton: Blob.skeleton(seed: 131), profile: Blob.profile(squareness: 0.66),
+            scale: 1.04, hue: 0.0142, saturation: 0.741, brightness: 1, opacity: 0.22,
+            drift: -1.45, spin: 0.19, breathRate: 0.35, breathPhase: 2.4,
+            offset: CGSize(width: -0.119, height: -0.107), lag: 2, response: 0.08
         ),
     ]
+
+    private static let coreProfile = Blob.profile(squareness: 0.62)
 
     // MARK: the waveform
 
@@ -241,6 +258,17 @@ struct RecordButton: View {
         }
     }
 
+    /// Rotates every colour in the control together, from Einstellungen.
+    private var shift: Double { model.settings.recordButtonHue }
+
+    private func tint(_ hue: Double, _ saturation: Double, _ brightness: Double) -> Color {
+        Color(
+            hue: (hue + shift).truncatingRemainder(dividingBy: 1),
+            saturation: saturation,
+            brightness: brightness
+        )
+    }
+
     var body: some View {
         Button {
             if isActive {
@@ -251,7 +279,7 @@ struct RecordButton: View {
         } label: {
             // A timeline, not a repeating animation: the phase is read from the
             // clock every frame, so nothing ever restarts or jumps.
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / Self.frameRate)) { context in
                 content(at: context.date.timeIntervalSinceReferenceDate)
             }
             .frame(width: Self.extent, height: Self.extent)
@@ -263,9 +291,19 @@ struct RecordButton: View {
     }
 
     private func content(at time: TimeInterval) -> some View {
-        let core = level(lag: 0, window: 3)
+        ZStack {
+            halo(at: time)
+            interior(at: time)
+            waveform(at: time)
+        }
+        // One rasterisation for the lot, on the GPU. Without it every layer's
+        // blur and blend is its own pass through Core Animation.
+        .drawingGroup()
+    }
 
-        return ZStack {
+    /// The five duplicates, blurred once as a group rather than five times.
+    private func halo(at time: TimeInterval) -> some View {
+        ZStack {
             ForEach(Self.layers) { layer in
                 let heard = level(lag: layer.lag, window: 4)
                 let breathe = 1 + 0.022 * sin(time * layer.breathRate * 2 + layer.breathPhase)
@@ -274,63 +312,69 @@ struct RecordButton: View {
 
                 Blob(
                     harmonics: layer.skeleton,
+                    profile: layer.profile,
                     time: time,
                     drift: layer.drift,
-                    rotation: time * layer.spin,
-                    swell: 1 + heard * layer.response,
-                    squareness: layer.squareness
+                    swell: 1 + heard * layer.response
                 )
-                .fill(layer.color)
+                .fill(tint(layer.hue, layer.saturation, layer.brightness))
                 .frame(width: side, height: side)
+                // Turning the finished shape is free; baking the angle into the
+                // path means recomputing every point's position instead.
+                .rotationEffect(.radians(time * layer.spin))
                 .offset(
                     x: layer.offset.width * Self.coreRadius,
                     y: layer.offset.height * Self.coreRadius
                 )
-                .blur(radius: layer.blur)
                 .opacity(layer.opacity)
                 // On white the artwork's pale layers stay pale; on black the
                 // same fill at the same opacity turns brown. They have to add
                 // light instead of veiling it.
                 .blendMode(.plusLighter)
             }
-
-            interior(at: time, level: core)
-            waveform(at: time)
         }
+        .blur(radius: 1.6)
     }
 
-    /// The saturated middle: a gradient across it for the coral variation, a
-    /// highlight off-centre for depth, and a hair of blur so the edge is
-    /// translucent rather than cut out.
-    private func interior(at time: TimeInterval, level core: Double) -> some View {
+    /// The saturated middle: a gradient across it for the tonal variation, and a
+    /// highlight off-centre for depth. Two fills of one shape — a mask would be
+    /// another offscreen pass for the same picture.
+    private func interior(at time: TimeInterval) -> some View {
+        let core = level(lag: 0, window: 3)
         let side = Self.coreRadius * 2 * (1 + CGFloat(core) * 0.03) * Blob.margin
+        let shape = Blob(
+            harmonics: Blob.base,
+            profile: Self.coreProfile,
+            time: time,
+            swell: 1 + core * 0.3
+        )
 
         return ZStack {
-            LinearGradient(
-                stops: [
-                    .init(color: Self.rgb(255, 47, 34), location: 0),
-                    .init(color: Self.rgb(255, 71, 51), location: 0.5),
-                    .init(color: Self.rgb(255, 107, 69), location: 1),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+            shape.fill(
+                LinearGradient(
+                    stops: [
+                        .init(color: tint(0.0098, 0.867, 1), location: 0),
+                        .init(color: tint(0.0163, 0.800, 1), location: 0.5),
+                        .init(color: tint(0.0341, 0.729, 1), location: 1),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             )
-            RadialGradient(
-                stops: [
-                    .init(color: Self.rgb(255, 132, 96).opacity(0.42), location: 0),
-                    .init(color: Self.rgb(255, 70, 50).opacity(0.12), location: 0.6),
-                    .init(color: Self.rgb(255, 40, 30).opacity(0), location: 1),
-                ],
-                center: UnitPoint(x: 0.35, y: 0.34),
-                startRadius: Self.coreRadius * 0.08,
-                endRadius: Self.coreRadius * 1.05
+            shape.fill(
+                RadialGradient(
+                    stops: [
+                        .init(color: tint(0.0379, 0.624, 1).opacity(0.42), location: 0),
+                        .init(color: tint(0.0163, 0.800, 1).opacity(0.12), location: 0.6),
+                        .init(color: tint(0.0098, 0.878, 1).opacity(0), location: 1),
+                    ],
+                    center: UnitPoint(x: 0.35, y: 0.34),
+                    startRadius: Self.coreRadius * 0.08,
+                    endRadius: Self.coreRadius * 1.05
+                )
             )
-        }
-        .mask {
-            Blob(harmonics: Blob.base, time: time, swell: 1 + core * 0.3)
         }
         .frame(width: side, height: side)
-        .blur(radius: 0.7)
     }
 
     private func waveform(at time: TimeInterval) -> some View {
@@ -340,7 +384,7 @@ struct RecordButton: View {
         return HStack(alignment: .center, spacing: Self.coreRadius * 0.10) {
             ForEach(Self.bars) { bar in
                 Capsule()
-                    .fill(Self.rgb(128, 14, 7).opacity(0.5))
+                    .fill(tint(0.0098, 0.945, 0.502).opacity(0.5))
                     .frame(width: width, height: height(of: bar, at: time, tallest: tallest))
             }
         }
@@ -387,6 +431,7 @@ struct Blob: Shape {
 
     /// Room left around the outline inside its frame, so a bulge never clips.
     static let margin: CGFloat = 1.25
+    static let steps = 80
 
     static let base: [Harmonic] = [
         Harmonic(amplitude: 0.010, phase: -2.32),
@@ -394,6 +439,27 @@ struct Blob: Shape {
         Harmonic(amplitude: 0.030, phase: -2.64),
         Harmonic(amplitude: 0.018, phase: -3.00),
     ]
+
+    /// Unit direction per sample. Fixed, so the sines and cosines that place the
+    /// points are paid for once for the life of the app rather than every frame.
+    static let directions: [CGPoint] = (0 ..< steps).map { step in
+        let angle = Double(step) / Double(steps) * 2 * .pi
+        return CGPoint(x: cos(angle), y: sin(angle))
+    }
+
+    /// The silhouette itself, sampled: a superellipse blended towards a circle,
+    /// `width` wider than tall. Two powers and a root per sample, so it is built
+    /// once per distinct squareness rather than 80 times a frame.
+    static func profile(squareness: Double, width: Double = 1.12, power: Double = 3.8) -> [Double] {
+        (0 ..< steps).map { step in
+            let angle = Double(step) / Double(steps) * 2 * .pi
+            let superellipse = 1 / pow(
+                pow(abs(cos(angle) / width), power) + pow(abs(sin(angle)), power),
+                1 / power
+            )
+            return (1 - squareness) + superellipse * squareness
+        }
+    }
 
     /// A sibling outline: the same family of amplitudes, its own phases.
     /// Deterministic, so a layer keeps its shape between frames.
@@ -409,36 +475,29 @@ struct Blob: Shape {
     }
 
     var harmonics: [Harmonic]
+    var profile: [Double]
     var time: Double
     var drift: Double = 1
-    /// Radians the whole outline is turned by.
-    var rotation: Double = 0
     var swell: Double = 1
-    /// 0 is a circle, 1 the full superellipse.
-    var squareness: Double = 0.62
-    /// How much wider than tall.
-    var width: Double = 1.12
 
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let radius = min(rect.width, rect.height) / 2 / Self.margin
-        let steps = 80
-        let power = 3.8
+        let steps = Self.steps
+        let step = 2 * Double.pi / Double(steps)
 
-        let points: [CGPoint] = (0 ..< steps).map { step in
-            let angle = Double(step) / Double(steps) * 2 * .pi + rotation
-            let superellipse = 1 / pow(
-                pow(abs(cos(angle) / width), power) + pow(abs(sin(angle)), power),
-                1 / power
-            )
+        let points: [CGPoint] = (0 ..< steps).map { index in
+            let angle = Double(index) * step
             var bend = 0.0
-            for (index, harmonic) in harmonics.enumerated() {
-                let order = Double(index + 1)
-                let turn = time * drift * (0.19 + 0.05 * order)
-                bend += harmonic.amplitude * swell * cos(order * angle + harmonic.phase + turn)
+            for (order, harmonic) in harmonics.enumerated() {
+                let multiple = Double(order + 1)
+                let turn = time * drift * (0.19 + 0.05 * multiple)
+                bend += harmonic.amplitude * swell * cos(multiple * angle + harmonic.phase + turn)
             }
-            let distance = radius * ((1 - squareness) + superellipse * squareness) * (1 + bend)
-            return CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
+            let silhouette = index < profile.count ? profile[index] : 1
+            let distance = radius * CGFloat(silhouette * (1 + bend))
+            let direction = Self.directions[index]
+            return CGPoint(x: center.x + direction.x * distance, y: center.y + direction.y * distance)
         }
 
         // Quad curves between the midpoints, each sample as the control point:
