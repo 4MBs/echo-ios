@@ -37,12 +37,8 @@ struct TranscriptPane: View {
     }
 }
 
-/// What fills the transcript area before there is a transcript.
-///
-/// At rest: nothing. The page is empty because nothing has been said, and a
-/// title-sized "Bereit für die nächste Stunde" only stated the obvious loudly.
-/// While recording it keeps one quiet line, which before the first words land is
-/// the only thing on the page confirming the microphone is live.
+/// What fills the transcript area before there is a transcript: at rest, the
+/// resting screen; while recording, one quiet line until the first words land.
 struct TranscriptEmptyState: View {
     @Environment(AppModel.self) private var model
 
@@ -53,7 +49,99 @@ struct TranscriptEmptyState: View {
                 .foregroundStyle(.tertiary)
                 .symbolEffect(.variableColor.iterative)
                 .transition(.opacity)
+        } else {
+            RestingScreen()
         }
+    }
+}
+
+/// The screen between lessons. It used to be a title-sized announcement that
+/// nothing had happened, and then nothing at all, which was honest but dead.
+///
+/// Now it answers the only question worth asking here — what is about to be
+/// recorded — from the timetable already in memory, and keeps the clock running
+/// underneath it. Both redraw themselves every minute, so the page is never
+/// quite still, and neither needs a request to the server.
+struct RestingScreen: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            VStack(spacing: 6) {
+                Text(context.date, format: .dateTime.hour().minute())
+                    .font(.system(size: 64, weight: .light, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+
+                Text(context.date.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+
+                if let lesson = model.timetable.current ?? model.timetable.next {
+                    lessonView(lesson, isNow: model.timetable.current != nil, now: context.date)
+                        .padding(.top, 26)
+                        .transition(.opacity)
+                }
+            }
+            .padding(.horizontal, 32)
+            .multilineTextAlignment(.center)
+            .animation(.snappy, value: model.timetable.current)
+        }
+    }
+
+    @ViewBuilder
+    private func lessonView(_ lesson: BackendAPI.Lesson, isNow: Bool, now: Date) -> some View {
+        VStack(spacing: 8) {
+            if let countdown = countdown(for: lesson, isNow: isNow, now: now) {
+                Text(countdown)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isNow ? Color.orange : Theme.accent)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(
+                        (isNow ? Color.orange : Theme.accent).opacity(0.14),
+                        in: Capsule()
+                    )
+                    .contentTransition(.numericText())
+            }
+
+            Text(lesson.subjectLong ?? lesson.title)
+                .font(.system(.title2, design: .rounded).weight(.semibold))
+                .foregroundStyle(lesson.cancelled ? .secondary : .primary)
+                .strikethrough(lesson.cancelled)
+
+            Text(details(lesson))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// "in 12 Min" before it starts, "noch 34 Min" once it is running — the one
+    /// number on this screen that keeps moving on its own.
+    private func countdown(for lesson: BackendAPI.Lesson, isNow: Bool, now: Date) -> String? {
+        if lesson.cancelled { return "entfällt" }
+        if isNow {
+            guard let end = lesson.endDate, end > now else { return "Jetzt" }
+            return "noch \(spell(end.timeIntervalSince(now)))"
+        }
+        guard let start = lesson.startDate, start > now else { return nil }
+        return "in \(spell(start.timeIntervalSince(now)))"
+    }
+
+    private func spell(_ interval: TimeInterval) -> String {
+        let minutes = max(1, Int((interval / 60).rounded(.up)))
+        if minutes < 60 { return "\(minutes) Min" }
+        let hours = minutes / 60
+        let rest = minutes % 60
+        return rest == 0 ? "\(hours) Std" : "\(hours) Std \(rest) Min"
+    }
+
+    private func details(_ lesson: BackendAPI.Lesson) -> String {
+        var parts = ["\(lesson.start)–\(lesson.end)"]
+        if !lesson.room.isEmpty { parts.append("Raum \(lesson.room)") }
+        if !lesson.teacher.isEmpty { parts.append(lesson.teacher) }
+        return parts.joined(separator: " · ")
     }
 }
 

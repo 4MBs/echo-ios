@@ -27,8 +27,12 @@ struct LibraryView: View {
         } else if let errorMessage {
             ErrorState(message: errorMessage) { await load() }.groupedScreen()
         } else if books.isEmpty {
-            ContentUnavailableView("Keine Bücher", systemImage: "books.vertical", description: Text("Lege PDF-Dateien in den Bibliotheks-Ordner auf dem Server."))
-                .groupedScreen()
+            ContentUnavailableView(
+                "Keine Bücher",
+                systemImage: "books.vertical",
+                description: Text("Lege PDF-Dateien in den Bibliotheks-Ordner auf dem Server.")
+            )
+            .groupedScreen()
         } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 148, maximum: 210), spacing: 24)], spacing: 28) {
