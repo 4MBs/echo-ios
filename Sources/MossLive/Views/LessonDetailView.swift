@@ -9,6 +9,8 @@ struct LessonDetailView: View {
     let api: BackendAPI
     let info: BackendAPI.LessonInfo
 
+    @Environment(AppModel.self) private var model
+    @State private var loadError: Error?
     @State private var tab: Tab = .zusammenfassung
     @State private var detail: BackendAPI.LessonDetail?
     @State private var summary: String?
@@ -20,8 +22,8 @@ struct LessonDetailView: View {
         Group {
             if let detail {
                 loadedContent(detail)
-            } else if let errorMessage {
-                ErrorState(message: errorMessage, retry: nil)
+            } else if let loadError {
+                ErrorState(loadError)
                     .groupedScreen()
             } else {
                 ProgressView("Lade Stunde…")
@@ -48,14 +50,24 @@ struct LessonDetailView: View {
             }
         }
         .onDisappear { audioPlayer.stop() }
-        .task {
-            do {
-                let loaded = try await api.lesson(id: info.id)
-                detail = loaded
-                summary = loaded.summary
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+        .task { await load() }
+    }
+
+    /// The stored copy first, so a lesson opens instantly and opens at all
+    /// without a server; the server's copy replaces it when there is one.
+    private func load() async {
+        let key = OfflineCache.Key.lesson(info.id)
+        if let stored = OfflineCache.load(BackendAPI.LessonDetail.self, key: key) {
+            detail = stored
+            summary = stored.summary
+        }
+        do {
+            let loaded = try await api.lesson(id: info.id)
+            detail = loaded
+            summary = loaded.summary
+            OfflineCache.save(loaded, as: key)
+        } catch {
+            if detail == nil { loadError = error }
         }
     }
 
@@ -71,7 +83,11 @@ struct LessonDetailView: View {
         }
         .listStyle(.insetGrouped)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if tab == .transkript, info.hasAudio {
+            // The recording is only playable if it is already on the iPad or
+            // can still be fetched; offering a player that cannot start is
+            // worse than not offering one.
+            if tab == .transkript, info.hasAudio,
+               model.connectivity.isOnline || BackendAPI.cachedAudio(id: info.id) != nil {
                 LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
@@ -145,7 +161,13 @@ struct LessonDetailView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.capsule)
-                    .disabled(summarizing)
+                    .disabled(summarizing || !model.connectivity.isOnline)
+                    // Writing one is the AI's job, and the AI is on the server.
+                    if !model.connectivity.isOnline {
+                        Text("Dafür wird eine Verbindung zum Server gebraucht.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
@@ -162,7 +184,15 @@ struct LessonDetailView: View {
         summarizing = true
         errorMessage = nil
         do {
-            summary = try await api.summarize(id: info.id)
+            let text = try await api.summarize(id: info.id)
+            summary = text
+            // Keep the stored copy current, or the summary would vanish the
+            // next time the lesson is opened without a server.
+            if var stored = detail {
+                stored.summary = text
+                detail = stored
+                OfflineCache.save(stored, as: OfflineCache.Key.lesson(info.id))
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

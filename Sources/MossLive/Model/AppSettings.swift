@@ -47,6 +47,13 @@ final class AppSettings {
         didSet { defaults.set(autoStopAtLessonEnd, forKey: "autoStopAtLessonEnd") }
     }
 
+    /// Whether the server last reported a working WebUntis login. Remembered
+    /// here so that being unable to ask does not look like never having logged
+    /// in — the credentials are on the server and are still perfectly valid.
+    var timetableConnected: Bool {
+        didSet { defaults.set(timetableConnected, forKey: "timetableConnected") }
+    }
+
     /// URL scheme opened by the three-finger tap (instant app switch).
     var quickSwitchURL: String {
         didSet { defaults.set(quickSwitchURL, forKey: "quickSwitchURL") }
@@ -90,6 +97,7 @@ final class AppSettings {
         bitrate = rate == 0 ? 24000 : rate
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
+        timetableConnected = defaults.bool(forKey: "timetableConnected")
         learnReminderEnabled = defaults.bool(forKey: "learnReminderEnabled")
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true

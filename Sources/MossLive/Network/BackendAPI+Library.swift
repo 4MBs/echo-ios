@@ -4,7 +4,7 @@ import Foundation
 /// The app lists them and downloads each book once into persistent app storage
 /// on the iPad — after that it opens instantly and works offline.
 extension BackendAPI {
-    struct Book: Decodable, Identifiable, Hashable, Sendable {
+    struct Book: Codable, Identifiable, Hashable, Sendable {
         let id: String
         let title: String
         let fileName: String
@@ -58,7 +58,14 @@ extension BackendAPI {
         var coverRequest = try URLRequest(url: url("/library/\(book.id)/cover"))
         coverRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         coverRequest.cachePolicy = .returnCacheDataElseLoad
-        let (data, response) = try await URLSession.shared.data(for: coverRequest)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: coverRequest)
+        } catch {
+            let mapped = await Self.noteOffline(error)
+            throw mapped
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
             throw APIError(message: "Buchcover nicht verfügbar (HTTP \(status)).")
@@ -76,7 +83,13 @@ extension BackendAPI {
         if let cached = Self.cachedBook(id: book.id) { return cached }
         var request = try URLRequest(url: url("/library/\(book.id)/file"), timeoutInterval: 3600)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let tmp = try await BookDownloader().download(request, expectedBytes: book.sizeBytes, progress: progress)
+        let tmp: URL
+        do {
+            tmp = try await BookDownloader().download(request, expectedBytes: book.sizeBytes, progress: progress)
+        } catch {
+            let mapped = await Self.noteOffline(error)
+            throw mapped
+        }
         let dest = Self.booksDirectory().appendingPathComponent("\(book.id).pdf")
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tmp, to: dest)

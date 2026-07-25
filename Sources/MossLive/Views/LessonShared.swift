@@ -135,21 +135,68 @@ struct LessonAudioBar: View {
 
 // MARK: - Shared list states
 
+/// What a screen shows when a request did not work out.
+///
+/// Three cases, and they look different because they are different: nothing
+/// answered, the server answered and said no, or something actually broke.
+/// Calling all of them "Verbindung fehlgeschlagen" is wrong in two of them —
+/// and offering to try again on a lesson that is simply too short to make a
+/// quiz out of is worse than wrong, because the answer will be the same every
+/// single time.
 struct ErrorState: View {
-    let message: String
+    let error: Error
     let retry: (() async -> Void)?
+
+    init(_ error: Error, retry: (() async -> Void)? = nil) {
+        self.error = error
+        self.retry = retry
+    }
 
     var body: some View {
         ContentUnavailableView {
-            Label("Verbindung fehlgeschlagen", systemImage: "wifi.exclamationmark")
+            Label(title, systemImage: symbol)
         } description: {
-            Text(message)
+            Text(detail)
         } actions: {
-            if let retry {
+            if let retry, !isRefusal {
                 Button("Erneut versuchen") { Task { await retry() } }
                     .buttonStyle(.bordered)
             }
         }
+    }
+
+    private var status: Int? { (error as? BackendAPI.APIError)?.status }
+
+    private var isOffline: Bool { Connectivity.meansUnreachable(error) }
+
+    /// The server answered and said no. Asking again gets the same answer, so
+    /// there is nothing worth putting a button under.
+    private var isRefusal: Bool {
+        guard let status else { return false }
+        return (400 ..< 500).contains(status) && ![401, 408, 429].contains(status)
+    }
+
+    private var title: String {
+        if isOffline { return "Keine Verbindung" }
+        if status == 401 { return "Zugang abgelehnt" }
+        if isRefusal { return "Nicht möglich" }
+        return "Etwas ist schiefgelaufen"
+    }
+
+    private var symbol: String {
+        if isOffline { return "wifi.slash" }
+        if status == 401 { return "lock" }
+        if isRefusal { return "exclamationmark.circle" }
+        return "exclamationmark.triangle"
+    }
+
+    private var detail: String {
+        if isOffline {
+            return "Der Server ist nicht erreichbar. Gespeicherte Inhalte funktionieren weiter."
+        }
+        // Server messages are written as fragments; they read as sentences here.
+        let text = error.localizedDescription
+        return text.prefix(1).uppercased() + String(text.dropFirst())
     }
 }
 

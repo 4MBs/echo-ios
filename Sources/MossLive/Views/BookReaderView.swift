@@ -10,10 +10,10 @@ struct BookReaderView: View {
     let api: BackendAPI
     let book: BackendAPI.Book
 
-    private enum Phase: Equatable {
+    private enum Phase {
         case downloading(Double)
         case ready(URL)
-        case failed(String)
+        case failed(Error)
     }
 
     @State private var phase: Phase?
@@ -25,8 +25,8 @@ struct BookReaderView: View {
                 downloadProgress
             case .ready(let url):
                 PDFReader(url: url, bookID: book.id)
-            case .failed(let message):
-                ErrorState(message: message) { await open() }
+            case .failed(let error):
+                ErrorState(error) { await open() }
                     .groupedScreen()
             }
         }
@@ -65,7 +65,7 @@ struct BookReaderView: View {
             }
             phase = .ready(url)
         } catch {
-            phase = .failed(error.localizedDescription)
+            phase = .failed(error)
         }
     }
 }
