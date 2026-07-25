@@ -75,6 +75,14 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    RecordTintPicker(hue: $settings.recordButtonHue)
+                } header: {
+                    Text("Aufnahmeknopf")
+                } footer: {
+                    Text("Färbt den Aufnahmeknopf auf dem Aufnahme-Bildschirm.")
+                }
+
+                Section {
                     Toggle("Seitenzahlen anpassen", isOn: $settings.showPageNumberEditor)
                 } header: {
                     Text("Bibliothek")
@@ -303,5 +311,43 @@ struct TimetableSettingsSection: View {
             ok = false
             message = error.localizedDescription
         }
+    }
+}
+
+/// A row of colours for the record control, the way a list picks its colour in
+/// Erinnerungen: the swatches themselves are the control.
+struct RecordTintPicker: View {
+    @Binding var hue: Double
+
+    private var selected: RecordTint { RecordTint.nearest(to: hue) }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(RecordTint.allCases) { tint in
+                Button {
+                    hue = tint.shift
+                } label: {
+                    Circle()
+                        .fill(tint.swatch)
+                        .frame(width: 28, height: 28)
+                        .overlay {
+                            if tint == selected {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        .overlay {
+                            Circle().stroke(.primary.opacity(tint == selected ? 0.35 : 0), lineWidth: 2)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tint.title)
+                .accessibilityAddTraits(tint == selected ? [.isSelected] : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .animation(.snappy, value: selected)
     }
 }

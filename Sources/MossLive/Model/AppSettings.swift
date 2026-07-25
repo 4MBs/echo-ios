@@ -62,6 +62,13 @@ final class AppSettings {
         didSet { defaults.set(learnReminderMinutes, forKey: "learnReminderMinutes") }
     }
 
+    /// How far the record control's colours are turned around the wheel. Stored
+    /// as the shift itself rather than a name, so the set of offered colours can
+    /// change without stranding a saved value.
+    var recordButtonHue: Double {
+        didSet { defaults.set(recordButtonHue, forKey: "recordButtonHue") }
+    }
+
     /// Whether a book shows the control for adjusting its page numbering. Off
     /// once the books are lined up: the numbering each book already learned
     /// stays in force either way, this only takes the control off the screen.
@@ -86,6 +93,7 @@ final class AppSettings {
         learnReminderEnabled = defaults.bool(forKey: "learnReminderEnabled")
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
+        recordButtonHue = defaults.double(forKey: "recordButtonHue")  // 0 = the red it was designed in
         let reminderMinutes = defaults.integer(forKey: "learnReminderMinutes")
         learnReminderMinutes = reminderMinutes == 0 ? 16 * 60 : reminderMinutes
         // migrate the old default: bare goodnotes:// lands in GoodNotes'
