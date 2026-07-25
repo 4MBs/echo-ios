@@ -2,49 +2,50 @@ import SwiftUI
 import UIKit
 
 /// "Chat mit KI": free-form questions to Gemini, grounded in the running
-/// recording or a picked past lesson (mockup screen 2).
+/// recording or a picked past lesson.
+///
+/// Assembled out of stock parts wherever one exists. The send button is the
+/// system's own bordered-prominent button in a circle rather than a hand-drawn
+/// disc, so its pressed and disabled states come from iOS instead of being
+/// guessed. Copying a reply is a long-press, which is where iOS users look for
+/// it. And the composer is a bottom safe-area inset, so the thread scrolls
+/// underneath it the way Nachrichten does.
 struct ChatView: View {
     @Environment(AppModel.self) private var model
 
     @State private var draft = ""
     @State private var lessons: [BackendAPI.LessonInfo] = []
+    @State private var confirmingClear = false
     @FocusState private var inputFocused: Bool
+
+    private static let bottomAnchor = "chat-bottom"
 
     private var chat: ChatStore { model.chat }
 
-    private var api: BackendAPI {
-        BackendAPI(
-            host: model.settings.serverHost,
-            port: model.settings.serverPort,
-            token: model.settings.authToken
-        )
-    }
+    private var api: BackendAPI { model.api }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                messagesArea
-                if let error = chat.errorMessage {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 6)
-                }
-                inputBar
-            }
-            .groupedScreen()
-            .navigationTitle("Chat mit KI")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !chat.messages.isEmpty {
-                        Button("Leeren") { chat.clear() }
-                            .font(.footnote)
+            messagesArea
+                .groupedScreen()
+                .navigationTitle("Chat mit KI")
+                .navigationBarTitleDisplayMode(.inline)
+                .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if !chat.messages.isEmpty {
+                            Button("Leeren", role: .destructive) { confirmingClear = true }
+                        }
                     }
                 }
-            }
+                .confirmationDialog(
+                    "Unterhaltung leeren?",
+                    isPresented: $confirmingClear,
+                    titleVisibility: .visible
+                ) {
+                    Button("Leeren", role: .destructive) { chat.clear() }
+                    Button("Abbrechen", role: .cancel) {}
+                }
         }
         .task { await loadLessons() }
         .onAppear { syncContextWithRecording() }
@@ -61,7 +62,7 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Messages
+    // MARK: - Thread
 
     @ViewBuilder
     private var messagesArea: some View {
@@ -75,60 +76,68 @@ struct ChatView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 10) {
                         ForEach(chat.messages) { message in
                             MessageBubble(message: message)
                         }
                         if chat.sending {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text("Denkt nach…")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 4)
+                            ThinkingBubble()
                         }
-                        Color.clear.frame(height: 2).id("chat-bottom")
+                        Color.clear.frame(height: 1).id(Self.bottomAnchor)
                     }
                     .padding(16)
                 }
-                .onChange(of: chat.messages.count) {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("chat-bottom", anchor: .bottom)
-                    }
-                }
+                // Both stock: the thread opens at its end, and dragging it
+                // puts the keyboard away without a "Fertig" button.
+                .defaultScrollAnchor(.bottom)
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: chat.messages.count) { scrollToEnd(proxy) }
+                .onChange(of: chat.sending) { scrollToEnd(proxy) }
             }
         }
     }
 
-    // MARK: - Input
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+        }
+    }
 
-    private var inputBar: some View {
-        VStack(spacing: 8) {
-            contextChip
-            HStack(spacing: 10) {
+    // MARK: - Composer
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let error = chat.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+            contextButton
+            HStack(alignment: .bottom, spacing: 8) {
                 TextField("Stelle eine Frage zum Unterricht…", text: $draft, axis: .vertical)
-                    .lineLimit(1 ... 4)
+                    .lineLimit(1 ... 5)
                     .focused($inputFocused)
+                    .submitLabel(.send)
                     .onSubmit(send)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .cardSurface(cornerRadius: 22)
-                Button(action: send) {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background(canSend ? Theme.accent : Color.secondary.opacity(0.4), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .accessibilityLabel("Frage senden")
+                    .cardSurface(cornerRadius: 20)
+                // The system's button, not a circle drawn by hand: it brings
+                // its own press animation and its own disabled treatment, and
+                // the up arrow is the glyph iOS uses for sending a message.
+                Button("Frage senden", systemImage: "arrow.up", action: send)
+                    .labelStyle(.iconOnly)
+                    .fontWeight(.semibold)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .disabled(!canSend)
+                    .padding(.bottom, 2)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     private var canSend: Bool {
@@ -146,33 +155,37 @@ struct ChatView: View {
 
     /// What the next question is grounded in. Locked to the live transcript
     /// while recording; otherwise a past lesson (or nothing) can be picked.
+    ///
+    /// A Picker inside the menu rather than loose buttons, so the current
+    /// choice carries the system's checkmark instead of only being legible
+    /// from the label outside.
     @ViewBuilder
-    private var contextChip: some View {
-        HStack(spacing: 6) {
-            if model.phase == .recording {
-                Label("Kontext: Aktuelle Aufnahme", systemImage: "record.circle")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            } else {
-                Menu {
-                    Button("Ohne Kontext") { chat.context = .none }
+    private var contextButton: some View {
+        if model.phase == .recording {
+            Label("Aktuelle Aufnahme", systemImage: "record.circle")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.red)
+        } else {
+            Menu {
+                Picker("Kontext", selection: contextBinding) {
+                    Text("Ohne Kontext").tag(ChatStore.Context.none)
                     ForEach(lessons) { lesson in
-                        Button(title(for: lesson)) {
-                            chat.context = .lesson(id: lesson.id, title: title(for: lesson))
-                        }
+                        Text(title(for: lesson))
+                            .tag(ChatStore.Context.lesson(id: lesson.id, title: title(for: lesson)))
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "text.book.closed")
-                        Text("Kontext: \(chat.context.label)")
-                        Image(systemName: "chevron.down").font(.caption2)
-                    }
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
                 }
+            } label: {
+                Label(chat.context.label, systemImage: "text.book.closed")
+                    .font(.footnote)
             }
-            Spacer()
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
         }
+    }
+
+    private var contextBinding: Binding<ChatStore.Context> {
+        Binding(get: { chat.context }, set: { chat.context = $0 })
     }
 
     private func title(for lesson: BackendAPI.LessonInfo) -> String {
@@ -191,46 +204,57 @@ struct ChatView: View {
     }
 }
 
+/// One turn. No avatar on every reply: Nachrichten does not repeat one, and
+/// with two participants the side of the screen already says who is speaking.
+/// Copy and share are a long-press, which is where iOS keeps them.
 private struct MessageBubble: View {
     let message: ChatStore.Message
 
+    private var isUser: Bool { message.role == .user }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if message.role == .user {
-                Spacer(minLength: 60)
-            } else {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 32, height: 32)
-                    .background(Theme.accent.opacity(0.12), in: Circle())
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(renderedMarkdown(message.text))
-                    .font(.callout)
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .foregroundStyle(message.role == .user ? Color.white : .primary)
-                if message.role == .assistant {
-                    Button {
+        HStack(spacing: 0) {
+            if isUser { Spacer(minLength: 48) }
+            Text(renderedMarkdown(message.text))
+                .font(.callout)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .foregroundStyle(isUser ? Color.white : Color.primary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    isUser
+                        ? AnyShapeStyle(Theme.accent)
+                        : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+                .contextMenu {
+                    Button("Kopieren", systemImage: "doc.on.doc") {
                         UIPasteboard.general.string = message.text
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Antwort kopieren")
+                    ShareLink(item: message.text)
                 }
-            }
-            .padding(12)
-            .background(
-                message.role == .user
-                    ? AnyShapeStyle(Theme.accent)
-                    : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-            )
-            if message.role == .assistant { Spacer(minLength: 60) }
+            if !isUser { Spacer(minLength: 48) }
         }
+    }
+}
+
+/// The wait, shaped like the reply it is about to become.
+private struct ThinkingBubble: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Denkt nach…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .transition(.opacity)
     }
 }

@@ -17,8 +17,9 @@ final class ChatStore {
         let date = Date()
     }
 
-    /// What the AI is grounded in for the next question.
-    enum Context: Equatable {
+    /// What the AI is grounded in for the next question. Hashable so it can be
+    /// a Picker tag, which is what puts the checkmark on the current choice.
+    enum Context: Equatable, Hashable {
         case live
         case lesson(id: String, title: String)
         case none
