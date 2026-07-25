@@ -1,5 +1,35 @@
 import SwiftUI
 
+/// Everything about the AI in one place: how much of the lesson a question
+/// carries with it, and which model answers it.
+struct AISettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
+                    HStack {
+                        Text("Kontextfenster")
+                        Spacer(minLength: 12)
+                        Text("\(Int(settings.contextSeconds)) s")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                    }
+                }
+                .animation(.snappy, value: settings.contextSeconds)
+            } footer: {
+                Text("Sekunden Transkript, die eine Frage aus dem Widget oder vom Aufnahme-Bildschirm mitschickt.")
+            }
+
+            AIModelSection()
+        }
+        .navigationTitle("KI")
+    }
+}
+
 /// Which AI backend the server uses. With ChatGPT, the model and the
 /// reasoning effort are picked here; the choice is stored on the server (like
 /// the WebUntis login) and applies immediately, no restart needed. The model
@@ -22,25 +52,26 @@ struct AIModelSection: View {
                             Text(displayName(for: choice)).tag(choice.id)
                         }
                     }
+                    .pickerStyle(.navigationLink)
                     // only the efforts the selected model actually supports
                     Picker("Denkaufwand", selection: effortBinding) {
                         ForEach(effortChoices, id: \.self) { effort in
                             Text(Self.effortLabel(effort)).tag(effort)
                         }
                     }
+                    .pickerStyle(.navigationLink)
                 }
                 if let errorMessage {
-                    Text(errorMessage).font(.caption).foregroundStyle(.red)
+                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
                 }
             } else if loadFailed {
-                Text("Nicht verfügbar – Server nicht erreichbar oder noch ohne Update.")
-                    .font(.footnote)
+                Text("Server nicht erreichbar.")
                     .foregroundStyle(.secondary)
             } else {
                 LabeledContent("Anbieter") { ProgressView() }
             }
         } header: {
-            Text("KI-Modell")
+            Text("Modell")
         } footer: {
             Text(footerText)
         }
@@ -113,15 +144,12 @@ struct AIModelSection: View {
 
     private var footerText: String {
         guard let settings else {
-            return "Modell-Einstellungen werden vom Server geladen."
+            return "Wird vom Server geladen."
         }
         if settings.provider == "chatgpt" {
-            return "Modell und Denkaufwand gelten für Antworten, Zusammenfassungen, Chat und "
-                + "Quizfragen. Die Auswahl wird auf deinem Server gespeichert und gilt sofort. "
-                + "\"Standard\" nutzt immer das aktuell empfohlene ChatGPT-Modell."
+            return "Gilt für Antworten, Zusammenfassungen, Chat und Quiz — sofort."
         }
-        return "Dein Server nutzt Gemini. Zum Wechseln auf ChatGPT setze auf dem Server "
-            + "answer.provider = \"chatgpt\" in ~/.config/mosslive/config.toml."
+        return "Den Anbieter wählt der Server (answer.provider in config.toml)."
     }
 
     private func displayName(for choice: BackendAPI.ModelChoice) -> String {
