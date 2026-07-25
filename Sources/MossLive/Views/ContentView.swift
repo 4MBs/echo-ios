@@ -38,7 +38,12 @@ struct LiveView: View {
                 RecordControlBar()
             }
             .animation(.snappy, value: model.bannerMessage)
-            .toolbar(.hidden, for: .navigationBar)
+            // The navigation bar has to stay: it carries the system button that
+            // hides and reveals the sidebar, which is why that button was
+            // missing here alone. Inline, so it costs as little height as
+            // possible and the transcript still reads as a full page.
+            .navigationTitle("Aufnahme")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

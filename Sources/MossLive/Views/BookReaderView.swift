@@ -24,7 +24,7 @@ struct BookReaderView: View {
             case .none, .downloading:
                 downloadProgress
             case .ready(let url):
-                PDFReader(url: url)
+                PDFReader(url: url, bookID: book.id)
             case .failed(let message):
                 ErrorState(message: message) { await open() }
                     .groupedScreen()
@@ -74,6 +74,16 @@ struct BookReaderView: View {
 private struct PDFReader: View {
     let url: URL
 
+    /// Printed page number minus PDF page number. Schoolbooks put a cover and
+    /// often a few unnumbered pages in front, so the two rarely line up — and
+    /// the shift differs per book, which is why it is stored per book.
+    @AppStorage private var pageOffset: Int
+
+    init(url: URL, bookID: String) {
+        self.url = url
+        _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(bookID)")
+    }
+
     @State private var document: PDFDocument?
     @State private var twoUp = true
     @State private var currentPage = 1
@@ -81,8 +91,13 @@ private struct PDFReader: View {
     @State private var proxy = PDFViewProxy()
     @State private var askingForPage = false
     @State private var typedPage = ""
-    @State private var pageAtOpen = 1
+    @State private var openedAt = "1"
+    @State private var adjustingNumbering = false
+    @State private var typedNumbering = ""
+    @State private var numberingPage = 1
+    @State private var numberingPlaceholder = "1"
     @FocusState private var pageFieldFocused: Bool
+    @FocusState private var numberingFocused: Bool
 
     var body: some View {
         Group {
@@ -111,6 +126,87 @@ private struct PDFReader: View {
             document = await Task.detached(priority: .userInitiated) {
                 LoadedDocument(document: PDFDocument(url: url))
             }.value.document
+        }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { readerMenu } }
+    }
+
+    /// Set once per book and then forgotten, so it belongs in the navigation
+    /// bar's overflow menu rather than anywhere near the reading controls.
+    private var readerMenu: some View {
+        Menu {
+            Button {
+                numberingPage = currentPage
+                numberingPlaceholder = printedLabel(currentPage)
+                typedNumbering = ""
+                adjustingNumbering = true
+            } label: {
+                Label("Seitenzahlen anpassen…", systemImage: "number")
+            }
+
+            if pageOffset != 0 {
+                Button(role: .destructive) {
+                    pageOffset = 0
+                } label: {
+                    Label("Nummerierung zurücksetzen", systemImage: "arrow.uturn.backward")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .popover(isPresented: $adjustingNumbering) { numberingEditor }
+    }
+
+    /// Teach the reader where the printed numbering starts: turn to a page whose
+    /// number you can see, type that number, and every other page follows. The
+    /// PDF page it is anchored to is captured on opening, so the book can be
+    /// left where it is while the number is typed.
+    private var numberingEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Seitenzahlen")
+                .font(.headline)
+
+            Text("Welche Zahl steht auf dieser Seite? Das Buch richtet seine Nummerierung danach aus.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                TextField(numberingPlaceholder, text: $typedNumbering)
+                    .keyboardType(.numberPad)
+                    .focused($numberingFocused)
+                    .multilineTextAlignment(.center)
+                    .font(.title3.monospacedDigit().weight(.semibold))
+                    .frame(width: 76)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityLabel("Gedruckte Seitenzahl")
+
+                Text("= PDF-Seite \(numberingPage)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if pageOffset != 0 {
+                Button("Zurücksetzen") {
+                    pageOffset = 0
+                    typedNumbering = ""
+                }
+                .font(.subheadline)
+            }
+        }
+        .frame(width: 296, alignment: .leading)
+        .padding(16)
+        .presentationCompactAdaptation(.popover)
+        .task {
+            try? await Task.sleep(for: .milliseconds(60))
+            numberingFocused = true
+        }
+        .onChange(of: typedNumbering) { _, text in
+            let digits = String(text.filter(\.isNumber).prefix(5))
+            if digits != text { typedNumbering = digits }
+            if let printed = Int(digits), printed >= 1 {
+                pageOffset = printed - numberingPage
+            }
         }
     }
 
@@ -143,21 +239,21 @@ private struct PDFReader: View {
 
             Button {
                 typedPage = ""
-                pageAtOpen = currentPage
+                openedAt = printedLabel(currentPage)
                 askingForPage = true
             } label: {
                 // Fixed slots either side of the slash: the indicator stays put
                 // whether the page number is 1 or 320 digits wide.
                 HStack(spacing: 4) {
-                    Text("\(currentPage)")
+                    Text(printedLabel(currentPage))
                         .frame(width: 36, alignment: .trailing)
-                    Text("/ \(pageCount)")
+                    Text("/ \(printedLast)")
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 42, alignment: .leading)
                 }
                 .font(.subheadline.monospacedDigit().weight(.semibold))
             }
-            .accessibilityLabel("Seite \(currentPage) von \(pageCount)")
+            .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
             .popover(isPresented: $askingForPage) { pageJump }
 
             Button {
@@ -176,7 +272,7 @@ private struct PDFReader: View {
     /// keyboard is up.
     private var pageJump: some View {
         HStack(spacing: 8) {
-            TextField("\(pageAtOpen)", text: $typedPage)
+            TextField(openedAt, text: $typedPage)
                 .keyboardType(.numberPad)
                 .focused($pageFieldFocused)
                 .multilineTextAlignment(.center)
@@ -186,7 +282,7 @@ private struct PDFReader: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityLabel("Seitennummer")
 
-            Text("von \(pageCount)")
+            Text("von \(printedLast)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -201,10 +297,30 @@ private struct PDFReader: View {
         .onChange(of: typedPage) { _, text in
             let digits = String(text.filter(\.isNumber).prefix(5))
             if digits != text { typedPage = digits }
-            if let page = Int(digits), (1...max(pageCount, 1)).contains(page) {
-                proxy.go(toPage: page)
+            if let printed = Int(digits), let pdfPage = pdfPage(forPrinted: printed) {
+                proxy.go(toPage: pdfPage)
             }
         }
+    }
+
+    /// The number printed on a PDF page. Pages ahead of the book's own page 1 —
+    /// cover, title page, whatever else — carry no printed number.
+    private func printedNumber(_ pdfPage: Int) -> Int? {
+        let printed = pdfPage + pageOffset
+        return printed >= 1 ? printed : nil
+    }
+
+    private func printedLabel(_ pdfPage: Int) -> String {
+        printedNumber(pdfPage).map(String.init) ?? "—"
+    }
+
+    private var printedLast: Int {
+        max(pageCount + pageOffset, 0)
+    }
+
+    private func pdfPage(forPrinted printed: Int) -> Int? {
+        let pdfPage = printed - pageOffset
+        return (1...max(pageCount, 1)).contains(pdfPage) ? pdfPage : nil
     }
 
     /// A compact native menu keeps the toolbar quiet while making both layouts
