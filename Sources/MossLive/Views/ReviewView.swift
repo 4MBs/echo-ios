@@ -21,9 +21,10 @@ struct ReviewView: View {
         case loading
         case running
         case finished
-        case failed(String)
+        case failed(Error)
     }
 
+    @Environment(AppModel.self) private var model
     @State private var phase: Phase = .loading
     @State private var cards: [BackendAPI.LearnCard] = []
     @State private var index = 0
@@ -55,8 +56,8 @@ struct ReviewView: View {
             questionScreen
         case .finished:
             resultScreen
-        case .failed(let message):
-            ErrorState(message: message) { await start() }
+        case .failed(let error):
+            ErrorState(error) { await start() }
         }
     }
 
@@ -65,7 +66,7 @@ struct ReviewView: View {
         do {
             let loaded = try await loader()
             guard !loaded.isEmpty else {
-                phase = .failed("Keine Karten gefunden.")
+                phase = .failed(BackendAPI.APIError(message: "Keine Karten gefunden."))
                 return
             }
             cards = loaded
@@ -74,7 +75,7 @@ struct ReviewView: View {
             selected = nil
             phase = .running
         } catch {
-            phase = .failed(error.localizedDescription)
+            phase = .failed(error)
         }
     }
 
@@ -150,9 +151,10 @@ struct ReviewView: View {
             let correct = option == card.answer
             if correct { score += 1 }
             if mode == .review {
-                // fire-and-forget: a lost report only means the card stays due
+                // The schedule lives on the server, so an answer given without
+                // one is written down and handed over later rather than lost.
                 let cardId = card.id
-                Task { try? await api.reviewCard(id: cardId, correct: correct) }
+                Task { await model.reviews.record(cardId: cardId, correct: correct, api: api) }
             }
         } label: {
             HStack(spacing: 10) {

@@ -251,7 +251,12 @@ struct TimetableSettingsSection: View {
                 Text(busy ? "Verbinde…" : "Mit WebUntis verbinden")
             }
         }
-        .disabled(busy || school.isEmpty || username.isEmpty || password.isEmpty)
+        .disabled(busy || school.isEmpty || username.isEmpty || password.isEmpty || !model.connectivity.isOnline)
+        if !model.connectivity.isOnline {
+            Text("Zum Anmelden wird eine Verbindung zum Server gebraucht.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var connectedSubtitle: String {
@@ -260,6 +265,14 @@ struct TimetableSettingsSection: View {
         }
         if let next = model.timetable.next {
             return "Als Nächstes: \(next.title) · \(next.start)"
+        }
+        // The login lives on the server and is untouched by any of this; only
+        // the ability to ask about it is missing.
+        if !model.connectivity.isOnline {
+            guard let savedAt = model.timetable.savedAt else {
+                return "Die Anmeldung bleibt bestehen."
+            }
+            return "Stundenplan von \(CacheAge.phrase(savedAt))"
         }
         return "Stundenplan wird vom Server abgerufen."
     }

@@ -8,20 +8,14 @@ struct LessonsView: View {
 
     @State private var lessons: [BackendAPI.LessonInfo] = []
     @State private var loading = true
-    @State private var errorMessage: String?
+    @State private var loadError: Error?
     @State private var subjectFilter: String?
     @State private var newestFirst = true
     @State private var searchText = ""
     @State private var dayToDelete: Date?
     @State private var actionError: String?
 
-    private var api: BackendAPI {
-        BackendAPI(
-            host: model.settings.serverHost,
-            port: model.settings.serverPort,
-            token: model.settings.authToken
-        )
-    }
+    private var api: BackendAPI { model.api }
 
     var body: some View {
         NavigationStack {
@@ -66,8 +60,8 @@ struct LessonsView: View {
         if loading {
             ProgressView("Lade Stunden…")
                 .groupedScreen()
-        } else if let errorMessage {
-            ErrorState(message: errorMessage) { await load() }
+        } else if lessons.isEmpty, let loadError {
+            ErrorState(loadError) { await load() }
                 .groupedScreen()
         } else if lessons.isEmpty {
             ContentUnavailableView {
@@ -87,10 +81,14 @@ struct LessonsView: View {
                         DayRow(day: entry.day, lessons: entry.lessons)
                     }
                     .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            dayToDelete = entry.day
-                        } label: {
-                            Label("Löschen", systemImage: "trash")
+                        // Deleting is the server's copy to delete, so it waits
+                        // for the server rather than half-happening here.
+                        if model.connectivity.isOnline {
+                            Button(role: .destructive) {
+                                dayToDelete = entry.day
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -148,12 +146,20 @@ struct LessonsView: View {
     }
 
     private func load() async {
+        let key = OfflineCache.Key.lessons
+        if lessons.isEmpty, let cached = OfflineCache.load([BackendAPI.LessonInfo].self, key: key) {
+            lessons = cached
+        }
         loading = lessons.isEmpty
-        errorMessage = nil
+        loadError = nil
         do {
-            lessons = try await api.listLessons().filter { $0.segmentCount > 0 }
+            let fresh = try await api.listLessons().filter { $0.segmentCount > 0 }
+            lessons = fresh
+            OfflineCache.save(fresh, as: key)
         } catch {
-            errorMessage = error.localizedDescription
+            // The archive is a list of what was recorded on this iPad. Keeping
+            // it readable without the server is the whole point of storing it.
+            if lessons.isEmpty { loadError = error }
         }
         loading = false
     }

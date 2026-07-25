@@ -27,6 +27,9 @@ struct MainTabView: View {
             }
             .navigationTitle("Echo")
             .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 300)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                SidebarOfflineNote()
+            }
         } detail: {
             selectedView
         }
