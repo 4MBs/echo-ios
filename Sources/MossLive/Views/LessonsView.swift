@@ -14,19 +14,15 @@ struct LessonsView: View {
     @State private var searchText = ""
     @State private var dayToDelete: Date?
     @State private var actionError: String?
+    @State private var savedAt: Date?
 
-    private var api: BackendAPI {
-        BackendAPI(
-            host: model.settings.serverHost,
-            port: model.settings.serverPort,
-            token: model.settings.authToken
-        )
-    }
+    private var api: BackendAPI { model.api }
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Stunden")
+                .offlineBar(savedAt: savedAt)
                 .searchable(text: $searchText, prompt: "Suchen")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -66,7 +62,7 @@ struct LessonsView: View {
         if loading {
             ProgressView("Lade Stunden…")
                 .groupedScreen()
-        } else if let errorMessage {
+        } else if lessons.isEmpty, let errorMessage {
             ErrorState(message: errorMessage) { await load() }
                 .groupedScreen()
         } else if lessons.isEmpty {
@@ -87,10 +83,14 @@ struct LessonsView: View {
                         DayRow(day: entry.day, lessons: entry.lessons)
                     }
                     .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            dayToDelete = entry.day
-                        } label: {
-                            Label("Löschen", systemImage: "trash")
+                        // Deleting is the server's copy to delete, so it waits
+                        // for the server rather than half-happening here.
+                        if model.connectivity.isOnline {
+                            Button(role: .destructive) {
+                                dayToDelete = entry.day
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -148,12 +148,22 @@ struct LessonsView: View {
     }
 
     private func load() async {
+        let key = OfflineCache.Key.lessons
+        if lessons.isEmpty, let cached = OfflineCache.load([BackendAPI.LessonInfo].self, key: key) {
+            lessons = cached
+            savedAt = OfflineCache.savedAt(key: key)
+        }
         loading = lessons.isEmpty
         errorMessage = nil
         do {
-            lessons = try await api.listLessons().filter { $0.segmentCount > 0 }
+            let fresh = try await api.listLessons().filter { $0.segmentCount > 0 }
+            lessons = fresh
+            OfflineCache.save(fresh, as: key)
+            savedAt = OfflineCache.savedAt(key: key)
         } catch {
-            errorMessage = error.localizedDescription
+            // The archive is a list of what was recorded on this iPad. Keeping
+            // it readable without the server is the whole point of storing it.
+            if lessons.isEmpty { errorMessage = error.localizedDescription }
         }
         loading = false
     }

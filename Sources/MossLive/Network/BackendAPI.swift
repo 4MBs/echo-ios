@@ -3,7 +3,7 @@ import Foundation
 /// HTTP client for the backend's lessons archive. Transcripts and summaries
 /// live on the Fedora machine — the iPad only ever views them.
 struct BackendAPI {
-    struct LessonInfo: Decodable, Identifiable, Sendable {
+    struct LessonInfo: Codable, Identifiable, Sendable {
         let id: String
         let startedAtMs: Int64
         let endedAtMs: Int64?
@@ -48,10 +48,12 @@ struct BackendAPI {
         var startedAt: Date { Date(timeIntervalSince1970: Double(startedAtMs) / 1000) }
     }
 
-    struct LessonDetail: Decodable, Sendable {
+    struct LessonDetail: Codable, Sendable {
         let id: String
         let startedAtMs: Int64
-        let summary: String?
+        /// Filled in later by "Zusammenfassung erstellen", which is why the
+        /// stored copy has to be updatable in place.
+        var summary: String?
         let hasAudio: Bool
         let title: String?
         let subject: String?
@@ -81,7 +83,7 @@ struct BackendAPI {
 
     // MARK: - Timetable
 
-    struct Lesson: Decodable, Identifiable, Sendable, Equatable {
+    struct Lesson: Codable, Identifiable, Sendable, Equatable {
         let date: String
         let start: String
         let end: String
@@ -108,13 +110,13 @@ struct BackendAPI {
         var endDate: Date? { endMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     }
 
-    struct TimetableNow: Decodable, Sendable {
+    struct TimetableNow: Codable, Sendable {
         let enabled: Bool
         let current: Lesson?
         let next: Lesson?
     }
 
-    struct TimetableDay: Decodable, Sendable {
+    struct TimetableDay: Codable, Sendable {
         let enabled: Bool
         let date: String?
         let lessons: [Lesson]
@@ -122,6 +124,10 @@ struct BackendAPI {
 
     struct APIError: LocalizedError {
         let message: String
+        /// Nothing answered at the other end, as opposed to something answering
+        /// with bad news. Screens treat the two differently: one falls back to
+        /// what is stored on the iPad, the other is a real error worth showing.
+        var isOffline = false
         var errorDescription: String? { message }
     }
 
@@ -144,6 +150,15 @@ struct BackendAPI {
         return url
     }
 
+    /// Record a transport failure and translate it into something a screen can
+    /// recognise. Anything else passes through untouched.
+    // internal: BackendAPI extensions in other files build on this
+    static func noteOffline(_ error: Error) async -> Error {
+        guard Connectivity.meansUnreachable(error) else { return error }
+        await Connectivity.shared.note(failure: error)
+        return APIError(message: "Keine Verbindung zum Server.", isOffline: true)
+    }
+
     // internal: BackendAPI extensions in other files build on this
     func request(
         _ path: String,
@@ -158,7 +173,16 @@ struct BackendAPI {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw await Self.noteOffline(error)
+        }
+        // Anything with a status line means the server is there, including a
+        // 500 — only the transport failing counts as being offline.
+        await Connectivity.shared.noteReachable()
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
             struct ErrorBody: Decodable {
@@ -259,7 +283,7 @@ struct BackendAPI {
 
     // MARK: - Lernen (spaced repetition)
 
-    struct LearnCard: Decodable, Sendable, Identifiable, Equatable {
+    struct LearnCard: Codable, Sendable, Identifiable, Equatable {
         let id: String
         let sessionId: String
         let subject: String?
@@ -279,7 +303,7 @@ struct BackendAPI {
         }
     }
 
-    struct LearnSubject: Decodable, Sendable, Identifiable, Equatable {
+    struct LearnSubject: Codable, Sendable, Identifiable, Equatable {
         let subject: String?
         let due: Int
         let total: Int
@@ -287,7 +311,7 @@ struct BackendAPI {
         var id: String { subject ?? "" }
     }
 
-    struct LearnOverview: Decodable, Sendable, Equatable {
+    struct LearnOverview: Codable, Sendable, Equatable {
         let dueTotal: Int
         let cardTotal: Int
         let subjects: [LearnSubject]
@@ -353,16 +377,17 @@ struct BackendAPI {
     /// stream an authenticated URL, so we fetch it once and reuse it). The file
     /// is either .m4a or .wav depending on what the server produced.
     func downloadAudio(id: String) async throws -> URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("lesson-audio", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        for ext in ["m4a", "wav"] {
-            let cached = dir.appendingPathComponent("\(id).\(ext)")
-            if FileManager.default.fileExists(atPath: cached.path) { return cached }
-        }
+        let dir = Self.audioDirectory()
+        if let cached = Self.cachedAudio(id: id) { return cached }
         var req = try URLRequest(url: url("/sessions/\(id)/audio"), timeoutInterval: 120)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (tmp, response) = try await URLSession.shared.download(for: req)
+        let tmp: URL
+        let response: URLResponse
+        do {
+            (tmp, response) = try await URLSession.shared.download(for: req)
+        } catch {
+            throw await Self.noteOffline(error)
+        }
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
@@ -376,10 +401,27 @@ struct BackendAPI {
         return dest
     }
 
-    /// Remove any cached audio for a deleted lesson.
-    static func purgeCachedAudio(id: String) {
+    private static func audioDirectory() -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("lesson-audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// The already-downloaded recording of a lesson, if there is one — which is
+    /// what decides whether the player is worth offering while offline.
+    static func cachedAudio(id: String) -> URL? {
+        let dir = audioDirectory()
+        for ext in ["m4a", "wav"] {
+            let cached = dir.appendingPathComponent("\(id).\(ext)")
+            if FileManager.default.fileExists(atPath: cached.path) { return cached }
+        }
+        return nil
+    }
+
+    /// Remove any cached audio for a deleted lesson.
+    static func purgeCachedAudio(id: String) {
+        let dir = audioDirectory()
         for ext in ["m4a", "wav"] {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(id).\(ext)"))
         }

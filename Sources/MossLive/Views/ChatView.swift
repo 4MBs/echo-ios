@@ -107,6 +107,11 @@ struct ChatView: View {
     private var inputBar: some View {
         VStack(spacing: 8) {
             contextChip
+            // Asking is the one thing here that genuinely is the AI's, and the
+            // AI is on the server. Say so instead of failing on send.
+            if !model.connectivity.isOnline {
+                OfflineHint("Fragen beantwortet die KI auf dem Server.")
+            }
             HStack(spacing: 10) {
                 TextField("Stelle eine Frage zum Unterricht…", text: $draft, axis: .vertical)
                     .lineLimit(1 ... 4)
@@ -132,7 +137,9 @@ struct ChatView: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !chat.sending
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !chat.sending
+            && model.connectivity.isOnline
     }
 
     private func send() {
@@ -178,7 +185,14 @@ struct ChatView: View {
     }
 
     private func loadLessons() async {
-        lessons = await (try? api.listLessons().filter { $0.segmentCount > 0 }) ?? []
+        // Only the picker's contents — the stored list keeps it populated so
+        // an old chat still shows which lesson it was about.
+        if let stored = OfflineCache.load([BackendAPI.LessonInfo].self, key: OfflineCache.Key.lessons) {
+            lessons = stored
+        }
+        guard let fresh = try? await api.listLessons().filter({ $0.segmentCount > 0 }) else { return }
+        lessons = fresh
+        OfflineCache.save(fresh, as: OfflineCache.Key.lessons)
     }
 }
 
