@@ -21,7 +21,7 @@ final class ReviewQueue {
     private(set) var pending: [Entry] = []
 
     @ObservationIgnored private let log = Logger(subsystem: "com.fourmbs.mosslive", category: "reviews")
-    @ObservationIgnored private static let key = "pending-reviews"
+    private static let key = "pending-reviews"
 
     init() {
         pending = OfflineCache.load([Entry].self, key: Self.key) ?? []

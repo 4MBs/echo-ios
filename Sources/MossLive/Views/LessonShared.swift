@@ -152,11 +152,6 @@ struct ErrorState: View {
         self.retry = retry
     }
 
-    /// For the few places that only ever have a sentence to show.
-    init(message: String, retry: (() async -> Void)? = nil) {
-        self.init(BackendAPI.APIError(message: message), retry: retry)
-    }
-
     var body: some View {
         ContentUnavailableView {
             Label(title, systemImage: symbol)

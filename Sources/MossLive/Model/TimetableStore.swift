@@ -22,7 +22,7 @@ final class TimetableStore {
     @ObservationIgnored private let log = Logger(subsystem: "com.fourmbs.mosslive", category: "timetable")
     @ObservationIgnored private let settings: AppSettings
 
-    @ObservationIgnored private static let dayKey: DateFormatter = {
+    private static let dayKey: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"

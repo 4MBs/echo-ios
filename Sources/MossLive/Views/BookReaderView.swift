@@ -10,7 +10,7 @@ struct BookReaderView: View {
     let api: BackendAPI
     let book: BackendAPI.Book
 
-    private enum Phase: Equatable {
+    private enum Phase {
         case downloading(Double)
         case ready(URL)
         case failed(Error)
