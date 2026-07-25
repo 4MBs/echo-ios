@@ -37,63 +37,19 @@ struct TranscriptPane: View {
     }
 }
 
-/// Red "LIVE" capsule shown while recording.
-struct LivePill: View {
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(.white).frame(width: 6, height: 6)
-            Text("LIVE")
-                .font(.caption.weight(.bold))
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color.red, in: Capsule())
-    }
-}
-
-/// Connection status: small colored dot + label, like a system status row.
-struct StatusLabel: View {
-    let phase: AppModel.Phase
-
-    private var color: Color {
-        switch phase {
-        case .disconnected: .gray
-        case .connecting, .reconnecting: .orange
-        case .connected: .green
-        case .recording: .red
-        case .error: .red
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(phase.label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-/// Empty transcript area, using the system empty-state layout.
+/// What fills the transcript area before there is a transcript: while recording,
+/// one quiet line until the first words land. At rest, deliberately nothing —
+/// the page is left blank.
 struct TranscriptEmptyState: View {
     @Environment(AppModel.self) private var model
 
-    private var isRecording: Bool { model.phase == .recording }
-
     var body: some View {
-        ContentUnavailableView {
-            Label(
-                isRecording ? "Ich höre zu" : "Bereit für die nächste Stunde",
-                systemImage: isRecording ? "waveform" : "mic.fill"
-            )
-        } description: {
-            Text(
-                isRecording
-                    ? "Gesprochenes erscheint hier."
-                    : "Die Aufnahme wird live transkribiert und automatisch der richtigen Stunde zugeordnet."
-            )
+        if model.phase == .recording {
+            Label("Warte auf die ersten Wörter…", systemImage: "waveform")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .symbolEffect(.variableColor.iterative)
+                .transition(.opacity)
         }
     }
 }
