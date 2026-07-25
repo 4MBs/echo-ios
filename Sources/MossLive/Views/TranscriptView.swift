@@ -37,76 +37,23 @@ struct TranscriptPane: View {
     }
 }
 
-/// Red "LIVE" capsule shown while recording.
-struct LivePill: View {
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(.white).frame(width: 6, height: 6)
-            Text("LIVE")
-                .font(.caption.weight(.bold))
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color.red, in: Capsule())
-    }
-}
-
-/// Connection status: small colored dot + label, like a system status row.
-struct StatusLabel: View {
-    let phase: AppModel.Phase
-
-    private var color: Color {
-        switch phase {
-        case .disconnected: .gray
-        case .connecting, .reconnecting: .orange
-        case .connected: .green
-        case .recording: .red
-        case .error: .red
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(phase.label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-/// Empty transcript area. Built by hand rather than with ContentUnavailableView
-/// so the symbol can animate: while recording it travels, which is the only
-/// thing on the page saying "still listening" before the first words land.
+/// What fills the transcript area before there is a transcript.
+///
+/// At rest: nothing. The page is empty because nothing has been said, and a
+/// title-sized "Bereit für die nächste Stunde" only stated the obvious loudly.
+/// While recording it keeps one quiet line, which before the first words land is
+/// the only thing on the page confirming the microphone is live.
 struct TranscriptEmptyState: View {
     @Environment(AppModel.self) private var model
 
-    private var isRecording: Bool { model.phase == .recording }
-
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: isRecording ? "waveform" : "mic")
-                .font(.system(size: 46, weight: .light))
+        if model.phase == .recording {
+            Label("Warte auf die ersten Wörter…", systemImage: "waveform")
+                .font(.footnote)
                 .foregroundStyle(.tertiary)
-                .symbolEffect(.variableColor.iterative, isActive: isRecording)
-                .padding(.bottom, 2)
-
-            Text(isRecording ? "Ich höre zu" : "Bereit für die nächste Stunde")
-                .font(.title3.weight(.semibold))
-
-            Text(
-                isRecording
-                    ? "Gesprochenes erscheint hier."
-                    : "Die Aufnahme wird live transkribiert und automatisch der richtigen Stunde zugeordnet."
-            )
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: 430)
+                .symbolEffect(.variableColor.iterative)
+                .transition(.opacity)
         }
-        .padding(.horizontal, 32)
-        .animation(.snappy, value: isRecording)
     }
 }
 
