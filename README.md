@@ -1,55 +1,177 @@
-<img src="Sources/MossLive/Assets.xcassets/AppIcon.appiconset/icon-1024.png" width="88" align="right" alt="">
+<p align="center">
+  <img src="Sources/MossLive/Assets.xcassets/AppIcon.appiconset/icon-1024.png" width="128" alt="Echo">
+</p>
 
-# Echo
+<h1 align="center">Echo</h1>
 
-An iPad app that listens to a school lesson, transcribes it live on a machine you
-own, and files the result under the right subject. It also carries your
-schoolbooks, so the same app you take notes in is the one you read from.
+<p align="center">
+  Live lesson transcription, a searchable lesson archive, and your schoolbooks —
+  on an iPad, powered by a machine you own.
+</p>
 
-It is not on the App Store and it will not work on its own: it is the client half
-of a pair. The other half is a FastAPI backend running on your own Linux or
-Windows machine with a GPU, reachable over your own [Tailscale](https://tailscale.com)
-network. The iPad records, displays and asks; everything else happens on the
-server.
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#what-you-need">What you need</a> ·
+  <a href="#what-it-doesnt-do">What it doesn't do</a> ·
+  <a href="#setup">Setup</a> ·
+  <a href="#building-without-a-mac">Building without a Mac</a>
+</p>
 
-## What it does
+<p align="center">
+  <img src="https://img.shields.io/badge/iPadOS-26%2B-000000?logo=apple&logoColor=white" alt="iPadOS 26+">
+  <img src="https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white" alt="Swift 5.10">
+  <img src="https://img.shields.io/badge/built%20on-Linux-51A2DA?logo=linux&logoColor=white" alt="Built on Linux">
+</p>
 
-**Live transcription.** The microphone is captured with AVAudioEngine, encoded as
-Opus and streamed over a WebSocket to the backend, which runs Qwen3-ASR locally.
-Text comes back as it is recognised and lands on the page while the teacher is
-still talking. No audio goes anywhere else.
+Echo is the iPad half of a pair. It streams the microphone to a backend running on
+your own machine, which transcribes the lesson locally and keeps the transcript,
+the audio, and everything derived from them. The iPad records, displays and asks;
+it stores almost nothing itself.
 
-**It knows the timetable.** Connect WebUntis and recordings name themselves by
-subject, teacher and room. Record straight through a double period and it is
-split into one lesson per period afterwards.
+It is not on the App Store, and it does nothing on its own. Without the backend
+and a working [Tailscale](https://tailscale.com) connection to it, the app is an
+empty shell. The interface is in German.
 
-**Every lesson is kept.** Transcript and audio both live on the server. Tapping a
-line in a transcript plays back the audio from exactly that moment. One tap per
-lesson also produces a summary of what was taught, cached after the first time.
+## Features
 
-**Lernen** turns a lesson into a quiz deck and schedules it on a Leitner ladder:
-cards you get wrong come back tomorrow, cards you get right at 1, 3, 7, 14 and 30
-days. **Chat mit KI** answers free-form questions about the running recording or
-any past lesson. While recording, a sticky note on the page answers "what did they
-just say" for the last N seconds, and a deliberately anonymous-looking
-Home/Lock-Screen widget does the same without announcing what it is.
+### Live transcription
 
-**Bibliothek** is the schoolbook shelf. PDFs sit in one folder on the server; the
-app shows them as a cover grid and downloads a book on first open into permanent
-storage, so it is there offline from then on. The reader shows a book, not a
-scrolling document: one page or a real 2–3 spread fills the screen, nothing
-scrolls, and pages turn by flicking sideways. Zooming out stops where the page
-reaches its natural size on the screen, worked out per book from the page
-dimensions and the layout, so no book ends up a stamp in the middle of the
-display. Since schoolbooks almost never print page 1 on the first PDF page, each
-book learns its own numbering once — turn to any page whose number you can read,
-type that number, and the rest follows.
+Audio is captured with AVAudioEngine, encoded as Opus, and streamed over a
+WebSocket to the backend, which runs Qwen3-ASR on its own GPU. Recognised text
+comes back while the teacher is still talking. Nothing is sent anywhere else
+unless you press something that asks an AI a question.
 
-**Bad reception is survivable.** If the network drops mid-lesson the recording
-carries on and the backlog, up to roughly 100 minutes of audio, is replayed on
-reconnect. Nothing said during an outage is lost.
+### It knows your timetable
 
-## How it fits together
+Connect WebUntis and recordings name themselves: subject, teacher, room. Record
+straight through a double period and the recording is cut into one lesson per
+period afterwards, so the archive matches the timetable rather than the tape.
+
+### The lesson archive
+
+Transcript and audio both stay on the server. Tap any line of a transcript and
+the audio plays from that moment. One tap per lesson also produces a summary of
+what was taught, which is cached, so the second look is free.
+
+### Lernen
+
+Each lesson becomes a quiz deck, scheduled on a Leitner ladder. A card you get
+wrong returns tomorrow; a card you get right returns after 1, 3, 7, 14 and 30
+days. Only exam-relevant material becomes cards.
+
+### Chat and the answer note
+
+The chat answers free-form questions about the running recording or any past
+lesson. While recording, a sticky note on the page answers "what did they just
+say" for the last N seconds. A Home and Lock Screen widget does the same and is
+deliberately anonymous-looking, which matters more than it should.
+
+### Bibliothek
+
+The schoolbook shelf. PDFs sit in one folder on the server, appear in the app as
+a grid of covers, and a book downloads once, into permanent storage, the first
+time it is opened. After that it is available offline.
+
+The reader shows a book rather than a document. One page, or a real 2–3 spread,
+fills the screen; nothing scrolls; pages turn with a sideways flick. Zooming out
+stops when the page reaches its natural size on the display, worked out for each
+book from its own page dimensions and the current layout, so no book can shrink
+into a stamp in the middle of the screen.
+
+Schoolbooks rarely print page 1 on the first PDF page, so every book learns its
+own numbering once: turn to any page whose number you can read, type that number,
+and the rest of the book follows. It is remembered per book.
+
+### Dead zones don't cost you the lesson
+
+If the network drops mid-lesson, recording continues and the backlog — up to
+roughly 100 minutes of audio — is replayed when the connection returns. Nothing
+said during an outage is lost.
+
+## What you need
+
+- A Linux or Windows machine with an NVIDIA or AMD GPU, running the companion
+  backend. Transcription happens there, so this is the piece that decides how
+  fast text appears.
+- A [Tailscale](https://tailscale.com) account, with both the iPad and that
+  machine in the same tailnet.
+- An iPad on iPadOS 26 or later, and a way to sideload an IPA (SideStore,
+  AltStore, or your own developer account).
+- Optionally a WebUntis account for the timetable features. The credentials live
+  on your server, never on the iPad.
+
+## What it doesn't do
+
+- **It is not usable without a server.** There is no cloud, no account, and no
+  hosted mode. If the machine at home is off, the app has nothing to talk to.
+- **It is not multi-user.** One person, one tailnet, one set of lessons. Nothing
+  in the design anticipates a second user.
+- **It is not localised.** The interface is German throughout.
+- **It is not distributed.** No App Store, no TestFlight, no signed builds. You
+  build the IPA yourself and sideload it, and re-signing is on you.
+- **It does not transcribe well without a decent GPU.** The model is small but it
+  is still a model, and on CPU the text arrives too late to be worth reading.
+
+## Setup
+
+1. **Backend.** Run the companion backend on the GPU machine and note its auth
+   token and Tailscale address. Its README covers the Tailscale side end to end.
+   Point `[library] dir` at the folder holding your schoolbook PDFs if you want
+   the Bibliothek tab to have anything in it.
+2. **iPad.** Install the [Tailscale app](https://apps.apple.com/app/tailscale/id1470499037),
+   sign in with the same account as the server, and keep it connected while using
+   Echo. Then build the IPA and install it.
+3. **Connect.** The app opens its settings on first launch: server address, port
+   (`8787` by default) and auth token, all documented in
+   [`Config.example.plist`](Config.example.plist).
+
+## Building without a Mac
+
+This app is developed entirely from Linux, which is the most unusual thing about
+the repository and the reason it is laid out the way it is.
+
+There is no `.xcodeproj` checked in. [`project.yml`](project.yml) is the real
+project file, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) generates the
+Xcode project on a GitHub-hosted macOS runner, which then builds, tests and
+uploads an IPA artifact. Nothing about editing the app requires a Mac; only
+compiling it does, and that is rented by the minute.
+
+```bash
+$EDITOR Sources/MossLive/...   # edit Swift in any editor
+git push                       # a macOS runner builds and tests
+gh run watch                   # collect the IPA artifact
+```
+
+Style is gated on every push by SwiftLint and SwiftFormat, on Ubuntu runners
+because macOS minutes bill at ten times the rate. Both run locally through
+Docker, which is worth doing before pushing:
+
+```bash
+docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/realm/swiftlint:0.57.1 swiftlint
+```
+
+If you do have a Mac, `brew install xcodegen && xcodegen generate && open
+MossLive.xcodeproj` behaves exactly as you would expect.
+
+[`scripts/ci/codemagic.sh`](scripts/ci/codemagic.sh) drives a macOS build on
+Codemagic instead, for when GitHub Actions is unavailable.
+
+## Repository layout
+
+```
+project.yml                  XcodeGen project definition (the real project file)
+Sources/MossLive/
+  Audio/                     AVAudioEngine capture, Opus streaming encoder
+  Network/                   wire protocol, WebSocket client with resume + backlog
+  Model/                     app state machine, settings, stores
+  Views/                     SwiftUI: transcript, lessons, learn, chat, library
+Sources/MossLiveWidget/      Home and Lock Screen answer widget
+LocalPackages/OpusShim/      C shim over libopus (SPM)
+Tests/MossLiveTests/         unit tests
+.github/workflows/           lint (ubuntu) · ci (macOS) · release
+```
+
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -61,62 +183,6 @@ flowchart LR
     A -- "REST: lessons, books, quiz cards" --> B
     B -- "summaries · chat · quiz cards" --> C
     B -- "timetable" --> D
-```
-
-Transcripts, audio, summaries, quiz decks and the schoolbook PDFs all live on the
-backend. The only thing the iPad keeps for itself is a downloaded book and its
-settings.
-
-## Setup
-
-1. **Backend.** Run the companion backend on a machine with an NVIDIA or AMD GPU
-   and note its auth token and Tailscale address. Its README covers the Tailscale
-   setup end to end. Point `[library] dir` at the folder holding your schoolbook
-   PDFs if you want the Bibliothek tab to have anything in it.
-2. **iPad.** Install the [Tailscale app](https://apps.apple.com/app/tailscale/id1470499037),
-   sign in with the same account as the server, and keep it connected while using
-   Echo. Then build the IPA (below) and install it.
-3. **Connect.** The app opens its settings on first launch: server address, port
-   (`8787` by default) and auth token, all documented in
-   [`Config.example.plist`](Config.example.plist). WebUntis is optional and its
-   credentials stay on your server.
-
-## Building without a Mac
-
-This is developed entirely from Linux. There is no `.xcodeproj` in the repository:
-[`project.yml`](project.yml) is the real project file and
-[XcodeGen](https://github.com/yonaskolb/XcodeGen) generates the Xcode project on a
-GitHub-hosted macOS runner, which builds, tests, and uploads an IPA artifact.
-
-```bash
-$EDITOR Sources/MossLive/...   # edit Swift in any editor
-git push                       # macOS runner builds and tests
-gh run watch                   # collect the IPA
-```
-
-SwiftLint and SwiftFormat gate every push on Ubuntu runners, and both run locally
-through Docker:
-
-```bash
-docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/realm/swiftlint:0.57.1 swiftlint
-```
-
-On a Mac, `brew install xcodegen && xcodegen generate && open MossLive.xcodeproj`
-works as you would expect.
-
-## Repository layout
-
-```
-project.yml                  XcodeGen project definition (the real project file)
-Sources/MossLive/
-  Audio/                     AVAudioEngine capture, Opus streaming encoder
-  Network/                   wire protocol, WebSocket client with resume + backlog
-  Model/                     app state machine, settings, stores
-  Views/                     SwiftUI: transcript, lessons, learn, chat, library
-Sources/MossLiveWidget/      Home/Lock-Screen answer widget
-LocalPackages/OpusShim/      C shim over libopus (SPM)
-Tests/MossLiveTests/         unit tests
-.github/workflows/           lint (ubuntu) · ci (macOS) · release
 ```
 
 ## Credits
