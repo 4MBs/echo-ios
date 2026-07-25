@@ -182,7 +182,8 @@ struct BackendAPI {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            throw await Self.noteOffline(error)
+            let mapped = await Self.noteOffline(error)
+            throw mapped
         }
         // Anything with a status line means the server is there, including a
         // 500 — only the transport failing counts as being offline.
@@ -390,7 +391,8 @@ struct BackendAPI {
         do {
             (tmp, response) = try await URLSession.shared.download(for: req)
         } catch {
-            throw await Self.noteOffline(error)
+            let mapped = await Self.noteOffline(error)
+            throw mapped
         }
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 0

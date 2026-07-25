@@ -63,7 +63,8 @@ extension BackendAPI {
         do {
             (data, response) = try await URLSession.shared.data(for: coverRequest)
         } catch {
-            throw await Self.noteOffline(error)
+            let mapped = await Self.noteOffline(error)
+            throw mapped
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
@@ -86,7 +87,8 @@ extension BackendAPI {
         do {
             tmp = try await BookDownloader().download(request, expectedBytes: book.sizeBytes, progress: progress)
         } catch {
-            throw await Self.noteOffline(error)
+            let mapped = await Self.noteOffline(error)
+            throw mapped
         }
         let dest = Self.booksDirectory().appendingPathComponent("\(book.id).pdf")
         try? FileManager.default.removeItem(at: dest)
