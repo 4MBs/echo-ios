@@ -65,7 +65,7 @@ struct LessonsView: View {
                 .groupedScreen()
         } else if lessons.isEmpty {
             ContentUnavailableView {
-                Label("Noch keine Stunden", systemImage: "books.vertical")
+                Label("Noch keine Stunden", systemImage: "calendar")
             } description: {
                 Text("Nimm eine Stunde auf, dann erscheint sie hier.")
             }
