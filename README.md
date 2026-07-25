@@ -32,6 +32,10 @@ It is not on the App Store, and it does nothing on its own. Without the backend
 and a working [Tailscale](https://tailscale.com) connection to it, the app is an
 empty shell. The interface is in German.
 
+<p align="center">
+  <img src="docs/screenshots/recording.png" width="880" alt="Recording in progress: the sidebar on the left, the waveform and stop button in a bar at the bottom, and the AI answer note in the top right corner">
+</p>
+
 ## Features
 
 ### Live transcription
@@ -40,6 +44,9 @@ Audio is captured with AVAudioEngine, encoded as Opus, and streamed over a
 WebSocket to the backend, which runs Qwen3-ASR on its own GPU. Recognised text
 comes back while the teacher is still talking. Nothing is sent anywhere else
 unless you press something that asks an AI a question.
+
+The transcript fills the page as it arrives. Everything else — the sidebar, the
+record control, the answer note — sits at the edges.
 
 ### It knows your timetable
 
@@ -66,6 +73,13 @@ lesson. While recording, a sticky note on the page answers "what did they just
 say" for the last N seconds. A Home and Lock Screen widget does the same and is
 deliberately anonymous-looking, which matters more than it should.
 
+<p align="center">
+  <img src="docs/screenshots/chat.png" width="880" alt="The chat screen before the first question, with a context picker above the input field">
+</p>
+
+The context picker under the conversation decides what a question is answered
+from: nothing, the running recording, or one particular lesson.
+
 ### Bibliothek
 
 The schoolbook shelf. PDFs sit in one folder on the server, appear in the app as
@@ -81,6 +95,10 @@ into a stamp in the middle of the screen.
 Schoolbooks rarely print page 1 on the first PDF page, so every book learns its
 own numbering once: turn to any page whose number you can read, type that number,
 and the rest of the book follows. It is remembered per book.
+
+<p align="center">
+  <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">
+</p>
 
 ### Dead zones don't cost you the lesson
 
