@@ -107,11 +107,6 @@ struct ChatView: View {
     private var inputBar: some View {
         VStack(spacing: 8) {
             contextChip
-            // Asking is the one thing here that genuinely is the AI's, and the
-            // AI is on the server. Say so instead of failing on send.
-            if !model.connectivity.isOnline {
-                OfflineHint("Fragen beantwortet die KI auf dem Server.")
-            }
             HStack(spacing: 10) {
                 TextField("Stelle eine Frage zum Unterricht…", text: $draft, axis: .vertical)
                     .lineLimit(1 ... 4)

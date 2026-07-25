@@ -4,8 +4,7 @@ struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @State private var books: [BackendAPI.Book] = []
     @State private var loading = true
-    @State private var errorMessage: String?
-    @State private var savedAt: Date?
+    @State private var loadError: Error?
 
     private var api: BackendAPI { model.api }
 
@@ -13,7 +12,6 @@ struct LibraryView: View {
         NavigationStack {
             content
                 .navigationTitle("Bibliothek")
-                .offlineBar(savedAt: savedAt)
                 .navigationDestination(for: BackendAPI.Book.self) { book in
                     BookReaderView(api: api, book: book)
                 }
@@ -24,8 +22,8 @@ struct LibraryView: View {
     @ViewBuilder private var content: some View {
         if loading {
             ProgressView("Lade Bücher…").groupedScreen()
-        } else if books.isEmpty, let errorMessage {
-            ErrorState(message: errorMessage) { await load() }.groupedScreen()
+        } else if books.isEmpty, let loadError {
+            ErrorState(loadError) { await load() }.groupedScreen()
         } else if books.isEmpty {
             ContentUnavailableView(
                 "Keine Bücher",
@@ -66,20 +64,18 @@ struct LibraryView: View {
         let key = OfflineCache.Key.books
         if books.isEmpty, let cached = OfflineCache.load([BackendAPI.Book].self, key: key) {
             books = cached
-            savedAt = OfflineCache.savedAt(key: key)
         }
         loading = books.isEmpty
-        errorMessage = nil
+        loadError = nil
         do {
             let fresh = try await api.listBooks()
             books = fresh
             OfflineCache.save(fresh, as: key)
-            savedAt = OfflineCache.savedAt(key: key)
         } catch {
             // A stored shelf beats an error page. The books already on the iPad
             // open perfectly well without the server, and the shelf is how you
             // get to them.
-            if books.isEmpty { errorMessage = error.localizedDescription }
+            if books.isEmpty { loadError = error }
         }
         loading = false
     }
