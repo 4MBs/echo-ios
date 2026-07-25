@@ -76,25 +76,37 @@ struct StatusLabel: View {
     }
 }
 
-/// Empty transcript area, using the system empty-state layout.
+/// Empty transcript area. Built by hand rather than with ContentUnavailableView
+/// so the symbol can animate: while recording it travels, which is the only
+/// thing on the page saying "still listening" before the first words land.
 struct TranscriptEmptyState: View {
     @Environment(AppModel.self) private var model
 
     private var isRecording: Bool { model.phase == .recording }
 
     var body: some View {
-        ContentUnavailableView {
-            Label(
-                isRecording ? "Ich höre zu" : "Bereit für die nächste Stunde",
-                systemImage: isRecording ? "waveform" : "mic.fill"
-            )
-        } description: {
+        VStack(spacing: 12) {
+            Image(systemName: isRecording ? "waveform" : "mic")
+                .font(.system(size: 46, weight: .light))
+                .foregroundStyle(.tertiary)
+                .symbolEffect(.variableColor.iterative, isActive: isRecording)
+                .padding(.bottom, 2)
+
+            Text(isRecording ? "Ich höre zu" : "Bereit für die nächste Stunde")
+                .font(.title3.weight(.semibold))
+
             Text(
                 isRecording
                     ? "Gesprochenes erscheint hier."
                     : "Die Aufnahme wird live transkribiert und automatisch der richtigen Stunde zugeordnet."
             )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 430)
         }
+        .padding(.horizontal, 32)
+        .animation(.snappy, value: isRecording)
     }
 }
 
