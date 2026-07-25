@@ -2,10 +2,13 @@ import SwiftUI
 
 /// The one place the app says the word "offline".
 ///
-/// It sits at the foot of the sidebar, where Mail keeps the same news, and it
-/// is the whole of the treatment: no banners over content, no badges on rows.
-/// The screens themselves simply show what they have, and anything the outage
+/// It sits in the sidebar's footer, where Mail keeps the same news, and it is
+/// the whole of the treatment: no banners over content, no badges on rows. The
+/// screens themselves simply show what they have, and anything the outage
 /// actually prevents is greyed out where it is used, with its own reason.
+///
+/// The footer owns the horizontal inset so this line's icon lands on the same
+/// column as the navigation rows above it.
 struct SidebarOfflineNote: View {
     @Environment(AppModel.self) private var model
 
@@ -15,8 +18,7 @@ struct SidebarOfflineNote: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
+                .padding(.vertical, 8)
                 .transition(.opacity)
         }
     }
