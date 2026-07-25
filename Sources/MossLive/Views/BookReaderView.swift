@@ -79,6 +79,11 @@ private struct PDFReader: View {
     /// the shift differs per book, which is why it is stored per book.
     @AppStorage private var pageOffset: Int
 
+    /// Once every book is lined up, the numbering has done its job and can get
+    /// out of the way. Kept across books, and across launches — hiding it never
+    /// touches the offsets, so switching it back on restores them all.
+    @AppStorage("reader.showPageNumbers") private var showPageNumbers = true
+
     init(url: URL, bookID: String) {
         self.url = url
         _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(bookID)")
@@ -130,24 +135,33 @@ private struct PDFReader: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { readerMenu } }
     }
 
-    /// Set once per book and then forgotten, so it belongs in the navigation
-    /// bar's overflow menu rather than anywhere near the reading controls.
+    /// Everything about page numbering: whether it shows at all, and what it
+    /// counts from. Both are set rarely, so they live in the navigation bar's
+    /// overflow menu rather than anywhere near the reading controls.
     private var readerMenu: some View {
         Menu {
-            Button {
-                numberingPage = currentPage
-                numberingPlaceholder = printedLabel(currentPage)
-                typedNumbering = ""
-                adjustingNumbering = true
-            } label: {
-                Label("Seitenzahlen anpassen…", systemImage: "number")
+            Toggle(isOn: $showPageNumbers) {
+                Label("Seitenzahlen anzeigen", systemImage: "number")
             }
 
-            if pageOffset != 0 {
-                Button(role: .destructive) {
-                    pageOffset = 0
-                } label: {
-                    Label("Nummerierung zurücksetzen", systemImage: "arrow.uturn.backward")
+            if showPageNumbers {
+                Section {
+                    Button {
+                        numberingPage = currentPage
+                        numberingPlaceholder = printedLabel(currentPage)
+                        typedNumbering = ""
+                        adjustingNumbering = true
+                    } label: {
+                        Label("Seitenzahlen anpassen…", systemImage: "textformat.123")
+                    }
+
+                    if pageOffset != 0 {
+                        Button(role: .destructive) {
+                            pageOffset = 0
+                        } label: {
+                            Label("Nummerierung zurücksetzen", systemImage: "arrow.uturn.backward")
+                        }
+                    }
                 }
             }
         } label: {
@@ -237,24 +251,9 @@ private struct PDFReader: View {
             .disabled(currentPage <= 1)
             .accessibilityLabel("Vorherige Seite")
 
-            Button {
-                typedPage = ""
-                openedAt = printedLabel(currentPage)
-                askingForPage = true
-            } label: {
-                // Fixed slots either side of the slash: the indicator stays put
-                // whether the page number is 1 or 320 digits wide.
-                HStack(spacing: 4) {
-                    Text(printedLabel(currentPage))
-                        .frame(width: 36, alignment: .trailing)
-                    Text("/ \(printedLast)")
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: 42, alignment: .leading)
-                }
-                .font(.subheadline.monospacedDigit().weight(.semibold))
+            if showPageNumbers {
+                pageIndicator
             }
-            .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
-            .popover(isPresented: $askingForPage) { pageJump }
 
             Button {
                 proxy.step(1)
@@ -265,6 +264,28 @@ private struct PDFReader: View {
             .accessibilityLabel("Nächste Seite")
         }
         .buttonStyle(.glass)
+    }
+
+    /// The current page, and the way to jump to another one.
+    private var pageIndicator: some View {
+        Button {
+            typedPage = ""
+            openedAt = printedLabel(currentPage)
+            askingForPage = true
+        } label: {
+            // Fixed slots either side of the slash: the indicator stays put
+            // whether the page number is 1 or 320 digits wide.
+            HStack(spacing: 4) {
+                Text(printedLabel(currentPage))
+                    .frame(width: 36, alignment: .trailing)
+                Text("/ \(printedLast)")
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 42, alignment: .leading)
+            }
+            .font(.subheadline.monospacedDigit().weight(.semibold))
+        }
+        .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
+        .popover(isPresented: $askingForPage) { pageJump }
     }
 
     /// Type a page and the book goes there — nothing to confirm. Deliberately
@@ -371,6 +392,25 @@ private final class PDFViewProxy {
         guard let pdfView, let document = pdfView.document, document.pageCount > 0 else { return }
         let clamped = min(max(index, 0), document.pageCount - 1)
         if let page = document.page(at: clamped) { pdfView.go(to: page) }
+    }
+}
+
+/// A swipe that remembers where the finger landed. UISwipeGestureRecognizer
+/// only reports where the flick ended, which is no use for telling a page turn
+/// apart from a back swipe that started at the screen edge.
+private final class PageSwipeGestureRecognizer: UISwipeGestureRecognizer {
+    private(set) var startX: CGFloat = .greatestFiniteMagnitude
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let touch = touches.first, let view {
+            startX = touch.location(in: view).x
+        }
+        super.touchesBegan(touches, with: event)
+    }
+
+    override func reset() {
+        super.reset()
+        startX = .greatestFiniteMagnitude
     }
 }
 
@@ -495,7 +535,7 @@ private struct PDFKitView: UIViewRepresentable {
             }
 
             for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
-                let swipe = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipe))
+                let swipe = PageSwipeGestureRecognizer(target: self, action: #selector(handleSwipe))
                 swipe.direction = direction
                 swipe.delegate = self
                 swipe.cancelsTouchesInView = false
@@ -511,14 +551,44 @@ private struct PDFKitView: UIViewRepresentable {
             proxy?.step(recognizer.direction == .left ? 1 : -1)
         }
 
-        // The PDF's own scroll view keeps its pan recognizer; the flick has to be
-        // allowed to run alongside it.
+        /// A backwards flick starting at the very left edge belongs to the
+        /// navigation controller, so going back to the library still works.
+        /// Everywhere else it turns the page.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let swipe = gestureRecognizer as? PageSwipeGestureRecognizer,
+                  swipe.direction == .right else { return true }
+            return swipe.startX > Self.edgeStrip
+        }
+
+        /// The PDF's own scroll view keeps its pan recognizer, and the flick has
+        /// to run alongside it. Recognizers from outside the reader — the back
+        /// swipe above all — must not: turning a page and leaving the book at
+        /// the same time is how a swipe back used to end up in the library.
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            true
+            belongsToReader(otherGestureRecognizer, alongside: gestureRecognizer)
         }
+
+        /// Outside recognizers wait for the page turn to fail before they run.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            !belongsToReader(otherGestureRecognizer, alongside: gestureRecognizer)
+        }
+
+        private func belongsToReader(
+            _ other: UIGestureRecognizer,
+            alongside mine: UIGestureRecognizer
+        ) -> Bool {
+            guard let readerView = mine.view, let otherView = other.view else { return false }
+            return otherView.isDescendant(of: readerView)
+        }
+
+        /// Width of the strip along the left edge reserved for the back swipe.
+        private static let edgeStrip: CGFloat = 40
 
         deinit {
             for observer in observers {
