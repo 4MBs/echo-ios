@@ -93,8 +93,10 @@ struct RecordDeck: View {
             RecordButton()
         }
         .padding(.horizontal, 24)
-        .padding(.top, isRecording ? 14 : 20)
-        .padding(.bottom, 14)
+        // The control carries its own margin — its layers and their blur need
+        // room inside its frame — so the dock adds little of its own.
+        .padding(.top, isRecording ? 8 : 12)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity)
         .animation(.snappy, value: isRecording)
     }
@@ -133,61 +135,104 @@ struct RecordDeck: View {
     }
 }
 
-/// The record control, built from measurements of Don Pardon's "Record Button
-/// (Voice Messanger App)" rather than from an impression of it.
+/// The record control: an inflated rounded square blended with a circle, under a
+/// luminous red gradient, with five translucent duplicates offset around it and a
+/// five-bar waveform at the centre. Modelled on Don Pardon's "Record Button
+/// (Voice Messanger App)" and tuned against a live preview of this same maths.
 ///
-/// The artwork is not one shape with a glow around it. It is four translucent
-/// shapes of different colours, each a different outline, overlapping so their
-/// edges show and their overlaps tint each other. Each one here has its own
-/// skeleton — its own set of harmonic amplitudes and phases — turning at its own
-/// speed and in its own direction, and each answers the microphone with its own
-/// delay, so a loud moment travels outwards through them instead of inflating
-/// the whole thing at once.
+/// Two things make it read as liquid rather than as a spinning graphic. Every
+/// layer moves on its own clock — its own outline, drift, rotation, breathing
+/// period and offset — so the overlaps slide across each other instead of
+/// travelling together. And every layer hears the microphone at its own delay,
+/// so a loud syllable sweeps outwards through them rather than inflating the
+/// whole control at once.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
 
-    /// One translucent shape. Everything that could tie it to its neighbours —
-    /// outline, colour, speed, direction, how far behind it hears — is its own.
+    /// Everything is a multiple of this, so the control scales as one piece.
+    private static let coreRadius: CGFloat = 39
+    private static let extent: CGFloat = 136
+
+    // MARK: the layers
+
+    /// One translucent duplicate. Nothing here is shared with its neighbours.
     private struct Layer: Identifiable {
         let id: Int
         let skeleton: [Blob.Harmonic]
         let scale: CGFloat
         let color: Color
         let opacity: Double
+        let blur: CGFloat
+        /// Speed and direction the outline morphs at.
         let drift: Double
+        /// Radians per second the whole silhouette turns; this is what slides
+        /// the overlaps across each other.
+        let spin: Double
+        let breathRate: Double
+        let breathPhase: Double
         let offset: CGSize
-        /// How many microphone samples behind the core this layer runs.
+        let squareness: Double
+        /// Microphone samples behind the core, and how much level it takes up.
         let lag: Int
-        /// How much of the level it takes up.
         let response: Double
+    }
+
+    private static func rgb(_ r: Double, _ g: Double, _ b: Double) -> Color {
+        Color(red: r / 255, green: g / 255, blue: b / 255)
     }
 
     private static let layers: [Layer] = [
         Layer(
-            id: 0, skeleton: Blob.skeleton(seed: 7), scale: 1.26,
-            color: Color(red: 254 / 255, green: 196 / 255, blue: 185 / 255),
-            opacity: 0.14, drift: -0.6, offset: CGSize(width: 0, height: -4), lag: 9, response: 0.17
+            id: 0, skeleton: Blob.skeleton(seed: 7), scale: 1.16, color: rgb(255, 198, 188),
+            opacity: 0.15, blur: 1.54, drift: -0.50, spin: 0.07, breathRate: 0.31, breathPhase: 0.0,
+            offset: CGSize(width: -0.048, height: -0.238), squareness: 0.50, lag: 10, response: 0.20
         ),
         Layer(
-            id: 1, skeleton: Blob.skeleton(seed: 23), scale: 1.16,
-            color: Color(red: 244 / 255, green: 169 / 255, blue: 162 / 255),
-            opacity: 0.22, drift: 0.8, offset: CGSize(width: 5, height: 3), lag: 6, response: 0.13
+            id: 1, skeleton: Blob.skeleton(seed: 23), scale: 1.12, color: rgb(255, 166, 152),
+            opacity: 0.17, blur: 1.23, drift: 0.70, spin: -0.11, breathRate: 0.23, breathPhase: 1.9,
+            offset: CGSize(width: 0.238, height: 0.095), squareness: 0.56, lag: 7, response: 0.17
         ),
         Layer(
-            id: 2, skeleton: Blob.skeleton(seed: 61), scale: 1.08,
-            color: Color(red: 253 / 255, green: 120 / 255, blue: 105 / 255),
-            opacity: 0.30, drift: -1.1, offset: CGSize(width: -5, height: 3), lag: 3, response: 0.09
+            id: 2, skeleton: Blob.skeleton(seed: 61), scale: 1.10, color: rgb(255, 126, 108),
+            opacity: 0.19, blur: 1.02, drift: -0.95, spin: 0.15, breathRate: 0.41, breathPhase: 3.4,
+            offset: CGSize(width: -0.226, height: 0.131), squareness: 0.60, lag: 5, response: 0.14
+        ),
+        Layer(
+            id: 3, skeleton: Blob.skeleton(seed: 97), scale: 1.07, color: rgb(255, 98, 80),
+            opacity: 0.21, blur: 0.82, drift: 1.20, spin: -0.09, breathRate: 0.27, breathPhase: 5.0,
+            offset: CGSize(width: 0.107, height: 0.226), squareness: 0.64, lag: 3, response: 0.11
+        ),
+        Layer(
+            id: 4, skeleton: Blob.skeleton(seed: 131), scale: 1.04, color: rgb(255, 82, 66),
+            opacity: 0.22, blur: 0.61, drift: -1.45, spin: 0.19, breathRate: 0.35, breathPhase: 2.4,
+            offset: CGSize(width: -0.119, height: -0.107), squareness: 0.66, lag: 2, response: 0.08
         ),
     ]
 
-    // sampled across the core: it runs from a deeper red to an orange one
-    private static let vivid = Color(red: 255 / 255, green: 58 / 255, blue: 50 / 255)
-    private static let coral = Color(red: 255 / 255, green: 92 / 255, blue: 64 / 255)
+    // MARK: the waveform
 
-    private static let diameter: CGFloat = 78
-    /// Bar heights as measured, relative to the tallest. Widths and gaps are
-    /// both 10.1% of the core's radius, and the tallest bar is 67.4% of it.
-    private static let glyphBars: [CGFloat] = [0.30, 0.60, 1.00, 0.60, 0.30]
+    /// One bar. Four of these differ per bar — clock, delay, gain, smoothing —
+    /// which is what stops the five of them moving as one object.
+    private struct Bar: Identifiable {
+        let id: Int
+        let base: CGFloat
+        let frequency: Double
+        let phase: Double
+        /// Samples behind now: the middle bar hears the room almost live, the
+        /// outer pair a third of a second late.
+        let lag: Int
+        /// Samples averaged, which is this bar's smoothing.
+        let window: Int
+        let gain: Double
+    }
+
+    private static let bars: [Bar] = [
+        Bar(id: 0, base: 0.34, frequency: 0.83, phase: 0.0, lag: 5, window: 5, gain: 0.95),
+        Bar(id: 1, base: 0.63, frequency: 1.27, phase: 1.7, lag: 3, window: 4, gain: 1.20),
+        Bar(id: 2, base: 1.00, frequency: 0.61, phase: 3.1, lag: 1, window: 2, gain: 1.40),
+        Bar(id: 3, base: 0.63, frequency: 1.09, phase: 4.4, lag: 3, window: 4, gain: 1.10),
+        Bar(id: 4, base: 0.34, frequency: 1.51, phase: 5.6, lag: 6, window: 5, gain: 0.85),
+    ]
 
     private var isActive: Bool {
         switch model.phase {
@@ -205,12 +250,11 @@ struct RecordButton: View {
             }
         } label: {
             // A timeline, not a repeating animation: the phase is read from the
-            // clock every frame, so it never restarts and never jumps — which is
-            // what made the first attempt stutter at the wrap.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            // clock every frame, so nothing ever restarts or jumps.
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
                 content(at: context.date.timeIntervalSinceReferenceDate)
             }
-            .frame(width: 116, height: 116)
+            .frame(width: Self.extent, height: Self.extent)
             .contentShape(Circle())
         }
         .buttonStyle(RecordButtonStyle())
@@ -219,139 +263,181 @@ struct RecordButton: View {
     }
 
     private func content(at time: TimeInterval) -> some View {
-        let core = energy(lag: 0)
+        let core = level(lag: 0, window: 3)
 
         return ZStack {
             ForEach(Self.layers) { layer in
-                let level = energy(lag: layer.lag)
+                let heard = level(lag: layer.lag, window: 4)
+                let breathe = 1 + 0.022 * sin(time * layer.breathRate * 2 + layer.breathPhase)
+                let side = Self.coreRadius * 2 * layer.scale * CGFloat(breathe)
+                    * (1 + CGFloat(heard) * 0.045) * Blob.margin
+
                 Blob(
                     harmonics: layer.skeleton,
                     time: time,
-                    swell: 1 + level * layer.response,
-                    drift: layer.drift
+                    drift: layer.drift,
+                    rotation: time * layer.spin,
+                    swell: 1 + heard * layer.response,
+                    squareness: layer.squareness
                 )
-                .fill(layer.color.opacity(layer.opacity))
-                .frame(
-                    width: Self.diameter * layer.scale * (1 + level * 0.05),
-                    height: Self.diameter * layer.scale * (1 + level * 0.05)
+                .fill(layer.color)
+                .frame(width: side, height: side)
+                .offset(
+                    x: layer.offset.width * Self.coreRadius,
+                    y: layer.offset.height * Self.coreRadius
                 )
-                .offset(layer.offset)
+                .blur(radius: layer.blur)
+                .opacity(layer.opacity)
+                // On white the artwork's pale layers stay pale; on black the
+                // same fill at the same opacity turns brown. They have to add
+                // light instead of veiling it.
+                .blendMode(.plusLighter)
             }
 
-            Blob(harmonics: Blob.reference, time: time, swell: 1 + core * 0.45, drift: 1)
-                .fill(
-                    LinearGradient(
-                        colors: [Self.vivid, Self.coral],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(
-                    width: Self.diameter * (1 + core * 0.04),
-                    height: Self.diameter * (1 + core * 0.04)
-                )
-
-            glyph(level: core)
+            interior(at: time, level: core)
+            waveform(at: time)
         }
     }
 
-    /// The room's loudness `lag` samples ago, smoothed over three of them. The
-    /// levels arrive about sixteen times a second, so a lag of nine is a little
-    /// over half a second behind — enough for the outer layer to visibly trail.
-    private func energy(lag: Int) -> Double {
+    /// The saturated middle: a gradient across it for the coral variation, a
+    /// highlight off-centre for depth, and a hair of blur so the edge is
+    /// translucent rather than cut out.
+    private func interior(at time: TimeInterval, level core: Double) -> some View {
+        let side = Self.coreRadius * 2 * (1 + CGFloat(core) * 0.03) * Blob.margin
+
+        return ZStack {
+            LinearGradient(
+                stops: [
+                    .init(color: Self.rgb(255, 47, 34), location: 0),
+                    .init(color: Self.rgb(255, 71, 51), location: 0.5),
+                    .init(color: Self.rgb(255, 107, 69), location: 1),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                stops: [
+                    .init(color: Self.rgb(255, 132, 96).opacity(0.42), location: 0),
+                    .init(color: Self.rgb(255, 70, 50).opacity(0.12), location: 0.6),
+                    .init(color: Self.rgb(255, 40, 30).opacity(0), location: 1),
+                ],
+                center: UnitPoint(x: 0.35, y: 0.34),
+                startRadius: Self.coreRadius * 0.08,
+                endRadius: Self.coreRadius * 1.05
+            )
+        }
+        .mask {
+            Blob(harmonics: Blob.base, time: time, swell: 1 + core * 0.3)
+        }
+        .frame(width: side, height: side)
+        .blur(radius: 0.7)
+    }
+
+    private func waveform(at time: TimeInterval) -> some View {
+        let width = Self.coreRadius * 0.16
+        let tallest = Self.coreRadius * 0.80
+
+        return HStack(alignment: .center, spacing: Self.coreRadius * 0.10) {
+            ForEach(Self.bars) { bar in
+                Capsule()
+                    .fill(Self.rgb(128, 14, 7).opacity(0.5))
+                    .frame(width: width, height: height(of: bar, at: time, tallest: tallest))
+            }
+        }
+    }
+
+    /// Idle, every bar drifts on its own frequency and phase, so they are never
+    /// in step even in silence. Recording, each adds its own slice of the level
+    /// history at its own gain, so a loud moment changes the shape of the
+    /// waveform rather than just its size.
+    private func height(of bar: Bar, at time: TimeInterval, tallest: CGFloat) -> CGFloat {
+        let idle = 1 + 0.085 * sin(time * bar.frequency * 1.6 + bar.phase)
+        let live = 1 + level(lag: bar.lag, window: bar.window) * bar.gain * 0.85
+        return max(Self.coreRadius * 0.16, tallest * bar.base * CGFloat(idle * live))
+    }
+
+    /// The room's loudness `lag` samples ago, averaged over `window` of them.
+    /// Averaging is the smoothing, and a different window per bar is why they
+    /// settle raggedly instead of together. Levels arrive about sixteen times a
+    /// second, so ten samples is a little over half a second behind.
+    private func level(lag: Int, window: Int) -> Double {
         guard model.phase == .recording else { return 0 }
         let levels = model.micLevels
         let end = levels.count - lag
-        let start = max(0, end - 3)
+        let start = max(0, end - window)
         guard end > start else { return 0 }
-        let window = levels[start ..< end]
-        return min(1, Double(window.reduce(0, +)) / Double(window.count) * 1.7)
-    }
-
-    /// The waveform from the artwork. Its bars are not a separate colour —
-    /// sampled, they are exactly the fill darkened by a fifth, so they are drawn
-    /// as black at 20% and stay part of the shape wherever the gradient has got
-    /// to. They ride the level while recording.
-    private func glyph(level: Double) -> some View {
-        let radius = Self.diameter / 2
-        let unit = radius * 0.101  // measured: bar width and gap are both this
-        let tallest = radius * 0.674
-        let ride = isActive ? 0.78 + level * 0.9 : 1
-
-        return HStack(alignment: .center, spacing: unit) {
-            ForEach(Self.glyphBars.indices, id: \.self) { index in
-                Capsule()
-                    .fill(Color.black.opacity(0.2))
-                    .frame(width: unit, height: max(unit, tallest * Self.glyphBars[index] * ride))
-            }
-        }
-        .animation(.easeOut(duration: 0.1), value: level)
+        let slice = levels[start ..< end]
+        return min(1, Double(slice.reduce(0, +)) / Double(slice.count) * 1.7)
     }
 }
 
-/// An outline in the style of the reference artwork: a circle whose radius is
-/// bent by seven harmonics.
+/// The silhouette: a superellipse blended with a circle, then bent by four
+/// harmonics.
 ///
-/// The reference set was measured by tracing the artwork's edge and taking the
-/// Fourier transform of its radius — the fourth and fifth harmonics carry it, at
-/// 3.5% and 3.4% of the radius, and the whole outline is only ±7.7% off a
-/// circle. Getting those amplitudes wrong is the difference between this and a
-/// rounded triangle. `skeleton(seed:)` makes siblings of it: same family of
-/// amplitudes, different phases, so each layer is its own shape.
+/// Only four. The artwork's own outline has seven, but orders five and up are
+/// small ripples — at button size they read as scalloping, and dropping them is
+/// what leaves broad shoulders and a gently irregular top. With no frequency
+/// above the fourth present, the outline cannot grow a pointed bulge or a deep
+/// indentation however hard it is pushed.
 struct Blob: Shape {
     struct Harmonic {
         let amplitude: Double
         let phase: Double
     }
 
-    /// Harmonics 1 through 7 of the artwork's own outline.
-    static let reference: [Harmonic] = [
-        Harmonic(amplitude: 0.0076, phase: -2.32),
-        Harmonic(amplitude: 0.0199, phase: -1.74),
-        Harmonic(amplitude: 0.0128, phase: -2.64),
-        Harmonic(amplitude: 0.0350, phase: -3.00),
-        Harmonic(amplitude: 0.0341, phase: -1.80),
-        Harmonic(amplitude: 0.0097, phase: 0.22),
-        Harmonic(amplitude: 0.0090, phase: 0.74),
+    /// Room left around the outline inside its frame, so a bulge never clips.
+    static let margin: CGFloat = 1.25
+
+    static let base: [Harmonic] = [
+        Harmonic(amplitude: 0.010, phase: -2.32),
+        Harmonic(amplitude: 0.045, phase: -1.74),
+        Harmonic(amplitude: 0.030, phase: -2.64),
+        Harmonic(amplitude: 0.018, phase: -3.00),
     ]
 
-    /// A sibling outline. Deterministic, so a shape does not change between
-    /// frames — the same seed always gives the same skeleton.
+    /// A sibling outline: the same family of amplitudes, its own phases.
+    /// Deterministic, so a layer keeps its shape between frames.
     static func skeleton(seed: UInt64) -> [Harmonic] {
         var state = seed
         func next() -> Double {
             state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
             return Double((state >> 33) % 10_000) / 10_000
         }
-        return reference.map { harmonic in
-            Harmonic(amplitude: harmonic.amplitude * (0.7 + next() * 0.8), phase: next() * 2 * .pi)
+        return base.map { harmonic in
+            Harmonic(amplitude: harmonic.amplitude * (0.75 + next() * 0.5), phase: next() * 2 * .pi)
         }
     }
 
     var harmonics: [Harmonic]
-    /// Seconds. Each harmonic turns at its own speed, so the outline drifts.
     var time: Double
-    /// Multiplies every amplitude: 1 is the artwork, higher is more agitated.
-    var swell: Double = 1
-    /// Speed and direction of the drift, so no two layers turn together.
     var drift: Double = 1
+    /// Radians the whole outline is turned by.
+    var rotation: Double = 0
+    var swell: Double = 1
+    /// 0 is a circle, 1 the full superellipse.
+    var squareness: Double = 0.62
+    /// How much wider than tall.
+    var width: Double = 1.12
 
     func path(in rect: CGRect) -> Path {
-        let reach = harmonics.reduce(0) { $0 + $1.amplitude }
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        // leave room for the largest bulge, so nothing clips at the frame
-        let radius = min(rect.width, rect.height) / 2 / (1 + reach * swell)
-        let steps = 64
+        let radius = min(rect.width, rect.height) / 2 / Self.margin
+        let steps = 80
+        let power = 3.8
 
         let points: [CGPoint] = (0 ..< steps).map { step in
-            let angle = Double(step) / Double(steps) * 2 * .pi
+            let angle = Double(step) / Double(steps) * 2 * .pi + rotation
+            let superellipse = 1 / pow(
+                pow(abs(cos(angle) / width), power) + pow(abs(sin(angle)), power),
+                1 / power
+            )
             var bend = 0.0
             for (index, harmonic) in harmonics.enumerated() {
                 let order = Double(index + 1)
-                let turn = time * drift * (0.21 + 0.05 * order)
+                let turn = time * drift * (0.19 + 0.05 * order)
                 bend += harmonic.amplitude * swell * cos(order * angle + harmonic.phase + turn)
             }
-            let distance = radius * (1 + bend)
+            let distance = radius * ((1 - squareness) + superellipse * squareness) * (1 + bend)
             return CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
         }
 
