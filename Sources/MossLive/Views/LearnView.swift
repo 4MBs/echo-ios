@@ -3,49 +3,115 @@ import UserNotifications
 
 /// "Lernen": the spaced-repetition home. One tap reviews everything due
 /// today; below that, per-subject decks and lessons whose deck hasn't been
-/// generated yet. The schedule lives on the server (Leitner ladder).
+/// generated yet. The schedule lives on the server (Leitner ladder), but the
+/// deck itself is kept here — cards never change once written, so learning is
+/// the one thing in the app that has no business needing a network.
 struct LearnView: View {
     @Environment(AppModel.self) private var model
 
     @State private var overview: BackendAPI.LearnOverview?
     @State private var lessons: [BackendAPI.LessonInfo] = []
+    @State private var cards: [BackendAPI.LearnCard] = []
     @State private var loading = true
     @State private var refreshing = false
     @State private var errorMessage: String?
+    @State private var savedAt: Date?
 
-    private var api: BackendAPI {
-        BackendAPI(
-            host: model.settings.serverHost,
-            port: model.settings.serverPort,
-            token: model.settings.authToken
-        )
-    }
+    private var api: BackendAPI { model.api }
+
+    /// Dates come off the server as plain `YYYY-MM-DD`, which compares
+    /// correctly as text — no parsing, no time zone to get wrong.
+    private static let day: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Lernen")
+                .offlineBar(savedAt: savedAt)
         }
     }
 
     /// Lessons that don't have a card deck yet, newest first.
     private var pendingLessons: [BackendAPI.LessonInfo] {
-        let withCards = Set(overview?.sessionsWithCards ?? [])
+        let withCards = Set(shownOverview?.sessionsWithCards ?? [])
         return lessons
             .filter { $0.segmentCount > 0 && !withCards.contains($0.id) }
             .sorted { $0.startedAt > $1.startedAt }
     }
 
+    /// What the screen actually shows. With a server that is the server's
+    /// answer. Without one it is rebuilt from the stored deck, so the counts
+    /// still fall as cards are answered instead of standing still all evening.
+    private var shownOverview: BackendAPI.LearnOverview? {
+        guard !model.connectivity.isOnline, !cards.isEmpty else { return overview }
+        let subjects = Dictionary(grouping: cards, by: \.subject)
+            .map { subject, deck in
+                BackendAPI.LearnSubject(
+                    subject: subject,
+                    due: deck.filter(isDue).count,
+                    total: deck.count
+                )
+            }
+            .sorted { ($0.subject ?? "") < ($1.subject ?? "") }
+        return BackendAPI.LearnOverview(
+            dueTotal: cards.filter(isDue).count,
+            cardTotal: cards.count,
+            subjects: subjects,
+            sessionsWithCards: Array(Set(cards.map(\.sessionId)))
+        )
+    }
+
+    /// Due, and not already answered on a card whose result is still queued —
+    /// otherwise the same question comes back around the same afternoon.
+    private func isDue(_ card: BackendAPI.LearnCard) -> Bool {
+        card.dueDate <= Self.day.string(from: Date()) && !model.reviews.answeredIDs.contains(card.id)
+    }
+
+    private func storedCards(subject: String?, dueOnly: Bool) -> [BackendAPI.LearnCard] {
+        cards.filter { card in
+            guard subject == nil || card.subject == subject else { return false }
+            // Practice never touches the schedule, so it may ask anything.
+            return dueOnly ? isDue(card) : true
+        }
+    }
+
+    /// Ask the server, and fall back to the stored deck when it cannot be
+    /// reached. Written this way round so a flaky connection degrades instead
+    /// of failing, and so the fallback is never used when the server is fine.
+    ///
+    /// The fallback is taken here rather than inside the closure: this runs
+    /// while the view is on screen, and reading the environment from an
+    /// escaping closure that outlives the body is not allowed.
+    private func loader(subject: String?, dueOnly: Bool) -> () async throws -> [BackendAPI.LearnCard] {
+        let client = api
+        let stored = storedCards(subject: subject, dueOnly: dueOnly)
+        return {
+            do {
+                return dueOnly
+                    ? try await client.dueCards(subject: subject)
+                    : try await client.allCards(subject: subject)
+            } catch {
+                guard !stored.isEmpty else { throw error }
+                return stored
+            }
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
-        if loading, overview == nil {
+        if loading, shownOverview == nil {
             ProgressView("Lade Lernstand…")
                 .groupedScreen()
                 .onAppear { Task { await load() } }
-        } else if let errorMessage {
+        } else if shownOverview == nil, let errorMessage {
             ErrorState(message: errorMessage) { await load() }
                 .groupedScreen()
-        } else if let overview {
+        } else if let overview = shownOverview {
             if overview.cardTotal == 0, pendingLessons.isEmpty {
                 ContentUnavailableView {
                     Label("Noch nichts zu lernen", systemImage: "brain.head.profile")
@@ -60,20 +126,20 @@ struct LearnView: View {
                     if !overview.subjects.isEmpty {
                         Section("Fächer") {
                             ForEach(overview.subjects) { subject in
-                                SubjectRow(api: api, subject: subject)
+                                SubjectRow(
+                                    api: api,
+                                    subject: subject,
+                                    due: loader(subject: subject.subject, dueOnly: true),
+                                    practice: loader(subject: subject.subject, dueOnly: false)
+                                )
                             }
                         }
                     }
                     if !pendingLessons.isEmpty {
-                        Section {
-                            ForEach(pendingLessons) { lesson in
-                                pendingRow(lesson)
-                            }
-                        } header: {
-                            Text("Noch nicht abgefragt")
-                        } footer: {
-                            Text("Beim ersten Abfragen entsteht der Kartensatz der Stunde.")
-                        }
+                        pendingSection
+                    }
+                    if !model.reviews.pending.isEmpty {
+                        queuedSection
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -90,9 +156,12 @@ struct LearnView: View {
         if overview.dueTotal > 0 {
             Section {
                 NavigationLink {
-                    ReviewView(api: api, title: "Heute lernen", mode: .review) {
-                        try await api.dueCards()
-                    }
+                    ReviewView(
+                        api: api,
+                        title: "Heute lernen",
+                        mode: .review,
+                        loader: loader(subject: nil, dueOnly: true)
+                    )
                 } label: {
                     HStack(spacing: 12) {
                         IconTile(systemName: "sparkles", color: .blue)
@@ -125,6 +194,23 @@ struct LearnView: View {
 
     // MARK: - Noch nicht abgefragt
 
+    private var pendingSection: some View {
+        Section {
+            ForEach(pendingLessons) { lesson in
+                pendingRow(lesson)
+                    .disabled(!model.connectivity.isOnline)
+            }
+        } header: {
+            Text("Noch nicht abgefragt")
+        } footer: {
+            // The deck for a lesson has to be written before it can be learned,
+            // and writing it is the AI's job on the server.
+            Text(model.connectivity.isOnline
+                ? "Beim ersten Abfragen entsteht der Kartensatz der Stunde."
+                : "Neue Kartensätze schreibt die KI auf dem Server — dafür wird eine Verbindung gebraucht.")
+        }
+    }
+
     private func pendingRow(_ lesson: BackendAPI.LessonInfo) -> some View {
         NavigationLink {
             ReviewView(
@@ -145,30 +231,74 @@ struct LearnView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "plus.circle")
-                    .foregroundStyle(Theme.accent)
+                Image(systemName: model.connectivity.isOnline ? "plus.circle" : "wifi.slash")
+                    .foregroundStyle(model.connectivity.isOnline ? Theme.accent : .secondary)
             }
             .padding(.vertical, 2)
+        }
+    }
+
+    // MARK: - Noch nicht übertragen
+
+    /// Answers given offline, waiting for the server. Shown so the count that
+    /// does not match the schedule has a visible reason.
+    private var queuedSection: some View {
+        Section {
+            Label {
+                Text(model.reviews.pending.count == 1
+                    ? "1 Antwort wartet auf den Server"
+                    : "\(model.reviews.pending.count) Antworten warten auf den Server")
+            } icon: {
+                Image(systemName: "arrow.up.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        } footer: {
+            Text("Sie werden übertragen, sobald der Server wieder erreichbar ist.")
         }
     }
 
     private func load() async {
         guard !refreshing else { return }
         refreshing = true
-        // Show the spinner (not a blank page) while the first load or an
-        // error retry runs; later loads refresh silently behind the content.
-        if overview == nil { loading = true }
+        defer { refreshing = false }
+
+        let overviewKey = OfflineCache.Key.learnOverview
+        let cardsKey = OfflineCache.Key.learnCards
+        let lessonsKey = OfflineCache.Key.lessons
+
+        // First time in: everything stored, so the screen is usable before —
+        // and without — a reply.
+        if overview == nil, cards.isEmpty {
+            overview = OfflineCache.load(BackendAPI.LearnOverview.self, key: overviewKey)
+            cards = OfflineCache.load([BackendAPI.LearnCard].self, key: cardsKey) ?? []
+            lessons = OfflineCache.load([BackendAPI.LessonInfo].self, key: lessonsKey) ?? []
+            savedAt = OfflineCache.savedAt(key: cardsKey)
+        }
+        if shownOverview == nil { loading = true }
         errorMessage = nil
         do {
-            async let ov = api.learnOverview()
-            async let ls = api.listLessons()
-            overview = try await ov
-            lessons = try await ls
+            async let remoteOverview = api.learnOverview()
+            async let remoteLessons = api.listLessons()
+            // The whole deck, not just what is due: it is a few kilobytes of
+            // text, and fetching it now is what makes tonight's train work.
+            async let remoteCards = api.allCards()
+            let (fetchedOverview, fetchedLessons, fetchedCards) =
+                try await (remoteOverview, remoteLessons, remoteCards)
+
+            overview = fetchedOverview
+            lessons = fetchedLessons.filter { $0.segmentCount > 0 }
+            cards = fetchedCards
+            OfflineCache.save(fetchedOverview, as: overviewKey)
+            OfflineCache.save(lessons, as: lessonsKey)
+            OfflineCache.save(fetchedCards, as: cardsKey)
+            savedAt = OfflineCache.savedAt(key: cardsKey)
+            await model.flushQueuedReviews()
         } catch {
-            errorMessage = error.localizedDescription
+            if shownOverview == nil { errorMessage = error.localizedDescription }
         }
         loading = false
-        refreshing = false
     }
 }
 
@@ -178,6 +308,8 @@ struct LearnView: View {
 private struct SubjectRow: View {
     let api: BackendAPI
     let subject: BackendAPI.LearnSubject
+    let due: () async throws -> [BackendAPI.LearnCard]
+    let practice: () async throws -> [BackendAPI.LearnCard]
 
     private var name: String { subject.subject ?? "Ohne Fach" }
 
@@ -186,9 +318,7 @@ private struct SubjectRow: View {
     var body: some View {
         NavigationLink {
             if subject.due > 0 {
-                ReviewView(api: api, title: name, mode: .review) {
-                    try await api.dueCards(subject: subject.subject)
-                }
+                ReviewView(api: api, title: name, mode: .review, loader: due)
             } else {
                 practiceDestination
             }
@@ -220,9 +350,7 @@ private struct SubjectRow: View {
     }
 
     private var practiceDestination: some View {
-        ReviewView(api: api, title: "\(name) üben", mode: .practice) {
-            try await api.allCards(subject: subject.subject)
-        }
+        ReviewView(api: api, title: "\(name) üben", mode: .practice, loader: practice)
     }
 
     private var subtitle: String {

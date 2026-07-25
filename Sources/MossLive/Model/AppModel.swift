@@ -46,6 +46,11 @@ final class AppModel {
     let settings = AppSettings()
     let timetable: TimetableStore
     let chat = ChatStore()
+    /// Whether the server can be reached — every screen asks this before it
+    /// decides between live content and what it has stored.
+    let connectivity = Connectivity.shared
+    /// Reviews answered while it could not.
+    let reviews = ReviewQueue()
 
     // MARK: - Internals
 
@@ -104,6 +109,10 @@ final class AppModel {
                 await self?.timetable.refresh()
                 self?.scheduleAutoStopIfNeeded()
                 await self?.resyncNotificationsIfDayChanged()
+                // The same poll doubles as the heartbeat that notices the
+                // server coming back, which is when anything answered offline
+                // can finally be handed over.
+                await self?.flushQueuedReviews()
                 try? await Task.sleep(for: .seconds(60))
             }
         }
@@ -131,6 +140,17 @@ final class AppModel {
     func refreshTimetable() async {
         await timetable.refresh()
         scheduleAutoStopIfNeeded()
+    }
+
+    /// The backend client for the configured server.
+    var api: BackendAPI {
+        BackendAPI(host: settings.serverHost, port: settings.serverPort, token: settings.authToken)
+    }
+
+    /// Hand over anything answered while the server was away.
+    func flushQueuedReviews() async {
+        guard connectivity.isOnline, settings.isConfigured, !reviews.pending.isEmpty else { return }
+        await reviews.flush(api: api)
     }
 
     /// Stop recording when the current lesson ends (if enabled). Rescheduled on

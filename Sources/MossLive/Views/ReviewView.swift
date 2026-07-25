@@ -24,6 +24,7 @@ struct ReviewView: View {
         case failed(String)
     }
 
+    @Environment(AppModel.self) private var model
     @State private var phase: Phase = .loading
     @State private var cards: [BackendAPI.LearnCard] = []
     @State private var index = 0
@@ -150,9 +151,10 @@ struct ReviewView: View {
             let correct = option == card.answer
             if correct { score += 1 }
             if mode == .review {
-                // fire-and-forget: a lost report only means the card stays due
+                // The schedule lives on the server, so an answer given without
+                // one is written down and handed over later rather than lost.
                 let cardId = card.id
-                Task { try? await api.reviewCard(id: cardId, correct: correct) }
+                Task { await model.reviews.record(cardId: cardId, correct: correct, api: api) }
             }
         } label: {
             HStack(spacing: 10) {
