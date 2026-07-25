@@ -4,136 +4,108 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var settings = model.settings
         NavigationStack {
             Form {
                 Section {
-                    TextField("z. B. 100.101.102.103 oder fedora", text: $settings.serverHost)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("Port", value: $settings.serverPort, format: .number.grouping(.never))
-                        .keyboardType(.numberPad)
-                    SecureField("Auth-Token", text: $settings.authToken)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                } header: {
-                    Text("Fedora-Server (Tailscale)")
-                } footer: {
-                    Text(
-                        """
-                        Auf dem Server: Adresse = `tailscale ip -4`, \
-                        Token = der Wert MOSSLIVE_AUTH_TOKEN in ~/.config/mosslive/env. \
-                        Beide Geräte müssen im selben Tailnet sein.
-                        """
-                    )
-                }
-
-                Section {
-                    Picker("App", selection: $settings.quickSwitchURL) {
-                        Text("GoodNotes").tag("goodnotes5://")
-                        Text("Notizen").tag("mobilenotes://")
-                        Text("Safari").tag("https://www.google.com")
-                        Text("Bücher").tag("ibooks://")
-                        // a typed custom scheme must stay a valid selection,
-                        // or the picker silently shows nothing selected
-                        if !Self.quickSwitchPresets.contains(settings.quickSwitchURL) {
-                            Text("Eigene URL").tag(settings.quickSwitchURL)
-                        }
+                    NavigationLink {
+                        ServerSettingsView()
+                    } label: {
+                        SettingsNavigationLabel(
+                            title: "Server",
+                            subtitle: serverSubtitle,
+                            systemImage: "server.rack",
+                            color: .blue
+                        )
                     }
-                    TextField("Eigenes URL-Schema (z. B. goodnotes5://)", text: $settings.quickSwitchURL)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.footnote)
-                } header: {
-                    Text("Schneller App-Wechsel")
-                } footer: {
-                    Text(
-                        "Tippe irgendwo in der App mit drei Fingern gleichzeitig, um sofort in "
-                            + "diese App zu wechseln. Die Aufnahme läuft im Hintergrund weiter. "
-                            + "Zeigt die Ziel-App beim Öffnen eine Meldung, probiere hier ein "
-                            + "anderes URL-Schema."
-                    )
-                }
 
-                TimetableSettingsSection()
-
-                Section {
-                    Toggle("Tägliche Lern-Erinnerung", isOn: reminderEnabledBinding(settings))
-                    if settings.learnReminderEnabled {
-                        DatePicker(
-                            "Uhrzeit",
-                            selection: reminderTimeBinding(settings),
-                            displayedComponents: .hourAndMinute
+                    NavigationLink {
+                        TimetableSettingsView()
+                    } label: {
+                        SettingsNavigationLabel(
+                            title: "WebUntis",
+                            subtitle: model.timetable.enabled ? "Verbunden" : "Nicht verbunden",
+                            systemImage: "calendar",
+                            color: .orange
                         )
                     }
                 } header: {
-                    Text("Lernen")
-                } footer: {
-                    Text("Erinnert dich einmal am Tag daran, deine fälligen Karten durchzugehen.")
+                    Text("Verbindungen")
                 }
 
                 Section {
-                    RecordTintPicker(hue: $settings.recordButtonHue)
-                } header: {
-                    Text("Aufnahmeknopf")
-                } footer: {
-                    Text("Färbt den Aufnahmeknopf auf dem Aufnahme-Bildschirm.")
-                }
+                    NavigationLink {
+                        LearningSettingsView()
+                    } label: {
+                        SettingsNavigationLabel(
+                            title: "Lernen",
+                            subtitle: model.settings.learnReminderEnabled ? "Erinnerung ein" : "Erinnerung aus",
+                            systemImage: "brain.head.profile",
+                            color: .purple
+                        )
+                    }
 
-                Section {
-                    Toggle("Seitenzahlen anpassen", isOn: $settings.showPageNumberEditor)
-                } header: {
-                    Text("Bibliothek")
-                } footer: {
-                    Text(
-                        "Zeigt in einem Buch den Knopf, mit dem du einstellst, welche Zahl auf "
-                            + "einer Seite gedruckt steht. Schalte ihn aus, wenn alle Bücher "
-                            + "eingestellt sind — die eingestellten Seitenzahlen bleiben erhalten."
-                    )
-                }
+                    NavigationLink {
+                        QuickSwitchSettingsView()
+                    } label: {
+                        SettingsNavigationLabel(
+                            title: "Schnellwechsel",
+                            subtitle: quickSwitchName,
+                            systemImage: "arrow.up.forward.app",
+                            color: .green
+                        )
+                    }
 
-                Section {
-                    Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
-                        Text("Kontextfenster: \(Int(settings.contextSeconds)) s")
+                    NavigationLink {
+                        AppearanceSettingsView()
+                    } label: {
+                        SettingsNavigationLabel(
+                            title: "Darstellung",
+                            subtitle: RecordTint.nearest(to: model.settings.recordButtonHue).title,
+                            systemImage: "paintpalette.fill",
+                            color: .pink
+                        )
                     }
                 } header: {
-                    Text("KI-Antwort")
-                } footer: {
-                    Text(
-                        "Wie viele Sekunden Transkript ein Tipp auf das Widget oder auf die "
-                            + "Antwort-Notiz (Aufnahme-Bildschirm) an die KI schickt."
-                    )
+                    Text("App")
                 }
 
-                AIModelSection()
-
                 Section {
-                    Picker("Audio-Bitrate", selection: $settings.bitrate) {
-                        Text("16 kbit/s (wenigste Daten)").tag(16000)
-                        Text("24 kbit/s (empfohlen)").tag(24000)
-                        Text("32 kbit/s").tag(32000)
+                    NavigationLink {
+                        AnswerSettingsView()
+                    } label: {
+                        SettingsNavigationLabel(
+                            title: "KI-Antworten",
+                            subtitle: "\(Int(model.settings.contextSeconds)) Sekunden Kontext",
+                            systemImage: "sparkles",
+                            color: .indigo
+                        )
                     }
-                } footer: {
-                    Text("24 kbit/s ≈ 11 MiB pro Stunde Streaming.")
+
+                    NavigationLink {
+                        AudioSettingsView()
+                    } label: {
+                        SettingsNavigationLabel(
+                            title: "Audio",
+                            subtitle: "\(model.settings.bitrate / 1000) kbit/s",
+                            systemImage: "waveform",
+                            color: .red
+                        )
+                    }
+                } header: {
+                    Text("Aufnahme")
                 }
 
                 Section {
                     LabeledContent("Transkription", value: "Qwen3-ASR 1.7B")
                     LabeledContent("Version", value: appVersion)
-                    LabeledContent("Widget-Verbindung", value: SharedConfig.resolvedGroupID ?? "nicht verfügbar")
-                        .font(.footnote)
-                } header: {
-                    Text("Über")
-                } footer: {
-                    Text(
-                        """
-                        Audio wird nur auf deinem eigenen Server verarbeitet; nichts geht an \
-                        Dritte, außer dem Transkript-Ausschnitt, der bei einer KI-Anfrage an \
-                        die gewählte KI (Gemini oder ChatGPT) geschickt wird.
-                        """
+                    LabeledContent(
+                        "Widget",
+                        value: SharedConfig.resolvedGroupID == nil ? "Nicht verfügbar" : "Bereit"
                     )
+                } header: {
+                    Text("Über Echo")
+                } footer: {
+                    Text("Audio bleibt auf deinem Server. Nur angefragte Textausschnitte gehen an die gewählte KI.")
                 }
             }
             .navigationTitle("Einstellungen")
@@ -141,9 +113,156 @@ struct SettingsView: View {
         }
     }
 
-    private static let quickSwitchPresets = [
+    private var serverSubtitle: String {
+        let host = model.settings.serverHost.trimmingCharacters(in: .whitespaces)
+        return model.settings.isConfigured ? "\(host):\(model.settings.serverPort)" : "Nicht konfiguriert"
+    }
+
+    private var quickSwitchName: String {
+        switch model.settings.quickSwitchURL {
+        case "goodnotes5://": "GoodNotes"
+        case "mobilenotes://": "Notizen"
+        case "https://www.google.com": "Safari"
+        case "ibooks://": "Bücher"
+        default: "Eigene URL"
+        }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
+    }
+}
+
+private struct SettingsNavigationLabel: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconTile(systemName: systemImage, color: color)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct ServerSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                TextField("Adresse", text: $settings.serverHost, prompt: Text("fedora oder 100.64.0.1"))
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Port", value: $settings.serverPort, format: .number.grouping(.never))
+                    .keyboardType(.numberPad)
+                SecureField("Auth-Token", text: $settings.authToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Verbindung")
+            } footer: {
+                Text("Nutze die Tailscale-Adresse deines Servers. Beide Geräte müssen im selben Tailnet sein.")
+            }
+
+            Section {
+                LabeledContent("Status") {
+                    Label(
+                        settings.isConfigured ? "Konfiguriert" : "Unvollständig",
+                        systemImage: settings.isConfigured ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+                    )
+                    .foregroundStyle(settings.isConfigured ? Color.green : Color.orange)
+                }
+            }
+        }
+        .navigationTitle("Server")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct TimetableSettingsView: View {
+    var body: some View {
+        Form {
+            TimetableSettingsSection()
+        }
+        .navigationTitle("WebUntis")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct QuickSwitchSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    private static let presets = [
         "goodnotes5://", "mobilenotes://", "https://www.google.com", "ibooks://",
     ]
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                Picker("App", selection: $settings.quickSwitchURL) {
+                    Text("GoodNotes").tag("goodnotes5://")
+                    Text("Notizen").tag("mobilenotes://")
+                    Text("Safari").tag("https://www.google.com")
+                    Text("Bücher").tag("ibooks://")
+                    if !Self.presets.contains(settings.quickSwitchURL) {
+                        Text("Eigene URL").tag(settings.quickSwitchURL)
+                    }
+                }
+            }
+
+            Section {
+                TextField("URL-Schema", text: $settings.quickSwitchURL, prompt: Text("goodnotes5://"))
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } footer: {
+                Text("Ein Drei-Finger-Tipp öffnet diese App. Die Aufnahme läuft dabei weiter.")
+            }
+        }
+        .navigationTitle("Schnellwechsel")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct LearningSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                Toggle("Tägliche Erinnerung", isOn: reminderEnabledBinding(settings))
+                if settings.learnReminderEnabled {
+                    DatePicker(
+                        "Uhrzeit",
+                        selection: reminderTimeBinding(settings),
+                        displayedComponents: .hourAndMinute
+                    )
+                }
+            } footer: {
+                Text("Erinnert dich an fällige Karten.")
+            }
+        }
+        .navigationTitle("Lernen")
+        .navigationBarTitleDisplayMode(.inline)
+    }
 
     private func reminderEnabledBinding(_ settings: AppSettings) -> Binding<Bool> {
         Binding(
@@ -177,11 +296,77 @@ struct SettingsView: View {
             }
         )
     }
+}
 
-    private var appVersion: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        return "\(version) (\(build))"
+private struct AppearanceSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                RecordTintPicker(hue: $settings.recordButtonHue)
+            } header: {
+                Text("Farbe des Aufnahmeknopfs")
+            }
+
+            Section {
+                Toggle("Seitenzahlen anpassen", isOn: $settings.showPageNumberEditor)
+            } header: {
+                Text("Bibliothek")
+            } footer: {
+                Text("Blendet den Regler für gedruckte Seitenzahlen in Büchern ein.")
+            }
+        }
+        .navigationTitle("Darstellung")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct AnswerSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                Stepper(
+                    "\(Int(settings.contextSeconds)) Sekunden",
+                    value: $settings.contextSeconds,
+                    in: 10 ... 120,
+                    step: 5
+                )
+            } header: {
+                Text("Kontext")
+            } footer: {
+                Text("Text vor einer Anfrage über Widget oder Antwort-Notiz.")
+            }
+
+            AIModelSection()
+        }
+        .navigationTitle("KI-Antworten")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct AudioSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                Picker("Bitrate", selection: $settings.bitrate) {
+                    Text("16 kbit/s").tag(16000)
+                    Text("24 kbit/s").tag(24000)
+                    Text("32 kbit/s").tag(32000)
+                }
+            } footer: {
+                Text("24 kbit/s ist empfohlen und braucht etwa 11 MiB pro Stunde.")
+            }
+        }
+        .navigationTitle("Audio")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -297,10 +482,9 @@ struct TimetableSettingsSection: View {
     private var footerText: String {
         if isConnected {
             return "Aufnahmen werden automatisch dem richtigen Fach zugeordnet. "
-                + "Deine Zugangsdaten sind nur auf deinem eigenen Server gespeichert."
+                + "Die Zugangsdaten bleiben auf deinem Server."
         }
-        return "Melde dich an, damit Aufnahmen automatisch dem richtigen Fach "
-            + "zugeordnet werden. Dein Passwort wird nur auf deinem eigenen Server gespeichert."
+        return "Verbindet Aufnahmen automatisch mit Fächern. Das Passwort bleibt auf deinem Server."
     }
 
     private func connect() async {

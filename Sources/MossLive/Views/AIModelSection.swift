@@ -33,7 +33,7 @@ struct AIModelSection: View {
                     Text(errorMessage).font(.caption).foregroundStyle(.red)
                 }
             } else if loadFailed {
-                Text("Nicht verfügbar – Server nicht erreichbar oder noch ohne Update.")
+                Text("Nicht verfügbar")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
@@ -113,15 +113,12 @@ struct AIModelSection: View {
 
     private var footerText: String {
         guard let settings else {
-            return "Modell-Einstellungen werden vom Server geladen."
+            return "Wird vom Server geladen."
         }
         if settings.provider == "chatgpt" {
-            return "Modell und Denkaufwand gelten für Antworten, Zusammenfassungen, Chat und "
-                + "Quizfragen. Die Auswahl wird auf deinem Server gespeichert und gilt sofort. "
-                + "\"Standard\" nutzt immer das aktuell empfohlene ChatGPT-Modell."
+            return "Gilt für Antworten, Zusammenfassungen, Chat und Quiz. Änderungen werden sofort gespeichert."
         }
-        return "Dein Server nutzt Gemini. Zum Wechseln auf ChatGPT setze auf dem Server "
-            + "answer.provider = \"chatgpt\" in ~/.config/mosslive/config.toml."
+        return "Der Anbieter wird auf deinem Server festgelegt."
     }
 
     private func displayName(for choice: BackendAPI.ModelChoice) -> String {
