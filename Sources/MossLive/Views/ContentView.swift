@@ -264,40 +264,58 @@ struct Waveform: View {
     let color: Color
 
     /// One bar. Every field differs between the five, so nothing about them can
-    /// move in step: their resting height, how far and how fast they sway, when
-    /// their sway starts, how far back they listen, and how hard they react.
+    /// move in step: their resting height, how tall they may ever grow, how far
+    /// and how fast they sway, when the sway starts, how far back they listen,
+    /// how hard they react, and how slowly they come back down.
     private struct Bar: Identifiable {
         let id: Int
         let base: CGFloat
+        let peak: CGFloat
         let sway: CGFloat
         let period: Double
         let delay: Double
         let lag: Int
-        let window: Int
+        let release: Double
         let gain: Double
     }
 
     /// Resting heights straight from the shot, tallest bar in the centre.
+    ///
+    /// The peaks are what keep the bars inside the blob. It is drawn 78pt
+    /// across, but its rim is bent inwards by as much as a seventh of that, so
+    /// the nearest edge can sit 34pt from the middle — and the further out a bar
+    /// stands, the sooner that edge curves away from it. Nothing may reach past
+    /// its own share of that, sway included.
     private static let bars: [Bar] = [
-        Bar(id: 0, base: 12, sway: 1.10, period: 1.20, delay: 0.00, lag: 5, window: 5, gain: 0.95),
-        Bar(id: 1, base: 22, sway: 1.07, period: 0.78, delay: 0.35, lag: 3, window: 4, gain: 1.20),
-        Bar(id: 2, base: 32, sway: 1.05, period: 1.60, delay: 0.15, lag: 1, window: 2, gain: 1.40),
-        Bar(id: 3, base: 22, sway: 1.08, period: 0.92, delay: 0.55, lag: 3, window: 4, gain: 1.10),
-        Bar(id: 4, base: 12, sway: 1.11, period: 0.66, delay: 0.25, lag: 6, window: 5, gain: 0.85),
+        Bar(id: 0, base: 12, peak: 26, sway: 1.10, period: 1.20, delay: 0.00, lag: 5, release: 0.10, gain: 0.95),
+        Bar(id: 1, base: 22, peak: 42, sway: 1.07, period: 0.78, delay: 0.35, lag: 3, release: 0.14, gain: 1.20),
+        Bar(id: 2, base: 32, peak: 54, sway: 1.05, period: 1.60, delay: 0.15, lag: 1, release: 0.18, gain: 1.40),
+        Bar(id: 3, base: 22, peak: 40, sway: 1.08, period: 0.92, delay: 0.55, lag: 3, release: 0.12, gain: 1.10),
+        Bar(id: 4, base: 12, peak: 24, sway: 1.11, period: 0.66, delay: 0.25, lag: 6, release: 0.09, gain: 0.85),
     ]
+
+    /// How fast a bar climbs towards a louder room, per sample. Shared: every
+    /// bar should catch a syllable beginning. It is the falling that differs.
+    private static let attack = 0.6
+
+    /// How much history the follower is run over — about a second and a half,
+    /// by which point where it started no longer shows in the result.
+    private static let trail = 24
 
     @State private var swaying = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 4) {
             ForEach(Self.bars) { bar in
-                let height = height(of: bar)
+                let heard = envelope(of: bar)
+                let height = height(of: bar, level: heard.level)
                 Capsule()
                     .fill(color)
                     .frame(width: 5, height: height)
-                    // The level moves the bar's real height, eased so the
-                    // sixteen samples a second arrive as motion, not as steps.
-                    .animation(.easeOut(duration: 0.16), value: height)
+                    // Climbing is allowed to be quick. Falling is not: a bar
+                    // that empties the instant a word ends reads as a fault,
+                    // which is why no level meter ever built is symmetric.
+                    .animation(.easeOut(duration: heard.rising ? 0.09 : 0.34), value: height)
                     // The sway is a scale, so it never touches layout, and it
                     // reverses rather than restarting — nothing to jump at.
                     .scaleEffect(y: swaying ? bar.sway : 1 / bar.sway, anchor: .center)
@@ -313,22 +331,37 @@ struct Waveform: View {
         .accessibilityHidden(true)
     }
 
-    private func height(of bar: Bar) -> CGFloat {
-        max(5, bar.base * (1 + CGFloat(level(lag: bar.lag, window: bar.window) * bar.gain * 0.85)))
+    /// Somewhere between the bar's resting height and its own ceiling, and never
+    /// past it. The sway scales the bar after this, so the ceiling has to leave
+    /// that room too — otherwise the loudest moment is exactly the one that
+    /// pushes the bar through the rim.
+    private func height(of bar: Bar, level: Double) -> CGFloat {
+        let ceiling = bar.peak / bar.sway
+        return bar.base + (ceiling - bar.base) * CGFloat(level)
     }
 
-    /// The room's loudness `lag` samples ago, averaged over `window` of them.
-    /// A different window per bar is why they settle raggedly rather than
-    /// together. Levels arrive about sixteen times a second, so six samples is a
-    /// bit over a third of a second behind.
-    private func level(lag: Int, window: Int) -> Double {
-        guard model.phase == .recording else { return 0 }
+    /// A peak follower over the recent samples, and whether it is still
+    /// climbing. It rises nearly as fast as the room does and comes down slowly,
+    /// each bar at its own rate — which is what settles them raggedly rather
+    /// than together, and what turns a jagged microphone reading into motion.
+    /// Averaging a handful of samples, as this used to, only makes the spikes
+    /// shorter; it leaves every one of their edges in place.
+    private func envelope(of bar: Bar) -> (level: Double, rising: Bool) {
+        guard model.phase == .recording else { return (0, false) }
         let levels = model.micLevels
-        let end = levels.count - lag
-        let start = max(0, end - window)
-        guard end > start else { return 0 }
-        let slice = levels[start ..< end]
-        return min(1, Double(slice.reduce(0, +)) / Double(slice.count) * 1.7)
+        let end = max(0, levels.count - bar.lag)
+        let start = max(0, end - Self.trail)
+        guard end > start else { return (0, false) }
+        var value = 0.0
+        var rising = false
+        for sample in levels[start ..< end] {
+            let target = min(1, Double(sample) * 1.7 * bar.gain)
+            rising = target > value
+            value += (target - value) * (rising ? Self.attack : bar.release)
+        }
+        // A gentle curve, so ordinary speech uses the height it has been given
+        // instead of living down near the resting mark.
+        return (pow(value, 0.85), rising)
     }
 }
 
