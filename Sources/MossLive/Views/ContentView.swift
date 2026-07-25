@@ -17,11 +17,11 @@ struct LiveView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) { RecordDeck() }
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { AnswerButton() } }
                 .animation(.snappy, value: model.bannerMessage)
-                // The navigation bar has to stay: it carries the system button
-                // that hides and reveals the sidebar, which is why that button
-                // was missing here alone. Inline, so it costs as little height
-                // as possible and the transcript still reads as a full page.
-                .navigationTitle("Aufnahme")
+                // No title: the sidebar already says which screen this is, and a
+                // second "Aufnahme" across the top of an otherwise empty page had
+                // nothing to do. The bar itself has to stay — it carries the
+                // system button that hides and reveals the sidebar.
+                .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -30,7 +30,7 @@ struct LiveView: View {
         if case .error = model.phase { return true }
         if model.bannerMessage != nil { return true }
         if model.phase == .reconnecting, model.bufferedSeconds >= 1 { return true }
-        return model.timetable.enabled
+        return model.timetable.enabled && model.phase == .recording
     }
 
     @ViewBuilder
@@ -55,7 +55,9 @@ struct LiveView: View {
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                if model.timetable.enabled {
+                // At rest the lesson is the centre of the page instead, so this
+                // only rides along once the recording has started.
+                if model.timetable.enabled, model.phase == .recording {
                     CurrentLessonBanner()
                 }
             }
@@ -165,12 +167,40 @@ struct RecordButton: View {
                     .shadow(color: .red.opacity(isActive ? 0 : 0.35), radius: 14, y: 5)
             }
             .frame(width: 72, height: 72)
+            .background { if !isActive { IdlePing() } }
             .contentShape(Circle())
         }
         .buttonStyle(RecordButtonStyle())
         .animation(.spring(response: 0.32, dampingFraction: 0.7), value: isActive)
         .sensoryFeedback(.impact(weight: .medium), trigger: isActive)
         .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
+    }
+}
+
+/// Two rings leaving the control every few seconds, very faint. The resting
+/// screen has nothing moving on it otherwise, and a control that breathes reads
+/// as ready rather than as switched off.
+private struct IdlePing: View {
+    @State private var running = false
+
+    var body: some View {
+        ZStack {
+            ForEach(0 ..< 2, id: \.self) { index in
+                Circle()
+                    .stroke(Color.red.opacity(0.35), lineWidth: 1)
+                    .frame(width: 66, height: 66)
+                    .scaleEffect(running ? 1.7 : 0.95)
+                    .opacity(running ? 0 : 0.7)
+                    .animation(
+                        .easeOut(duration: 2.6)
+                            .repeatForever(autoreverses: false)
+                            .delay(Double(index) * 1.3),
+                        value: running
+                    )
+            }
+        }
+        .allowsHitTesting(false)
+        .onAppear { running = true }
     }
 }
 
