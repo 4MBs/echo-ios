@@ -75,6 +75,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Seitenzahlen anpassen", isOn: $settings.showPageNumberEditor)
+                } header: {
+                    Text("Bibliothek")
+                } footer: {
+                    Text(
+                        "Zeigt in einem Buch den Knopf, mit dem du einstellst, welche Zahl auf "
+                            + "einer Seite gedruckt steht. Schalte ihn aus, wenn alle Bücher "
+                            + "eingestellt sind — die eingestellten Seitenzahlen bleiben erhalten."
+                    )
+                }
+
+                Section {
                     Stepper(value: $settings.contextSeconds, in: 10 ... 120, step: 5) {
                         Text("Kontextfenster: \(Int(settings.contextSeconds)) s")
                     }

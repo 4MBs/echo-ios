@@ -72,17 +72,14 @@ struct BookReaderView: View {
 
 /// The reader itself: a PDFKit page view with the control bar underneath.
 private struct PDFReader: View {
+    @Environment(AppModel.self) private var model
+
     let url: URL
 
     /// Printed page number minus PDF page number. Schoolbooks put a cover and
     /// often a few unnumbered pages in front, so the two rarely line up — and
     /// the shift differs per book, which is why it is stored per book.
     @AppStorage private var pageOffset: Int
-
-    /// Once every book is lined up, the numbering has done its job and can get
-    /// out of the way. Kept across books, and across launches — hiding it never
-    /// touches the offsets, so switching it back on restores them all.
-    @AppStorage("reader.showPageNumbers") private var showPageNumbers = true
 
     init(url: URL, bookID: String) {
         self.url = url
@@ -132,36 +129,33 @@ private struct PDFReader: View {
                 LoadedDocument(document: PDFDocument(url: url))
             }.value.document
         }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { readerMenu } }
+        .toolbar {
+            if model.settings.showPageNumberEditor {
+                ToolbarItem(placement: .topBarTrailing) { readerMenu }
+            }
+        }
     }
 
-    /// Everything about page numbering: whether it shows at all, and what it
-    /// counts from. Both are set rarely, so they live in the navigation bar's
-    /// overflow menu rather than anywhere near the reading controls.
+    /// Set once per book and then forgotten, so it belongs in the navigation
+    /// bar's overflow menu rather than anywhere near the reading controls — and
+    /// can be taken off the screen entirely from Einstellungen once every book
+    /// has been lined up.
     private var readerMenu: some View {
         Menu {
-            Toggle(isOn: $showPageNumbers) {
-                Label("Seitenzahlen anzeigen", systemImage: "number")
+            Button {
+                numberingPage = currentPage
+                numberingPlaceholder = printedLabel(currentPage)
+                typedNumbering = ""
+                adjustingNumbering = true
+            } label: {
+                Label("Seitenzahlen anpassen…", systemImage: "textformat.123")
             }
 
-            if showPageNumbers {
-                Section {
-                    Button {
-                        numberingPage = currentPage
-                        numberingPlaceholder = printedLabel(currentPage)
-                        typedNumbering = ""
-                        adjustingNumbering = true
-                    } label: {
-                        Label("Seitenzahlen anpassen…", systemImage: "textformat.123")
-                    }
-
-                    if pageOffset != 0 {
-                        Button(role: .destructive) {
-                            pageOffset = 0
-                        } label: {
-                            Label("Nummerierung zurücksetzen", systemImage: "arrow.uturn.backward")
-                        }
-                    }
+            if pageOffset != 0 {
+                Button(role: .destructive) {
+                    pageOffset = 0
+                } label: {
+                    Label("Nummerierung zurücksetzen", systemImage: "arrow.uturn.backward")
                 }
             }
         } label: {
@@ -251,9 +245,7 @@ private struct PDFReader: View {
             .disabled(currentPage <= 1)
             .accessibilityLabel("Vorherige Seite")
 
-            if showPageNumbers {
-                pageIndicator
-            }
+            pageIndicator
 
             Button {
                 proxy.step(1)

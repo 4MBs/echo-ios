@@ -62,6 +62,13 @@ final class AppSettings {
         didSet { defaults.set(learnReminderMinutes, forKey: "learnReminderMinutes") }
     }
 
+    /// Whether a book shows the control for adjusting its page numbering. Off
+    /// once the books are lined up: the numbering each book already learned
+    /// stays in force either way, this only takes the control off the screen.
+    var showPageNumberEditor: Bool {
+        didSet { defaults.set(showPageNumberEditor, forKey: "showPageNumberEditor") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -77,6 +84,8 @@ final class AppSettings {
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
         learnReminderEnabled = defaults.bool(forKey: "learnReminderEnabled")
+        // on until switched off, unlike the other flags
+        showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
         let reminderMinutes = defaults.integer(forKey: "learnReminderMinutes")
         learnReminderMinutes = reminderMinutes == 0 ? 16 * 60 : reminderMinutes
         // migrate the old default: bare goodnotes:// lands in GoodNotes'
