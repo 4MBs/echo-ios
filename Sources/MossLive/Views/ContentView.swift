@@ -133,32 +133,43 @@ struct RecordDeck: View {
     }
 }
 
-/// The record control: a soft blob under a red gradient, with two paler blobs
-/// drifting behind it and a waveform cut into the middle.
+/// The record control, rebuilt from Don Pardon's "Record Button (Voice
+/// Messanger App)" rather than from an impression of it: the outline, the bar
+/// geometry and the colours were measured off the artwork.
 ///
-/// Modelled on Don Pardon's "Record Button (Voice Messanger App)", down to its
-/// palette. Nothing here is an image — the blob is a circle whose radius is bent
-/// by two sine waves, so it can be animated by moving their phase, and it stays
-/// sharp at any size.
+/// The shape is a circle whose radius is bent by the first seven harmonics of
+/// the original outline, at the amplitudes and phases they actually have there.
+/// It matters that they are small — the real shape is only ±7.7% off a circle,
+/// and guessing at it produced a rounded triangle. Each harmonic then drifts at
+/// its own rate, so the outline keeps moving without ever repeating visibly.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
 
-    // straight from the shot's palette
-    private static let vivid = Color(red: 254 / 255, green: 22 / 255, blue: 14 / 255)
-    private static let coral = Color(red: 253 / 255, green: 88 / 255, blue: 81 / 255)
-    private static let deep = Color(red: 154 / 255, green: 11 / 255, blue: 7 / 255)
-    private static let pale = Color(red: 244 / 255, green: 169 / 255, blue: 162 / 255)
+    // sampled from the artwork; the palette it publishes agrees
+    private static let vivid = Color(red: 255 / 255, green: 45 / 255, blue: 38 / 255)
+    private static let coral = Color(red: 255 / 255, green: 96 / 255, blue: 66 / 255)
 
-    /// The waveform in the middle of the shot, tallest bar in the centre.
-    private static let glyphBars: [CGFloat] = [12, 22, 32, 22, 12]
-
-    @State private var phase: Double = 0
+    private static let diameter: CGFloat = 78
+    /// Bar heights as measured, relative to the tallest. Widths and gaps are
+    /// both 10.1% of the blob's radius, and the tallest bar is 67.4% of it.
+    private static let glyphBars: [CGFloat] = [0.30, 0.60, 1.00, 0.60, 0.30]
 
     private var isActive: Bool {
         switch model.phase {
         case .recording, .connecting, .reconnecting, .connected: true
         default: false
         }
+    }
+
+    /// How loudly the room is speaking, smoothed. The blob swells with it and
+    /// the bars ride on it, so the control is showing the recording rather than
+    /// just decorating it.
+    private var energy: Double {
+        guard model.phase == .recording else { return 0 }
+        let recent = model.micLevels.suffix(4)
+        guard !recent.isEmpty else { return 0 }
+        let mean = Double(recent.reduce(0, +)) / Double(recent.count)
+        return min(1, mean * 1.7)
     }
 
     var body: some View {
@@ -169,103 +180,126 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            ZStack {
-                halo
-                Blob(phase: phase, wobble: isActive ? 0.09 : 0.055)
-                    .fill(
-                        LinearGradient(
-                            colors: [Self.vivid, Self.coral],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 78, height: 78)
-                    .shadow(color: Self.vivid.opacity(0.45), radius: 16, y: 6)
-                glyph
+            // A timeline, not a repeating animation: the phase is read from the
+            // clock every frame, so it never restarts and never jumps — which is
+            // what made the first attempt stutter at the wrap.
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let time = context.date.timeIntervalSinceReferenceDate
+                content(at: time)
             }
-            .frame(width: 108, height: 108)
+            .frame(width: 112, height: 112)
             .contentShape(Circle())
         }
         .buttonStyle(RecordButtonStyle())
-        .animation(.spring(response: 0.34, dampingFraction: 0.7), value: isActive)
         .sensoryFeedback(.impact(weight: .medium), trigger: isActive)
         .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
-        .onAppear {
-            // one slow rotation of the phase, forever: the blob never settles
-            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
-                phase = .pi * 2
+    }
+
+    private func content(at time: TimeInterval) -> some View {
+        let swell = 1 + energy * 0.5
+        let size = Self.diameter * (1 + energy * 0.06)
+
+        return ZStack {
+            // The artwork's halo is two more of the same outline, larger and
+            // slower and turning the other way, reaching 1.34x the radius. There
+            // it sits on white and reads as a shadow; here it sits on black, so
+            // it is tinted with the blob's own colour and reads as light. Softened
+            // in one pass rather than two — a pale hard-edged copy of a shape
+            // this round just looks like a ring around it.
+            ZStack {
+                Blob(time: time * 0.5, swell: 1.3, seed: 2.1)
+                    .fill(Self.vivid.opacity(isActive ? 0.20 : 0.13))
+                    .frame(width: size * 1.34, height: size * 1.34)
+                Blob(time: -time * 0.7, swell: 1.15, seed: 4.4)
+                    .fill(Self.coral.opacity(isActive ? 0.26 : 0.17))
+                    .frame(width: size * 1.13, height: size * 1.13)
             }
+            .blur(radius: 9)
+
+            Blob(time: time, swell: swell)
+                .fill(
+                    LinearGradient(
+                        colors: [Self.vivid, Self.coral],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: size, height: size)
+                .shadow(color: Self.vivid.opacity(0.22), radius: 8, y: 3)
+
+            glyph
         }
     }
 
-    /// Two paler blobs, larger and slower, turning the wrong way — the halo in
-    /// the shot, and the only thing moving on the screen at rest.
-    private var halo: some View {
-        ZStack {
-            Blob(phase: -phase * 0.8 + 1.4, wobble: 0.07)
-                .fill(Self.pale.opacity(isActive ? 0.34 : 0.22))
-                .frame(width: 102, height: 102)
-                .blur(radius: 3)
-            Blob(phase: phase * 0.55 + 3.1, wobble: 0.08)
-                .fill(Self.pale.opacity(isActive ? 0.26 : 0.16))
-                .frame(width: 92, height: 92)
-                .blur(radius: 2)
-        }
-    }
-
-    /// The waveform from the shot at rest; a stop square once running, because
-    /// the control has to say what pressing it will do.
-    @ViewBuilder
+    /// The waveform from the artwork. Its bars are not a separate colour — they
+    /// are the fill darkened by a fifth, which is how they stay part of the blob
+    /// wherever the gradient has got to.
     private var glyph: some View {
-        if isActive {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Self.deep.opacity(0.85))
-                .frame(width: 24, height: 24)
-                .transition(.scale.combined(with: .opacity))
-        } else {
-            HStack(alignment: .center, spacing: 4) {
-                // indices, not the heights themselves: the shape is symmetric,
-                // so the values repeat and would collide as identities
-                ForEach(Self.glyphBars.indices, id: \.self) { index in
-                    Capsule()
-                        .fill(Self.deep.opacity(0.85))
-                        .frame(width: 5, height: Self.glyphBars[index])
-                }
+        let radius = Self.diameter / 2
+        let unit = radius * 0.101  // measured: bar width and gap are both this
+        let tallest = radius * 0.674
+        let ride = 0.78 + energy * 0.9
+
+        return HStack(alignment: .center, spacing: unit) {
+            ForEach(Self.glyphBars.indices, id: \.self) { index in
+                Capsule()
+                    .fill(Color.black.opacity(0.2))
+                    .frame(
+                        width: unit,
+                        height: max(unit, tallest * Self.glyphBars[index] * (isActive ? ride : 1))
+                    )
             }
-            .transition(.scale.combined(with: .opacity))
         }
+        .animation(.easeOut(duration: 0.12), value: energy)
     }
 }
 
-/// A circle with its radius bent by two sine waves. Moving `phase` walks the
-/// bulges around the rim, which is what makes it look alive rather than spun.
+/// The outline of the reference artwork, as a shape.
+///
+/// Measured by tracing its edge and taking the Fourier transform of the radius:
+/// the fourth and fifth harmonics carry it, at 3.5% and 3.4% of the radius, with
+/// five smaller ones filling in. Reproducing those amplitudes is the difference
+/// between this and a wobbly triangle.
 struct Blob: Shape {
-    var phase: Double
-    var wobble: Double
+    /// (amplitude as a fraction of the radius, phase) for harmonics 1 through 7.
+    private static let harmonics: [(amplitude: Double, phase: Double)] = [
+        (0.0076, -2.32),
+        (0.0199, -1.74),
+        (0.0128, -2.64),
+        (0.0350, -3.00),
+        (0.0341, -1.80),
+        (0.0097, 0.22),
+        (0.0090, 0.74),
+    ]
+    private static let reach = harmonics.reduce(0) { $0 + $1.amplitude }
 
-    /// Both are animated, so a press can deepen the wobble while it turns.
-    var animatableData: AnimatablePair<Double, Double> {
-        get { AnimatablePair(phase, wobble) }
-        set {
-            phase = newValue.first
-            wobble = newValue.second
-        }
-    }
+    /// Seconds. Each harmonic turns at its own speed, so the outline drifts.
+    var time: Double
+    /// Multiplies every amplitude: 1 is the artwork, higher is more agitated.
+    var swell: Double = 1
+    /// Rotates the whole outline, to tell the stacked copies apart.
+    var seed: Double = 0
 
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-        let steps = 14
+        // leave room for the largest bulge, so nothing clips at the frame
+        let radius = min(rect.width, rect.height) / 2 / (1 + Self.reach * swell)
+        let steps = 60
 
         let points: [CGPoint] = (0 ..< steps).map { step in
-            let angle = Double(step) / Double(steps) * 2 * .pi
-            let bend = sin(angle * 3 + phase) * wobble + cos(angle * 5 - phase * 1.3) * wobble * 0.5
-            let distance = radius * (1 - wobble + bend)
+            let angle = Double(step) / Double(steps) * 2 * .pi + seed
+            var bend = 0.0
+            for (index, harmonic) in Self.harmonics.enumerated() {
+                let order = Double(index + 1)
+                let drift = time * (0.21 + 0.05 * order)
+                bend += harmonic.amplitude * swell * cos(order * angle + harmonic.phase + drift)
+            }
+            let distance = radius * (1 + bend)
             return CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
         }
 
-        // Quad curves between the midpoints, with each sample as the control
-        // point: a closed curve with no corners anywhere.
+        // Quad curves between the midpoints, each sample as the control point:
+        // a closed curve with no corners anywhere.
         var path = Path()
         path.move(to: midpoint(points[steps - 1], points[0]))
         for index in 0 ..< steps {
