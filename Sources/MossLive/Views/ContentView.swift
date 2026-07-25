@@ -55,8 +55,8 @@ struct LiveView: View {
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                // At rest the lesson is the centre of the page instead, so this
-                // only rides along once the recording has started.
+                // The page is left blank at rest, so this only rides along once
+                // the recording has started and it says what is being recorded.
                 if model.timetable.enabled, model.phase == .recording {
                     CurrentLessonBanner()
                 }
@@ -96,8 +96,6 @@ struct RecordDeck: View {
         .padding(.top, isRecording ? 14 : 20)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
         .animation(.snappy, value: isRecording)
     }
 
@@ -135,11 +133,26 @@ struct RecordDeck: View {
     }
 }
 
-/// The record control. At rest it is a single red disc with a soft glow, the way
-/// Voice Memos leaves it; while running it draws in to a rounded square inside a
-/// red ring. One shape morphing between the two, so the transition is continuous.
+/// The record control: a soft blob under a red gradient, with two paler blobs
+/// drifting behind it and a waveform cut into the middle.
+///
+/// Modelled on Don Pardon's "Record Button (Voice Messanger App)", down to its
+/// palette. Nothing here is an image — the blob is a circle whose radius is bent
+/// by two sine waves, so it can be animated by moving their phase, and it stays
+/// sharp at any size.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
+
+    // straight from the shot's palette
+    private static let vivid = Color(red: 254 / 255, green: 22 / 255, blue: 14 / 255)
+    private static let coral = Color(red: 253 / 255, green: 88 / 255, blue: 81 / 255)
+    private static let deep = Color(red: 154 / 255, green: 11 / 255, blue: 7 / 255)
+    private static let pale = Color(red: 244 / 255, green: 169 / 255, blue: 162 / 255)
+
+    /// The waveform in the middle of the shot, tallest bar in the centre.
+    private static let glyphBars: [CGFloat] = [12, 22, 32, 22, 12]
+
+    @State private var phase: Double = 0
 
     private var isActive: Bool {
         switch model.phase {
@@ -157,50 +170,115 @@ struct RecordButton: View {
             }
         } label: {
             ZStack {
-                Circle()
-                    .stroke(Color.red.opacity(isActive ? 0.5 : 0), lineWidth: 3)
-                    .frame(width: 68, height: 68)
-
-                RoundedRectangle(cornerRadius: isActive ? 8 : 33, style: .continuous)
-                    .fill(Color.red.gradient)
-                    .frame(width: isActive ? 30 : 66, height: isActive ? 30 : 66)
-                    .shadow(color: .red.opacity(isActive ? 0 : 0.35), radius: 14, y: 5)
+                halo
+                Blob(phase: phase, wobble: isActive ? 0.09 : 0.055)
+                    .fill(
+                        LinearGradient(
+                            colors: [Self.vivid, Self.coral],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 78, height: 78)
+                    .shadow(color: Self.vivid.opacity(0.45), radius: 16, y: 6)
+                glyph
             }
-            .frame(width: 72, height: 72)
-            .background { if !isActive { IdlePing() } }
+            .frame(width: 108, height: 108)
             .contentShape(Circle())
         }
         .buttonStyle(RecordButtonStyle())
-        .animation(.spring(response: 0.32, dampingFraction: 0.7), value: isActive)
+        .animation(.spring(response: 0.34, dampingFraction: 0.7), value: isActive)
         .sensoryFeedback(.impact(weight: .medium), trigger: isActive)
         .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
+        .onAppear {
+            // one slow rotation of the phase, forever: the blob never settles
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                phase = .pi * 2
+            }
+        }
+    }
+
+    /// Two paler blobs, larger and slower, turning the wrong way — the halo in
+    /// the shot, and the only thing moving on the screen at rest.
+    private var halo: some View {
+        ZStack {
+            Blob(phase: -phase * 0.8 + 1.4, wobble: 0.07)
+                .fill(Self.pale.opacity(isActive ? 0.34 : 0.22))
+                .frame(width: 102, height: 102)
+                .blur(radius: 3)
+            Blob(phase: phase * 0.55 + 3.1, wobble: 0.08)
+                .fill(Self.pale.opacity(isActive ? 0.26 : 0.16))
+                .frame(width: 92, height: 92)
+                .blur(radius: 2)
+        }
+    }
+
+    /// The waveform from the shot at rest; a stop square once running, because
+    /// the control has to say what pressing it will do.
+    @ViewBuilder
+    private var glyph: some View {
+        if isActive {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Self.deep.opacity(0.85))
+                .frame(width: 24, height: 24)
+                .transition(.scale.combined(with: .opacity))
+        } else {
+            HStack(alignment: .center, spacing: 4) {
+                // indices, not the heights themselves: the shape is symmetric,
+                // so the values repeat and would collide as identities
+                ForEach(Self.glyphBars.indices, id: \.self) { index in
+                    Capsule()
+                        .fill(Self.deep.opacity(0.85))
+                        .frame(width: 5, height: Self.glyphBars[index])
+                }
+            }
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 }
 
-/// Two rings leaving the control every few seconds, very faint. The resting
-/// screen has nothing moving on it otherwise, and a control that breathes reads
-/// as ready rather than as switched off.
-private struct IdlePing: View {
-    @State private var running = false
+/// A circle with its radius bent by two sine waves. Moving `phase` walks the
+/// bulges around the rim, which is what makes it look alive rather than spun.
+struct Blob: Shape {
+    var phase: Double
+    var wobble: Double
 
-    var body: some View {
-        ZStack {
-            ForEach(0 ..< 2, id: \.self) { index in
-                Circle()
-                    .stroke(Color.red.opacity(0.35), lineWidth: 1)
-                    .frame(width: 66, height: 66)
-                    .scaleEffect(running ? 1.7 : 0.95)
-                    .opacity(running ? 0 : 0.7)
-                    .animation(
-                        .easeOut(duration: 2.6)
-                            .repeatForever(autoreverses: false)
-                            .delay(Double(index) * 1.3),
-                        value: running
-                    )
-            }
+    /// Both are animated, so a press can deepen the wobble while it turns.
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(phase, wobble) }
+        set {
+            phase = newValue.first
+            wobble = newValue.second
         }
-        .allowsHitTesting(false)
-        .onAppear { running = true }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        let steps = 14
+
+        let points: [CGPoint] = (0 ..< steps).map { step in
+            let angle = Double(step) / Double(steps) * 2 * .pi
+            let bend = sin(angle * 3 + phase) * wobble + cos(angle * 5 - phase * 1.3) * wobble * 0.5
+            let distance = radius * (1 - wobble + bend)
+            return CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
+        }
+
+        // Quad curves between the midpoints, with each sample as the control
+        // point: a closed curve with no corners anywhere.
+        var path = Path()
+        path.move(to: midpoint(points[steps - 1], points[0]))
+        for index in 0 ..< steps {
+            let current = points[index]
+            let next = points[(index + 1) % steps]
+            path.addQuadCurve(to: midpoint(current, next), control: current)
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+        CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
     }
 }
 
