@@ -78,9 +78,11 @@ private struct PDFReader: View {
     @State private var twoUp = true
     @State private var currentPage = 1
     @State private var pageCount = 0
-    @State private var pageText = "1"
     @State private var proxy = PDFViewProxy()
-    @FocusState private var editingPage: Bool
+    @State private var askingForPage = false
+    @State private var typedPage = ""
+    @State private var pageAtOpen = 1
+    @FocusState private var pageFieldFocused: Bool
 
     var body: some View {
         Group {
@@ -101,7 +103,6 @@ private struct PDFReader: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .simultaneousGesture(TapGesture().onEnded { editingPage = false })
         .safeAreaInset(edge: .bottom, spacing: 0) { controlBar }
         // Parsing a 300 MB schoolbook off the main thread keeps the push
         // animation smooth, and reusing the document means flipping the layout
@@ -110,12 +111,6 @@ private struct PDFReader: View {
             document = await Task.detached(priority: .userInitiated) {
                 LoadedDocument(document: PDFDocument(url: url))
             }.value.document
-        }
-        .onChange(of: currentPage) { _, page in
-            if !editingPage { pageText = String(page) }
-        }
-        .onChange(of: editingPage) { _, editing in
-            if !editing { pageText = String(currentPage) }
         }
     }
 
@@ -132,11 +127,13 @@ private struct PDFReader: View {
         .background(.bar)
     }
 
-    /// Previous/next buttons around an editable current-page field.
+    /// Previous/next buttons around the current page, which opens the jump-to
+    /// field. A popover rather than a field sitting in the bar: one tap outside
+    /// takes the keyboard, the caret and the popover away together, and there is
+    /// no field left in the bar to tap a second time.
     private var pageControls: some View {
         HStack(spacing: 12) {
             Button {
-                editingPage = false
                 proxy.step(-1)
             } label: {
                 Image(systemName: "arrow.left")
@@ -144,36 +141,26 @@ private struct PDFReader: View {
             .disabled(currentPage <= 1)
             .accessibilityLabel("Vorherige Seite")
 
-            HStack(spacing: 4) {
-                TextField("", text: $pageText)
-                    .multilineTextAlignment(.trailing)
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .frame(width: 40)
-                    .keyboardType(.numberPad)
-                    .focused($editingPage)
-                    .onChange(of: pageText) { _, text in
-                        guard editingPage else { return }
-                        let digits = String(text.filter(\.isNumber).prefix(5))
-                        if digits != text { pageText = digits }
-                        // Jump as soon as the typed number is a real page, so
-                        // there is nothing to confirm and no keyboard toolbar.
-                        if let page = Int(digits), (1...max(pageCount, 1)).contains(page) {
-                            proxy.go(toPage: page)
-                        }
-                    }
-                    .accessibilityLabel("Seitennummer")
-
-                Text("/ \(pageCount)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 40, alignment: .leading)
+            Button {
+                typedPage = ""
+                pageAtOpen = currentPage
+                askingForPage = true
+            } label: {
+                // Fixed slots either side of the slash: the indicator stays put
+                // whether the page number is 1 or 320 digits wide.
+                HStack(spacing: 4) {
+                    Text("\(currentPage)")
+                        .frame(width: 36, alignment: .trailing)
+                    Text("/ \(pageCount)")
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 42, alignment: .leading)
+                }
+                .font(.subheadline.monospacedDigit().weight(.semibold))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.regularMaterial, in: Capsule())
+            .accessibilityLabel("Seite \(currentPage) von \(pageCount)")
+            .popover(isPresented: $askingForPage) { pageJump }
 
             Button {
-                editingPage = false
                 proxy.step(1)
             } label: {
                 Image(systemName: "arrow.right")
@@ -182,6 +169,42 @@ private struct PDFReader: View {
             .accessibilityLabel("Nächste Seite")
         }
         .buttonStyle(.glass)
+    }
+
+    /// Type a page and the book goes there — nothing to confirm. Deliberately
+    /// shows no live page number, so nothing around the field redraws while the
+    /// keyboard is up.
+    private var pageJump: some View {
+        HStack(spacing: 8) {
+            TextField("\(pageAtOpen)", text: $typedPage)
+                .keyboardType(.numberPad)
+                .focused($pageFieldFocused)
+                .multilineTextAlignment(.center)
+                .font(.title3.monospacedDigit().weight(.semibold))
+                .frame(width: 76)
+                .padding(.vertical, 8)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityLabel("Seitennummer")
+
+            Text("von \(pageCount)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .presentationCompactAdaptation(.popover)
+        // The popover has to finish presenting before it can take focus,
+        // otherwise the keyboard occasionally never appears.
+        .task {
+            try? await Task.sleep(for: .milliseconds(60))
+            pageFieldFocused = true
+        }
+        .onChange(of: typedPage) { _, text in
+            let digits = String(text.filter(\.isNumber).prefix(5))
+            if digits != text { typedPage = digits }
+            if let page = Int(digits), (1...max(pageCount, 1)).contains(page) {
+                proxy.go(toPage: page)
+            }
+        }
     }
 
     /// A compact native menu keeps the toolbar quiet while making both layouts
@@ -235,6 +258,54 @@ private final class PDFViewProxy {
     }
 }
 
+/// A PDFView that will not let the page shrink below its natural size on screen.
+///
+/// The floor is not a fixed number: it is derived from whatever is on screen
+/// right now — the page's own dimensions, the current layout, the device
+/// orientation — so every book, and every oddly sized page inside a book, gets
+/// its own. The margin around the page is what stays constant, in points, so
+/// the spread never sits edge to edge but never floats in the middle of the
+/// screen either.
+private final class BookPDFView: PDFView {
+    /// Breathing room left around the page at its smallest, in points.
+    private let margin: CGFloat = 14
+    /// The scale the page rests at: its natural size on this screen, and the
+    /// point below which zooming out stops.
+    private(set) var restingScale: CGFloat = 0
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyScaleLimits()
+    }
+
+    func applyScaleLimits() {
+        guard document != nil, bounds.width > 40, bounds.height > 40 else { return }
+        let sizeToFit = scaleFactorForSizeToFit
+        guard sizeToFit > 0, sizeToFit.isFinite else { return }
+
+        // scaleFactorForSizeToFit fills the bounds; shrinking it by the same
+        // ratio the margin takes out of the bounds insets the page by exactly
+        // `margin` points, whatever shape the page happens to be.
+        let inset = min(
+            (bounds.width - 2 * margin) / bounds.width,
+            (bounds.height - 2 * margin) / bounds.height
+        )
+        let fit = sizeToFit * inset
+        guard fit > 0 else { return }
+
+        // Follow the new fit when the reader is sitting at the old one (rotation,
+        // layout switch, a differently sized page) rather than stranding the page
+        // at a scale that no longer belongs to it.
+        let restingAtFit = restingScale == 0 || abs(scaleFactor - restingScale) < 0.001
+        minScaleFactor = fit
+        maxScaleFactor = fit * 6
+        if (restingAtFit || scaleFactor < fit), abs(scaleFactor - fit) > 0.001 {
+            scaleFactor = fit
+        }
+        restingScale = fit
+    }
+}
+
 /// PDFKit wrapper. The non-continuous display modes are the only ones that show
 /// a real book: exactly one page (or one 2–3 style spread) fills the screen and
 /// nothing scrolls. They bring no page-turn gesture of their own, and the
@@ -248,7 +319,7 @@ private struct PDFKitView: UIViewRepresentable {
     @Binding var pageCount: Int
 
     func makeUIView(context: Context) -> PDFView {
-        let pdfView = PDFView()
+        let pdfView = BookPDFView()
         proxy.pdfView = pdfView
         // PDFKit is order-sensitive: layout has to be configured before the
         // document is attached, or the direction quietly falls back to vertical.
@@ -257,7 +328,9 @@ private struct PDFKitView: UIViewRepresentable {
         pdfView.displaysAsBook = twoUp
         pdfView.displaysPageBreaks = true
         pdfView.pageBreakMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-        pdfView.autoScales = true
+        // autoScales would overwrite the scale limits on every layout pass;
+        // BookPDFView takes over the fitting instead.
+        pdfView.autoScales = false
         pdfView.backgroundColor = .clear
         pdfView.document = document
 
@@ -281,6 +354,8 @@ private struct PDFKitView: UIViewRepresentable {
 
     private func updatePageState(_ view: PDFView) {
         guard let document = view.document else { return }
+        // A page of a different size needs its own floor, so re-fit on arrival.
+        (view as? BookPDFView)?.applyScaleLimits()
         pageCount = document.pageCount
         let visible = view.visiblePages.map { document.index(for: $0) + 1 }
         if let first = visible.min() { currentPage = first }
@@ -313,10 +388,10 @@ private struct PDFKitView: UIViewRepresentable {
         }
 
         @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
-            guard let view = recognizer.view as? PDFView else { return }
+            guard let view = recognizer.view as? BookPDFView else { return }
             // Once the reader has zoomed in, a sideways drag means "look at the
             // rest of this page", not "turn it".
-            guard view.scaleFactor <= view.scaleFactorForSizeToFit * 1.05 else { return }
+            guard view.restingScale == 0 || view.scaleFactor <= view.restingScale * 1.05 else { return }
             proxy?.step(recognizer.direction == .left ? 1 : -1)
         }
 
