@@ -67,78 +67,75 @@ struct LiveView: View {
 
 // MARK: - The deck
 
-/// Everything about the recording, in one place at the bottom edge: the level
-/// meter, the elapsed time as the largest thing on screen while running, and
-/// the record control centred beneath it with the small print either side.
+/// The recording dock. It says as little as it can get away with: while running,
+/// the meter, the clock and one caption; at rest, nothing but the control. The
+/// connection is not reported at rest either — the app is idle and disconnected
+/// almost all of the time, and announcing "Getrennt" made a normal state look
+/// like a fault.
 struct RecordDeck: View {
     @Environment(AppModel.self) private var model
 
     private var isRecording: Bool { model.phase == .recording }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             if isRecording {
                 RecordingWaveform()
                     .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
-                readout
-                    .transition(.opacity)
-            }
-
-            // The control stays dead centre whatever the side items say.
-            ZStack {
-                HStack(spacing: 0) {
-                    leadingMeta
-                    Spacer(minLength: 0)
-                    trailingMeta
+                if let started = model.recordingStartedAt {
+                    RecordingTimer(startedAt: started)
+                        .transition(.opacity)
                 }
-                RecordButton()
             }
+            caption
+            RecordButton()
         }
         .padding(.horizontal, 24)
-        .padding(.top, 14)
-        .padding(.bottom, 8)
+        .padding(.top, isRecording ? 14 : 20)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
         .background(.bar)
+        .overlay(alignment: .top) { Divider() }
         .animation(.snappy, value: isRecording)
     }
 
-    /// While running, the clock is the headline and the rest is a caption under
-    /// it — the same hierarchy Voice Memos uses.
+    /// One line under the clock, and the only place state is spelled out. The
+    /// round trip joins it rather than sitting in its own corner, so the dock
+    /// stays a single centred column.
     @ViewBuilder
-    private var readout: some View {
-        VStack(spacing: 1) {
-            if let started = model.recordingStartedAt {
-                RecordingTimer(startedAt: started)
-            }
-            Text(model.isTranscribing ? "wird transkribiert…" : "Aufnahme läuft")
+    private var caption: some View {
+        switch model.phase {
+        case .recording:
+            Text(recordingCaption)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .contentTransition(.opacity)
+        case .connecting, .reconnecting:
+            HStack(spacing: 7) {
+                ProgressView().controlSize(.small)
+                Text(model.phase.label)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        case .connected:
+            Text("Verbunden")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        case .disconnected, .error:
+            EmptyView()
         }
     }
 
-    @ViewBuilder
-    private var leadingMeta: some View {
-        if isRecording {
-            LivePill()
-        } else {
-            StatusLabel(phase: model.phase)
-        }
-    }
-
-    @ViewBuilder
-    private var trailingMeta: some View {
-        if let rtt = model.lastRoundTripMs, model.phase == .connected || isRecording {
-            Text("\(Int(rtt)) ms")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .accessibilityLabel("Antwortzeit \(Int(rtt)) Millisekunden")
-        }
+    private var recordingCaption: String {
+        var parts = [model.isTranscribing ? "wird transkribiert…" : "Aufnahme läuft"]
+        if let rtt = model.lastRoundTripMs { parts.append("\(Int(rtt)) ms") }
+        return parts.joined(separator: " · ")
     }
 }
 
-/// The record control, shaped like the system's rather than like a form button:
-/// a red disc inside a thin ring, which becomes a rounded square while running.
-/// The shape carries the state, so the control needs no words.
+/// The record control. At rest it is a single red disc with a soft glow, the way
+/// Voice Memos leaves it; while running it draws in to a rounded square inside a
+/// red ring. One shape morphing between the two, so the transition is continuous.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
 
@@ -159,20 +156,31 @@ struct RecordButton: View {
         } label: {
             ZStack {
                 Circle()
-                    .stroke(Color.primary.opacity(0.22), lineWidth: 2.5)
-                    .frame(width: 62, height: 62)
+                    .stroke(Color.red.opacity(isActive ? 0.5 : 0), lineWidth: 3)
+                    .frame(width: 68, height: 68)
 
-                RoundedRectangle(cornerRadius: isActive ? 7 : 25, style: .continuous)
-                    .fill(.red)
-                    .frame(width: isActive ? 26 : 50, height: isActive ? 26 : 50)
+                RoundedRectangle(cornerRadius: isActive ? 8 : 33, style: .continuous)
+                    .fill(Color.red.gradient)
+                    .frame(width: isActive ? 30 : 66, height: isActive ? 30 : 66)
+                    .shadow(color: .red.opacity(isActive ? 0 : 0.35), radius: 14, y: 5)
             }
-            .frame(width: 68, height: 68)
+            .frame(width: 72, height: 72)
             .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RecordButtonStyle())
         .animation(.spring(response: 0.32, dampingFraction: 0.7), value: isActive)
         .sensoryFeedback(.impact(weight: .medium), trigger: isActive)
         .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
+    }
+}
+
+/// Presses dip the control slightly. `.plain` gives no feedback at all, and a
+/// control this large feels dead without it.
+private struct RecordButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
@@ -333,21 +341,29 @@ struct AnswerButton: View {
     private var isRecording: Bool { model.phase == .recording }
 
     var body: some View {
-        Button {
-            showingAnswer = true
-            if state == .idle { ask() }
-        } label: {
-            Label("KI-Antwort", systemImage: "sparkles")
+        // Nothing can be answered without a running recording, and a permanently
+        // greyed-out control reads as broken rather than as unavailable.
+        Group {
+            if isRecording {
+                Button {
+                    showingAnswer = true
+                    if state == .idle { ask() }
+                } label: {
+                    Label("KI-Antwort", systemImage: "sparkles")
+                }
+                .popover(isPresented: $showingAnswer) { answerSheet }
+                .accessibilityLabel("KI-Antwort zu den letzten Sekunden")
+            }
         }
-        .disabled(!isRecording)
-        .popover(isPresented: $showingAnswer) { answerSheet }
+        // On the Group, not on the button: the button goes away when the
+        // recording stops, and a modifier that leaves with it would never fire —
+        // leaving the last answer to reappear at the start of the next lesson.
         .onChange(of: model.phase) {
             if !isRecording {
                 state = .idle
                 showingAnswer = false
             }
         }
-        .accessibilityLabel("KI-Antwort zu den letzten Sekunden")
     }
 
     private var answerSheet: some View {
@@ -376,9 +392,20 @@ struct AnswerButton: View {
                     .foregroundStyle(.red)
             }
 
-            Button("Neu fragen", systemImage: "arrow.clockwise", action: ask)
-                .font(.subheadline)
-                .disabled(state == .loading)
+            Divider()
+
+            HStack {
+                Button("Neu fragen", systemImage: "arrow.clockwise", action: ask)
+                    .disabled(state == .loading)
+                Spacer()
+                if case .answer(let text) = state {
+                    Button("Kopieren", systemImage: "doc.on.doc") {
+                        UIPasteboard.general.string = text
+                    }
+                }
+            }
+            .font(.subheadline)
+            .labelStyle(.titleAndIcon)
         }
         .padding(16)
         .frame(width: 380)
