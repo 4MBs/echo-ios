@@ -29,7 +29,11 @@ struct TranscriptSegment: Codable, Equatable, Identifiable, Sendable {
     let speaker: String
     let text: String
 
-    var id: String { "\(t0)-\(t1)-\(speaker)-\(text.hashValue)" }
+    /// Identity is the slot in time, which is unique in a recording and does
+    /// not change when a partial line's words do. Hashing the text here — as
+    /// this used to — was paid for on every diff of every row, and gave a
+    /// growing partial a new identity on every update.
+    var id: String { "\(t0)-\(t1)" }
 }
 
 // MARK: - Client -> server

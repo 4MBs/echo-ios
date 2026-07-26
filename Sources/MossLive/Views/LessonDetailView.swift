@@ -1,35 +1,39 @@
 import SwiftUI
 
-/// One lesson, as a document rather than a form.
+/// One lesson as a single document: what it was about, then what was said.
 ///
-/// Zusammenfassung and Transkript are two pages of the same thing, so the
-/// switch between them sits under the title where it stays put, and the
-/// recording plays along either of them — audio belongs to the lesson, not to
-/// one of its pages. Both pages are text on a page: the transcript used to be
-/// rendered as grouped list rows, which turned a spoken hour into a table.
+/// There is no switch between Zusammenfassung and Transkript, because there is
+/// nothing to switch — they are the top and the bottom of the same page, and a
+/// switch that rebuilt hundreds of transcript lines on every tap was the
+/// slowest thing on the screen. A toolbar button skips down to the transcript
+/// for a long summary; scrolling does the same thing by hand.
+///
+/// The other half of the old lag was in what the page recomputed while it sat
+/// there: the summary was re-parsed from Markdown on every redraw, and every
+/// redraw was driven by the audio player's clock. The summary is parsed once
+/// when it arrives, and the playing line comes from `player.activeIndex`,
+/// which changes when the line changes rather than seven times a second.
 struct LessonDetailView: View {
-    enum Page: String, CaseIterable, Identifiable {
-        case zusammenfassung = "Zusammenfassung"
-        case transkript = "Transkript"
-
-        var id: String { rawValue }
-    }
-
     let api: BackendAPI
     let info: BackendAPI.LessonInfo
 
     @Environment(AppModel.self) private var model
-    @State private var loadError: Error?
-    @State private var page: Page = .zusammenfassung
+
     @State private var detail: BackendAPI.LessonDetail?
-    @State private var summary: String?
+    @State private var summary: AttributedString?
+    @State private var summaryPlainText: String?
+    @State private var loadError: Error?
     @State private var summarizing = false
     @State private var errorMessage: String?
-    @State private var audioPlayer = LessonAudioPlayer()
+    @State private var player = LessonAudioPlayer()
 
     /// The readable column. Text set across the full width of an iPad is a
     /// wall; every reading app on the system stops somewhere around here.
-    private static let columnWidth: CGFloat = 700
+    private static let column: CGFloat = 680
+
+    private enum Anchor: Hashable {
+        case transcript
+    }
 
     var body: some View {
         Group {
@@ -43,79 +47,101 @@ struct LessonDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground).ignoresSafeArea())
-        // The lesson names the screen. It used to be replaced by the page
-        // switch, which left the title to a row further down the page.
-        .navigationTitle(info.title ?? info.subject ?? "Aufnahme")
-        .navigationSubtitle(metaLine)
+        .navigationTitle(info.subject ?? info.title ?? "Aufnahme")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if let detail {
+        .onDisappear { player.stop() }
+        .task { await load() }
+    }
+
+    // MARK: The page
+
+    private func document(_ detail: BackendAPI.LessonDetail) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    header
+                    summaryBlock
+                    if !detail.segments.isEmpty {
+                        transcriptBlock(detail)
+                    }
+                }
+                .frame(maxWidth: Self.column)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 22)
+                .padding(.top, 14)
+                .padding(.bottom, 44)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { audioBar }
+            .toolbar {
+                // Inside the reader, so the button can reach the proxy. Going
+                // back up is the scroll view's own job (a tap on the status
+                // bar), so there is only one direction to offer.
+                if !detail.segments.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(Anchor.transcript, anchor: .top)
+                            }
+                        } label: {
+                            Label("Zum Transkript", systemImage: "text.alignleft")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: lessonShareText(summary: summary, segments: detail.segments)) {
+                    ShareLink(item: lessonShareText(summary: summaryPlainText, segments: detail.segments)) {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
             }
-        }
-        .onDisappear { audioPlayer.stop() }
-        .task { await load() }
-    }
-
-    /// The stored copy first, so a lesson opens instantly and opens at all
-    /// without a server; the server's copy replaces it when there is one.
-    private func load() async {
-        let key = OfflineCache.Key.lesson(info.id)
-        if let stored = OfflineCache.load(BackendAPI.LessonDetail.self, key: key) {
-            detail = stored
-            summary = stored.summary
-        }
-        do {
-            let loaded = try await api.lesson(id: info.id)
-            detail = loaded
-            summary = loaded.summary
-            OfflineCache.save(loaded, as: key)
-        } catch {
-            if detail == nil { loadError = error }
-        }
-    }
-
-    private func document(_ detail: BackendAPI.LessonDetail) -> some View {
-        Group {
-            switch page {
-            case .zusammenfassung: summaryPage
-            case .transkript: transcriptPage(detail)
+            // Playback carries the page with it, the way a transcript that can
+            // be played is expected to behave.
+            .onChange(of: player.activeIndex) { _, index in
+                guard player.isPlaying, let index else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(index, anchor: .center)
+                }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { pagePicker }
-        .safeAreaInset(edge: .bottom, spacing: 0) { audioBar }
     }
 
-    /// Date, time and room, in the subtitle line the navigation bar has for
-    /// exactly this. It replaces three list rows that said the same thing.
+    private var header: some View {
+        let style = subjectStyle(for: info.subject)
+        return HStack(alignment: .top, spacing: 14) {
+            Image(systemName: style.symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(style.color.gradient, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(info.title ?? info.subject ?? "Aufnahme")
+                    .font(.title2.weight(.semibold))
+                Text(metaLine)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Date, time, room and teacher on one line, where three list rows used to
+    /// say the same thing one fact at a time.
     private var metaLine: String {
         let start = info.startedAt
         let end = start.addingTimeInterval(info.durationSeconds)
-        let range = start.formatted(date: .abbreviated, time: .omitted)
-            + " · \(start.formatted(date: .omitted, time: .shortened))–"
-            + end.formatted(date: .omitted, time: .shortened)
-        var parts = [range]
+        var parts = [
+            start.formatted(date: .abbreviated, time: .omitted)
+                + " · \(start.formatted(date: .omitted, time: .shortened))–"
+                + end.formatted(date: .omitted, time: .shortened),
+        ]
         if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
         if let teacher = info.teacher, !teacher.isEmpty { parts.append(teacher) }
         return parts.joined(separator: " · ")
     }
 
-    private var pagePicker: some View {
-        Picker("Ansicht", selection: $page) {
-            ForEach(Page.allCases) { page in
-                Text(page.rawValue).tag(page)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .frame(maxWidth: 520)
-        .frame(maxWidth: .infinity)
-        .background(.bar)
+    private func heading(_ text: String) -> some View {
+        Text(text)
+            .font(.title3.weight(.semibold))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The recording is only playable if it is already on the iPad or can
@@ -124,7 +150,7 @@ struct LessonDetailView: View {
     @ViewBuilder
     private var audioBar: some View {
         if info.hasAudio, model.connectivity.isOnline || BackendAPI.cachedAudio(id: info.id) != nil {
-            LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
+            LessonAudioBar(player: player, api: api, lessonId: info.id)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
                 .background(.bar)
@@ -134,94 +160,61 @@ struct LessonDetailView: View {
     // MARK: Zusammenfassung
 
     @ViewBuilder
-    private var summaryPage: some View {
-        if let summary {
-            ScrollView {
-                Text(renderedMarkdown(summary))
+    private var summaryBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            heading("Zusammenfassung")
+            if let summary {
+                Text(summary)
                     .font(.body)
                     .lineSpacing(5)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(maxWidth: Self.columnWidth)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 20)
-            }
-        } else if summarizing {
-            ProgressView("Zusammenfassung wird erstellt…")
-        } else {
-            ContentUnavailableView {
-                Label("Keine Zusammenfassung", systemImage: "text.badge.star")
-            } description: {
-                Text(model.connectivity.isOnline
-                    ? "Die KI fasst das Transkript dieser Stunde zusammen."
-                    : "Dafür wird der Server gebraucht.")
-            } actions: {
-                Button("Zusammenfassung erstellen") {
-                    Task { await generateSummary() }
+            } else if summarizing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Wird geschrieben…")
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.connectivity.isOnline)
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
+                .padding(.vertical, 6)
+            } else {
+                summaryPrompt
             }
         }
     }
 
-    private func generateSummary() async {
-        summarizing = true
-        errorMessage = nil
-        do {
-            let text = try await api.summarize(id: info.id)
-            summary = text
-            // Keep the stored copy current, or the summary would vanish the
-            // next time the lesson is opened without a server.
-            if var stored = detail {
-                stored.summary = text
-                detail = stored
-                OfflineCache.save(stored, as: OfflineCache.Key.lesson(info.id))
+    private var summaryPrompt: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(model.connectivity.isOnline
+                ? "Noch keine. Die KI schreibt sie aus dem Transkript dieser Stunde."
+                : "Noch keine. Dafür wird der Server gebraucht.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Zusammenfassung erstellen") {
+                Task { await generateSummary() }
             }
-        } catch {
-            errorMessage = error.localizedDescription
+            .buttonStyle(.borderedProminent)
+            .disabled(summarizing || !model.connectivity.isOnline)
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
         }
-        summarizing = false
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
     }
 
     // MARK: Transkript
 
-    @ViewBuilder
-    private func transcriptPage(_ detail: BackendAPI.LessonDetail) -> some View {
-        if detail.segments.isEmpty {
-            ContentUnavailableView {
-                Label("Kein Transkript", systemImage: "text.alignleft")
-            } description: {
-                Text("In dieser Aufnahme wurde nichts erkannt.")
-            }
-        } else {
-            let active = audioPlayer.activeSegmentIndex(in: detail.segments)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(detail.segments.enumerated()), id: \.element.id) { index, segment in
-                            line(segment, isActive: index == active)
-                                .id(segment.id)
-                        }
-                    }
-                    .frame(maxWidth: Self.columnWidth)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 16)
-                }
-                // Playback carries the page along with it, the way a transcript
-                // that can be played is expected to behave.
-                .onChange(of: active) { _, index in
-                    guard let index, detail.segments.indices.contains(index) else { return }
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        proxy.scrollTo(detail.segments[index].id, anchor: .center)
-                    }
+    private func transcriptBlock(_ detail: BackendAPI.LessonDetail) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            heading("Transkript")
+                .id(Anchor.transcript)
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(detail.segments.indices, id: \.self) { index in
+                    line(detail.segments[index], isActive: player.activeIndex == index)
+                        .id(index)
                 }
             }
         }
@@ -233,8 +226,8 @@ struct LessonDetailView: View {
         if info.hasAudio {
             Button {
                 Task {
-                    if await audioPlayer.ensureLoaded(api: api, lessonId: info.id) {
-                        audioPlayer.playFrom(segment.t0)
+                    if await player.ensureLoaded(api: api, lessonId: info.id) {
+                        player.playFrom(segment.t0)
                     }
                 }
             } label: {
@@ -244,5 +237,52 @@ struct LessonDetailView: View {
         } else {
             SegmentRow(segment: segment, isPartial: false, isActive: isActive)
         }
+    }
+
+    // MARK: Loading
+
+    /// The stored copy first, so a lesson opens instantly and opens at all
+    /// without a server; the server's copy replaces it when there is one.
+    private func load() async {
+        let key = OfflineCache.Key.lesson(info.id)
+        if let stored = OfflineCache.load(BackendAPI.LessonDetail.self, key: key) {
+            apply(stored)
+        }
+        do {
+            let loaded = try await api.lesson(id: info.id)
+            apply(loaded)
+            OfflineCache.save(loaded, as: key)
+        } catch {
+            if detail == nil { loadError = error }
+        }
+    }
+
+    /// Everything expensive about a lesson happens here, once: the Markdown is
+    /// parsed, and the player is told where the lines start and end.
+    private func apply(_ loaded: BackendAPI.LessonDetail) {
+        detail = loaded
+        summaryPlainText = loaded.summary
+        summary = loaded.summary.map(renderedMarkdown)
+        player.track(loaded.segments)
+    }
+
+    private func generateSummary() async {
+        summarizing = true
+        errorMessage = nil
+        do {
+            let text = try await api.summarize(id: info.id)
+            summaryPlainText = text
+            summary = renderedMarkdown(text)
+            // Keep the stored copy current, or the summary would vanish the
+            // next time the lesson is opened without a server.
+            if var stored = detail {
+                stored.summary = text
+                detail = stored
+                OfflineCache.save(stored, as: OfflineCache.Key.lesson(info.id))
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        summarizing = false
     }
 }
