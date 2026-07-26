@@ -154,6 +154,11 @@ struct RecordButton: View {
     /// second, so thirty frames carries all of it.
     private static let frameRate = 30.0
 
+    /// How far the glow is allowed past the control's own bounds. It only has
+    /// to be generous enough for the longest reach — the shadow's, downwards —
+    /// and it costs one larger texture, not one more drawing pass.
+    private static let bleed: CGFloat = 28
+
     private var isActive: Bool {
         switch model.phase {
         case .recording, .connecting, .reconnecting, .connected: true
@@ -210,6 +215,13 @@ struct RecordButton: View {
                 .frame(width: 78, height: 78)
                 .shadow(color: tint(Self.vivid).opacity(0.45), radius: 16, y: 6)
         }
+        // Room for what is painted outside the layout: the rasterisation below
+        // is the size of these bounds, and the bounds are the halo's 102pt —
+        // while the shadow reaches about 55pt to the sides and 61pt down from
+        // the middle, and the halo's own blur another 3pt past its edge.
+        // Without the padding the texture ends before the glow does, which is
+        // the flat edge that appears wherever the blob happens to swell.
+        .padding(Self.bleed)
         // One rasterisation for the blob and its halo, on the GPU, instead of a
         // pass per blur. The waveform is deliberately outside it: rasterising a
         // view every frame is the opposite of what its animation wants.
