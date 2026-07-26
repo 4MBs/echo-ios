@@ -55,10 +55,12 @@ struct TranscriptEmptyState: View {
 }
 
 /// One transcript line: faint timestamp, then the text. Partial (still
-/// changing) lines are italic and dimmed.
+/// changing) lines are italic and dimmed; the line the recording is currently
+/// playing is lifted onto a tinted plate.
 struct SegmentRow: View {
     let segment: TranscriptSegment
     let isPartial: Bool
+    var isActive = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
@@ -73,6 +75,15 @@ struct SegmentRow: View {
                 .foregroundStyle(isPartial ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.accent.opacity(0.13))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: isActive)
     }
 
     private var timestamp: String {

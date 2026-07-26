@@ -1,8 +1,13 @@
 import SwiftUI
 
-/// "Stunden": the archive grouped into one folder per school day. A folder
-/// opens the day's lessons; a lesson opens Zusammenfassung/Transkript.
-/// Abfragen lives in the Lernen tab.
+/// "Stunden": the archive as one timeline with a section per school day — the
+/// shape Fotos and Sprachmemos give a run of days.
+///
+/// It used to be a folder per day that had to be opened first, which cost a tap
+/// on every lesson and, worse, swallowed the search: a hit was regrouped into
+/// its day, so searching handed you a folder to open instead of the lesson you
+/// asked for. Sections say the same thing about the day without hiding what is
+/// inside it.
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
 
@@ -10,12 +15,14 @@ struct LessonsView: View {
     @State private var loading = true
     @State private var loadError: Error?
     @State private var subjectFilter: String?
-    @State private var newestFirst = true
     @State private var searchText = ""
     @State private var dayToDelete: Date?
     @State private var actionError: String?
 
     private var api: BackendAPI { model.api }
+
+    private var query: String { searchText.trimmingCharacters(in: .whitespaces) }
+    private var isSearching: Bool { !query.isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -35,24 +42,33 @@ struct LessonsView: View {
         Array(Set(lessons.compactMap(\.subject))).sorted()
     }
 
-    /// One folder per calendar day, lessons inside in chronological order.
-    private var days: [(day: Date, lessons: [BackendAPI.LessonInfo])] {
-        var filtered = lessons
+    private var filtered: [BackendAPI.LessonInfo] {
+        var result = lessons
         if let subjectFilter {
-            filtered = filtered.filter { $0.subject == subjectFilter }
+            result = result.filter { $0.subject == subjectFilter }
         }
-        let query = searchText.trimmingCharacters(in: .whitespaces)
-        if !query.isEmpty {
-            filtered = filtered.filter {
+        if isSearching {
+            result = result.filter {
                 ($0.title ?? "").localizedCaseInsensitiveContains(query)
                     || ($0.subject ?? "").localizedCaseInsensitiveContains(query)
                     || ($0.teacher ?? "").localizedCaseInsensitiveContains(query)
             }
         }
-        let grouped = Dictionary(grouping: filtered) { Calendar.current.startOfDay(for: $0.startedAt) }
-        return grouped
-            .sorted { newestFirst ? $0.key > $1.key : $0.key < $1.key }
+        return result
+    }
+
+    /// One section per calendar day, newest day first, lessons inside in the
+    /// order they were taught.
+    private var days: [(day: Date, lessons: [BackendAPI.LessonInfo])] {
+        Dictionary(grouping: filtered) { Calendar.current.startOfDay(for: $0.startedAt) }
+            .sorted { $0.key > $1.key }
             .map { ($0.key, $0.value.sorted { $0.startedAt < $1.startedAt }) }
+    }
+
+    /// A search is a question about lessons, not about days: the results are
+    /// one flat list, most recent first.
+    private var results: [BackendAPI.LessonInfo] {
+        filtered.sorted { $0.startedAt > $1.startedAt }
     }
 
     @ViewBuilder
@@ -71,57 +87,89 @@ struct LessonsView: View {
             }
             .groupedScreen()
         } else {
-            List {
+            archive
+        }
+    }
+
+    private var archive: some View {
+        List {
+            if isSearching {
+                Section {
+                    rows(results)
+                }
+            } else {
                 ForEach(days, id: \.day) { entry in
-                    NavigationLink {
-                        DayView(api: api, day: entry.day, lessons: entry.lessons) {
-                            await load()
+                    Section {
+                        rows(entry.lessons)
+                    } header: {
+                        DayHeader(
+                            day: entry.day,
+                            count: entry.lessons.count,
+                            canDelete: model.connectivity.isOnline
+                        ) {
+                            dayToDelete = entry.day
                         }
+                    }
+                    .textCase(nil)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .refreshable { await load() }
+        .overlay {
+            if isSearching, results.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .groupedScreen()
+            }
+        }
+        .confirmationDialog(
+            "Alle Stunden dieses Tages löschen?",
+            isPresented: Binding(
+                get: { dayToDelete != nil },
+                set: { if !$0 { dayToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Tag löschen", role: .destructive) {
+                if let day = dayToDelete {
+                    Task { await deleteDay(day) }
+                }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        }
+        .alert(
+            "Löschen fehlgeschlagen",
+            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(actionError ?? "")
+        }
+    }
+
+    private func rows(_ items: [BackendAPI.LessonInfo]) -> some View {
+        ForEach(items) { lesson in
+            NavigationLink {
+                LessonDetailView(api: api, info: lesson)
+            } label: {
+                LessonRow(info: lesson)
+            }
+            .swipeActions(edge: .trailing) {
+                // Deleting is the server's copy to delete, so it waits for the
+                // server rather than half-happening here.
+                if model.connectivity.isOnline {
+                    Button(role: .destructive) {
+                        Task { await delete(lesson) }
                     } label: {
-                        DayRow(day: entry.day, lessons: entry.lessons)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        // Deleting is the server's copy to delete, so it waits
-                        // for the server rather than half-happening here.
-                        if model.connectivity.isOnline {
-                            Button(role: .destructive) {
-                                dayToDelete = entry.day
-                            } label: {
-                                Label("Löschen", systemImage: "trash")
-                            }
-                        }
+                        Label("Löschen", systemImage: "trash")
                     }
                 }
-            }
-            .listStyle(.insetGrouped)
-            .refreshable { await load() }
-            .confirmationDialog(
-                "Alle Stunden dieses Tages löschen?",
-                isPresented: Binding(
-                    get: { dayToDelete != nil },
-                    set: { if !$0 { dayToDelete = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Tag löschen", role: .destructive) {
-                    if let day = dayToDelete {
-                        Task { await deleteDay(day) }
-                    }
-                }
-                Button("Abbrechen", role: .cancel) {}
-            }
-            .alert(
-                "Löschen fehlgeschlagen",
-                isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(actionError ?? "")
             }
         }
     }
 
-    /// Subject filter and sort order, as a standard toolbar menu.
+    /// The subject filter, and nothing else. Sorting used to share this menu,
+    /// but an archive reads newest-first and nobody sets that twice.
     private var filterMenu: some View {
         Menu {
             Picker("Fach", selection: $subjectFilter) {
@@ -129,11 +177,6 @@ struct LessonsView: View {
                 ForEach(subjects, id: \.self) { subject in
                     Text(subject).tag(String?.some(subject))
                 }
-            }
-            Divider()
-            Picker("Sortierung", selection: $newestFirst) {
-                Text("Neueste zuerst").tag(true)
-                Text("Älteste zuerst").tag(false)
             }
         } label: {
             Label(
@@ -164,6 +207,19 @@ struct LessonsView: View {
         loading = false
     }
 
+    private func delete(_ lesson: BackendAPI.LessonInfo) async {
+        do {
+            try await api.deleteLesson(id: lesson.id)
+            BackendAPI.purgeCachedAudio(id: lesson.id)
+            withAnimation(.snappy) {
+                lessons.removeAll { $0.id == lesson.id }
+            }
+        } catch {
+            actionError = error.localizedDescription
+            await load()
+        }
+    }
+
     private func deleteDay(_ day: Date) async {
         let targets = lessons.filter { Calendar.current.isDate($0.startedAt, inSameDayAs: day) }
         do {
@@ -181,107 +237,41 @@ struct LessonsView: View {
     }
 }
 
-/// One day as a folder row: date, lesson count badge, and the subjects.
-struct DayRow: View {
+/// A day's section header: what day it was, how much was recorded, and the one
+/// action that belongs to a whole day rather than to a lesson.
+struct DayHeader: View {
     let day: Date
-    let lessons: [BackendAPI.LessonInfo]
+    let count: Int
+    let canDelete: Bool
+    let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            IconTile(systemName: "folder.fill", color: .blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(day.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.vertical, 2)
-        .badge(lessons.count)
-    }
-
-    private var subtitle: String {
-        let names = lessons.compactMap { $0.subject ?? $0.title }
-        guard !names.isEmpty else {
-            return lessons.count == 1 ? "1 Stunde" : "\(lessons.count) Stunden"
-        }
-        var seen = Set<String>()
-        let unique = names.filter { seen.insert($0).inserted }
-        return unique.joined(separator: ", ")
-    }
-}
-
-/// One school day: the day's lessons as a list with standard swipe-to-delete.
-struct DayView: View {
-    let api: BackendAPI
-    let day: Date
-    let onChanged: () async -> Void
-
-    @State private var lessons: [BackendAPI.LessonInfo]
-    @State private var actionError: String?
-    @Environment(\.dismiss) private var dismiss
-
-    init(
-        api: BackendAPI,
-        day: Date,
-        lessons: [BackendAPI.LessonInfo],
-        onChanged: @escaping () async -> Void
-    ) {
-        self.api = api
-        self.day = day
-        self.onChanged = onChanged
-        _lessons = State(initialValue: lessons)
-    }
-
-    var body: some View {
-        List {
-            ForEach(lessons) { lesson in
-                NavigationLink {
-                    LessonDetailView(api: api, info: lesson)
-                } label: {
-                    LessonRow(info: lesson)
-                }
-            }
-            .onDelete { offsets in
-                let targets = offsets.map { lessons[$0] }
-                Task {
-                    for lesson in targets {
-                        await delete(lesson)
+        HStack(spacing: 8) {
+            Text(title)
+            Spacer(minLength: 8)
+            Text(count == 1 ? "1 Stunde" : "\(count) Stunden")
+            if canDelete {
+                Menu {
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Tag löschen", systemImage: "trash")
                     }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityLabel("Aktionen für \(title)")
             }
-        }
-        .listStyle(.insetGrouped)
-        .navigationTitle(day.formatted(date: .complete, time: .omitted))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
-            }
-        }
-        .alert(
-            "Stunde konnte nicht gelöscht werden",
-            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(actionError ?? "")
         }
     }
 
-    private func delete(_ lesson: BackendAPI.LessonInfo) async {
-        do {
-            try await api.deleteLesson(id: lesson.id)
-            BackendAPI.purgeCachedAudio(id: lesson.id)
-            withAnimation(.snappy) {
-                lessons.removeAll { $0.id == lesson.id }
-            }
-            await onChanged()
-            // the day folder no longer exists in the archive: leave it
-            if lessons.isEmpty { dismiss() }
-        } catch {
-            actionError = error.localizedDescription
+    /// Relative for the days a school week actually talks about, absolute
+    /// after that — and only then does the year earn its place.
+    private var title: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "Heute" }
+        if calendar.isDateInYesterday(day) { return "Gestern" }
+        if calendar.isDate(day, equalTo: .now, toGranularity: .year) {
+            return day.formatted(.dateTime.weekday(.wide).day().month(.wide))
         }
+        return day.formatted(.dateTime.weekday(.abbreviated).day().month(.wide).year())
     }
 }

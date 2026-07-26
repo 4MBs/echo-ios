@@ -1,9 +1,18 @@
 import SwiftUI
 
+/// One lesson, as a document rather than a form.
+///
+/// Zusammenfassung and Transkript are two pages of the same thing, so the
+/// switch between them sits under the title where it stays put, and the
+/// recording plays along either of them — audio belongs to the lesson, not to
+/// one of its pages. Both pages are text on a page: the transcript used to be
+/// rendered as grouped list rows, which turned a spoken hour into a table.
 struct LessonDetailView: View {
-    enum Tab: String, CaseIterable {
+    enum Page: String, CaseIterable, Identifiable {
         case zusammenfassung = "Zusammenfassung"
         case transkript = "Transkript"
+
+        var id: String { rawValue }
     }
 
     let api: BackendAPI
@@ -11,36 +20,35 @@ struct LessonDetailView: View {
 
     @Environment(AppModel.self) private var model
     @State private var loadError: Error?
-    @State private var tab: Tab = .zusammenfassung
+    @State private var page: Page = .zusammenfassung
     @State private var detail: BackendAPI.LessonDetail?
     @State private var summary: String?
     @State private var summarizing = false
     @State private var errorMessage: String?
     @State private var audioPlayer = LessonAudioPlayer()
 
+    /// The readable column. Text set across the full width of an iPad is a
+    /// wall; every reading app on the system stops somewhere around here.
+    private static let columnWidth: CGFloat = 700
+
     var body: some View {
         Group {
             if let detail {
-                loadedContent(detail)
+                document(detail)
             } else if let loadError {
                 ErrorState(loadError)
-                    .groupedScreen()
             } else {
                 ProgressView("Lade Stunde…")
-                    .groupedScreen()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground).ignoresSafeArea())
+        // The lesson names the screen. It used to be replaced by the page
+        // switch, which left the title to a row further down the page.
+        .navigationTitle(info.title ?? info.subject ?? "Aufnahme")
+        .navigationSubtitle(metaLine)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // The segmented switch sits in the navigation bar, like in the
-            // system apps; the lesson name lives in the info section below.
-            ToolbarItem(placement: .principal) {
-                Picker("Ansicht", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 340)
-            }
             if let detail {
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(item: lessonShareText(summary: summary, segments: detail.segments)) {
@@ -71,111 +79,94 @@ struct LessonDetailView: View {
         }
     }
 
-    private func loadedContent(_ detail: BackendAPI.LessonDetail) -> some View {
-        List {
-            switch tab {
-            case .zusammenfassung:
-                infoSection
-                summarySection
-            case .transkript:
-                transcriptSection(detail)
+    private func document(_ detail: BackendAPI.LessonDetail) -> some View {
+        Group {
+            switch page {
+            case .zusammenfassung: summaryPage
+            case .transkript: transcriptPage(detail)
             }
         }
-        .listStyle(.insetGrouped)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            // The recording is only playable if it is already on the iPad or
-            // can still be fetched; offering a player that cannot start is
-            // worse than not offering one.
-            if tab == .transkript, info.hasAudio,
-               model.connectivity.isOnline || BackendAPI.cachedAudio(id: info.id) != nil {
-                LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(.bar)
-            }
-        }
+        .safeAreaInset(edge: .top, spacing: 0) { pagePicker }
+        .safeAreaInset(edge: .bottom, spacing: 0) { audioBar }
     }
 
-    // MARK: Info
-
-    private var infoSection: some View {
-        Section {
-            HStack(spacing: 12) {
-                let style = subjectStyle(for: info.subject)
-                IconTile(systemName: style.symbol, color: style.color)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(info.title ?? "Aufnahme")
-                        .font(.headline)
-                    Text(dateLine)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, 2)
-            if let teacher = info.teacher, !teacher.isEmpty {
-                LabeledContent("Lehrkraft", value: teacher)
-            }
-            if let room = info.room, !room.isEmpty {
-                LabeledContent("Raum", value: room)
-            }
-            LabeledContent("Dauer", value: durationText)
-        }
-    }
-
-    private var dateLine: String {
+    /// Date, time and room, in the subtitle line the navigation bar has for
+    /// exactly this. It replaces three list rows that said the same thing.
+    private var metaLine: String {
         let start = info.startedAt
         let end = start.addingTimeInterval(info.durationSeconds)
-        return start.formatted(date: .long, time: .omitted)
-            + " · \(start.formatted(date: .omitted, time: .shortened)) – "
+        let range = start.formatted(date: .abbreviated, time: .omitted)
+            + " · \(start.formatted(date: .omitted, time: .shortened))–"
             + end.formatted(date: .omitted, time: .shortened)
+        var parts = [range]
+        if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
+        if let teacher = info.teacher, !teacher.isEmpty { parts.append(teacher) }
+        return parts.joined(separator: " · ")
     }
 
-    private var durationText: String {
-        let minutes = Int(info.durationSeconds) / 60
-        return minutes > 0 ? "\(minutes) Minuten" : "\(Int(info.durationSeconds)) Sekunden"
+    private var pagePicker: some View {
+        Picker("Ansicht", selection: $page) {
+            ForEach(Page.allCases) { page in
+                Text(page.rawValue).tag(page)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    /// The recording is only playable if it is already on the iPad or can
+    /// still be fetched; offering a player that cannot start is worse than not
+    /// offering one.
+    @ViewBuilder
+    private var audioBar: some View {
+        if info.hasAudio, model.connectivity.isOnline || BackendAPI.cachedAudio(id: info.id) != nil {
+            LessonAudioBar(player: audioPlayer, api: api, lessonId: info.id)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(.bar)
+        }
     }
 
     // MARK: Zusammenfassung
 
     @ViewBuilder
-    private var summarySection: some View {
-        Section("Zusammenfassung") {
-            if let summary {
+    private var summaryPage: some View {
+        if let summary {
+            ScrollView {
                 Text(renderedMarkdown(summary))
-                    .font(.callout)
-                    .lineSpacing(4)
+                    .font(.body)
+                    .lineSpacing(5)
                     .textSelection(.enabled)
-                    .padding(.vertical, 4)
-            } else {
-                VStack(spacing: 12) {
-                    Text("Für diese Stunde gibt es noch keine Zusammenfassung.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        Task { await generateSummary() }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if summarizing { ProgressView() }
-                            Text(summarizing ? "Wird erstellt…" : "Zusammenfassung erstellen")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .disabled(summarizing || !model.connectivity.isOnline)
-                    // Writing one is the AI's job, and the AI is on the server.
-                    if !model.connectivity.isOnline {
-                        Text("Dafür wird eine Verbindung zum Server gebraucht.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: Self.columnWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 20)
             }
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+        } else if summarizing {
+            ProgressView("Zusammenfassung wird erstellt…")
+        } else {
+            ContentUnavailableView {
+                Label("Keine Zusammenfassung", systemImage: "text.badge.star")
+            } description: {
+                Text(model.connectivity.isOnline
+                    ? "Die KI fasst das Transkript dieser Stunde zusammen."
+                    : "Dafür wird der Server gebraucht.")
+            } actions: {
+                Button("Zusammenfassung erstellen") {
+                    Task { await generateSummary() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.connectivity.isOnline)
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
         }
     }
@@ -201,27 +192,57 @@ struct LessonDetailView: View {
 
     // MARK: Transkript
 
-    private func transcriptSection(_ detail: BackendAPI.LessonDetail) -> some View {
-        let activeIndex = audioPlayer.activeSegmentIndex(in: detail.segments)
-        return Section {
-            ForEach(Array(detail.segments.enumerated()), id: \.element.id) { index, segment in
-                Button {
-                    guard info.hasAudio else { return }
-                    Task {
-                        if await audioPlayer.ensureLoaded(api: api, lessonId: info.id) {
-                            audioPlayer.playFrom(segment.t0)
+    @ViewBuilder
+    private func transcriptPage(_ detail: BackendAPI.LessonDetail) -> some View {
+        if detail.segments.isEmpty {
+            ContentUnavailableView {
+                Label("Kein Transkript", systemImage: "text.alignleft")
+            } description: {
+                Text("In dieser Aufnahme wurde nichts erkannt.")
+            }
+        } else {
+            let active = audioPlayer.activeSegmentIndex(in: detail.segments)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(detail.segments.enumerated()), id: \.element.id) { index, segment in
+                            line(segment, isActive: index == active)
+                                .id(segment.id)
                         }
                     }
-                } label: {
-                    SegmentRow(segment: segment, isPartial: false)
+                    .frame(maxWidth: Self.columnWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 16)
                 }
-                .buttonStyle(.plain)
-                .listRowBackground(index == activeIndex ? Theme.accent.opacity(0.12) : nil)
+                // Playback carries the page along with it, the way a transcript
+                // that can be played is expected to behave.
+                .onChange(of: active) { _, index in
+                    guard let index, detail.segments.indices.contains(index) else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo(detail.segments[index].id, anchor: .center)
+                    }
+                }
             }
-        } footer: {
-            if info.hasAudio {
-                Text("Zeile antippen, um sie ab dieser Stelle anzuhören.")
+        }
+    }
+
+    /// A line is only a control where there is something to play.
+    @ViewBuilder
+    private func line(_ segment: TranscriptSegment, isActive: Bool) -> some View {
+        if info.hasAudio {
+            Button {
+                Task {
+                    if await audioPlayer.ensureLoaded(api: api, lessonId: info.id) {
+                        audioPlayer.playFrom(segment.t0)
+                    }
+                }
+            } label: {
+                SegmentRow(segment: segment, isPartial: false, isActive: isActive)
             }
+            .buttonStyle(.plain)
+        } else {
+            SegmentRow(segment: segment, isPartial: false, isActive: isActive)
         }
     }
 }
