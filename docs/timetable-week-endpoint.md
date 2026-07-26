@@ -117,6 +117,24 @@ background entry. It belongs in the grid as a narrow full-height column, which
 is what WebUntis itself draws. Only `isFullDay` background entries — holidays —
 get the slab treatment.
 
+## Not the official platform API
+
+Untis documents an official API at developer.untis.com
+(`https://api.webuntis.com/WebUntis/api/rest/extern/v{version}/…`, note
+`extern` rather than the `view` above). It is the wrong tool here twice over:
+it authenticates an *application* through a Client Credentials flow, with
+credentials provisioned via Untis and the school — there is no route to them
+from a student's own login — and its documented resources (student, teacher,
+class, room, subject, absences, exams, lessons, timetable v3, messaging) do not
+include holidays, non-teaching days or the school year. The closest is
+OneRoster `academicSessions`, which is terms and grading periods, not Ferien.
+
+Worth knowing rather than worth using: since Untis' own supported surface has
+no holiday story, neither of the options below is being superseded by it. The
+per-endpoint schemas on that site render in JavaScript and were not read; if a
+timetable-v3 day turns out to carry a holiday marker, it would be there, and
+their credential-free sandbox is the quick way to check.
+
 ## The smaller alternative
 
 If moving to the REST view API is more than it's worth, the older
