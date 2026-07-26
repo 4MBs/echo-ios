@@ -104,6 +104,19 @@ enum SchoolClock {
         return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
     }
 
+    /// Monday to Friday of the week starting at `monday`. A school week has
+    /// five days; a recording made on a Saturday still turns up in search.
+    ///
+    /// Pure date arithmetic, so it lives here rather than on the store: the
+    /// grid's layout is built off the main actor, and a static on a
+    /// `@MainActor` type cannot be called from there.
+    static func weekdays(from monday: Date, calendar: Calendar) -> [(date: Date, key: String)] {
+        (0 ..< 5).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: monday) else { return nil }
+            return (date, key(date, calendar: calendar))
+        }
+    }
+
     /// The Monday of the week `date` falls in.
     static func monday(of date: Date, calendar: Calendar) -> Date {
         let start = calendar.startOfDay(for: date)

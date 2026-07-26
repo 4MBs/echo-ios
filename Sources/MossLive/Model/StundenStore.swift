@@ -92,7 +92,7 @@ final class StundenStore {
         loadingWeeks.insert(key)
         defer { loadingWeeks.remove(key) }
 
-        let dayKeys = Self.weekdays(from: monday, calendar: calendar).map(\.key)
+        let dayKeys = SchoolClock.weekdays(from: monday, calendar: calendar).map(\.key)
         do {
             let week = try await api.timetableWeek(mondayKey: key, dayKeys: dayKeys)
             fetched[key] = week
@@ -118,14 +118,6 @@ final class StundenStore {
         WeekLayout.build(week: week, monday: monday, recordings: recordings, calendar: calendar)
     }
 
-    /// Monday to Friday. A school week has five days; a recording made on a
-    /// Saturday still turns up in search.
-    static func weekdays(from monday: Date, calendar: Calendar) -> [(date: Date, key: String)] {
-        (0 ..< 5).compactMap { offset in
-            guard let date = calendar.date(byAdding: .day, value: offset, to: monday) else { return nil }
-            return (date, SchoolClock.key(date, calendar: calendar))
-        }
-    }
 }
 
 // MARK: - What the grid draws
@@ -194,7 +186,7 @@ struct WeekLayout {
         var earliest = Int.max
         var latest = Int.min
 
-        for day in StundenStore.weekdays(from: monday, calendar: calendar) {
+        for day in SchoolClock.weekdays(from: monday, calendar: calendar) {
             let scheduled = week.days.first { $0.date == day.key }?.lessons ?? []
             let dayRecordings = (byDay[day.key] ?? []).sorted { $0.startedAt < $1.startedAt }
             var blocks: [LessonBlock] = []
