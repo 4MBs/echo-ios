@@ -144,10 +144,13 @@ struct LessonBlock: Identifiable {
     /// Minutes since midnight.
     let start: Int
     let end: Int
-    /// Which of the overlapping columns this block sits in, and how many there
-    /// are — two lessons at the same hour share the day's width.
-    var column = 0
-    var columns = 1
+    /// Where the block sits across the day's width, as fractions of it. Two
+    /// lessons at the same hour split the day; a day-trip takes a quarter and
+    /// leaves the rest. WebUntis works this out itself and the numbers are
+    /// used when the server passes them through — they are what its own web
+    /// app draws with. Otherwise they are packed into equal columns here.
+    var offset = 0.0
+    var width = 1.0
     var recording: BackendAPI.LessonInfo?
     /// False for a recording with no lesson behind it.
     var isScheduled = true
@@ -157,13 +160,10 @@ struct DayLayout: Identifiable {
     let date: Date
     let key: String
     let blocks: [LessonBlock]
-    /// Excursions and the like: anything long enough that placing it on the
-    /// time axis would push the day's real lessons aside.
-    let allDay: [String]
     let holiday: String?
 
     var id: String { key }
-    var isEmpty: Bool { blocks.isEmpty && allDay.isEmpty }
+    var isEmpty: Bool { blocks.isEmpty }
 }
 
 struct WeekLayout {
@@ -176,10 +176,7 @@ struct WeekLayout {
     let wholeWeekHoliday: String?
 
     var isEmpty: Bool { days.allSatisfy(\.isEmpty) }
-    var hasAllDay: Bool { days.contains { !$0.allDay.isEmpty } }
 
-    /// Long enough that it is not a lesson but a day out.
-    private static let allDayMinutes = 240
     private static let defaultRange = (start: 8 * 60, end: 16 * 60)
 
     static func build(
@@ -201,17 +198,16 @@ struct WeekLayout {
             let scheduled = week.days.first { $0.date == day.key }?.lessons ?? []
             let dayRecordings = (byDay[day.key] ?? []).sorted { $0.startedAt < $1.startedAt }
             var blocks: [LessonBlock] = []
-            var allDay: [String] = []
             var claimed: Set<String> = []
 
+            // A day out lasts all morning and is still drawn in the grid — as a
+            // narrow column beside the lessons, which is what WebUntis does
+            // with it. Guessing from the length instead, as this did, would
+            // have filed a long exam under excursions.
             for lesson in scheduled {
                 guard let start = SchoolClock.minutes(lesson.start),
                       let end = SchoolClock.minutes(lesson.end), end > start
                 else { continue }
-                if end - start >= allDayMinutes {
-                    allDay.append(lesson.title.isEmpty ? lesson.subject : lesson.title)
-                    continue
-                }
                 // The server already cuts a recording per period, so the one
                 // whose middle falls inside the slot is the slot's recording.
                 let match = dayRecordings.first { recording in
@@ -223,9 +219,10 @@ struct WeekLayout {
                     return middle >= start && middle < end
                 }
                 if let match { claimed.insert(match.id) }
+                let layout = Self.layout(of: lesson)
                 blocks.append(
                     LessonBlock(
-                        id: "\(day.key)-\(lesson.start)-\(lesson.end)-\(lesson.subject)-\(lesson.room)",
+                        id: lesson.id,
                         title: Self.name(of: lesson),
                         subject: lesson.subject.isEmpty ? nil : lesson.subject,
                         room: lesson.room.isEmpty ? nil : lesson.room,
@@ -234,6 +231,8 @@ struct WeekLayout {
                         substitution: lesson.substitution,
                         start: start,
                         end: end,
+                        offset: layout?.offset ?? 0,
+                        width: layout?.width ?? 1,
                         recording: match
                     )
                 )
@@ -263,7 +262,12 @@ struct WeekLayout {
                 )
             }
 
-            let placed = place(blocks)
+            // WebUntis' own layout is used only when it covers every block on
+            // the day. Mixing its numbers with columns worked out here could
+            // stack one block on top of another and hide a lesson.
+            let laidOut = !blocks.isEmpty && scheduled.count == blocks.count
+                && scheduled.allSatisfy { Self.layout(of: $0) != nil }
+            let placed = laidOut ? blocks : place(blocks)
             for block in placed {
                 earliest = min(earliest, block.start)
                 latest = max(latest, block.end)
@@ -273,7 +277,6 @@ struct WeekLayout {
                     date: day.date,
                     key: day.key,
                     blocks: placed,
-                    allDay: allDay,
                     holiday: week.holidays.first { $0.covers(day.key) }?.name
                 )
             )
@@ -299,6 +302,14 @@ struct WeekLayout {
         )
     }
 
+    /// WebUntis' column for this lesson, as fractions of the day's width.
+    /// Nil from a server that does not pass the numbers through.
+    private static func layout(of lesson: BackendAPI.Lesson) -> (offset: Double, width: Double)? {
+        guard let start = lesson.layoutStart, let width = lesson.layoutWidth, width > 0 else { return nil }
+        let offset = min(max(Double(start) / 1000, 0), 1)
+        return (offset, min(Double(width) / 1000, 1 - offset))
+    }
+
     private static func name(of lesson: BackendAPI.Lesson) -> String {
         if let long = lesson.subjectLong, !long.isEmpty { return long }
         if !lesson.subject.isEmpty { return lesson.subject }
@@ -318,22 +329,22 @@ struct WeekLayout {
         func flush() {
             guard !cluster.isEmpty else { return }
             var columnEnds: [Int] = []
-            var placed: [LessonBlock] = []
-            for var block in cluster {
+            var columns: [Int] = []
+            for block in cluster {
                 if let free = columnEnds.firstIndex(where: { $0 <= block.start }) {
                     columnEnds[free] = block.end
-                    block.column = free
+                    columns.append(free)
                 } else {
                     columnEnds.append(block.end)
-                    block.column = columnEnds.count - 1
+                    columns.append(columnEnds.count - 1)
                 }
-                placed.append(block)
             }
-            let width = max(1, columnEnds.count)
-            result.append(contentsOf: placed.map {
-                var block = $0
-                block.columns = width
-                return block
+            let share = 1.0 / Double(max(1, columnEnds.count))
+            result.append(contentsOf: zip(cluster, columns).map { block, column in
+                var placed = block
+                placed.offset = Double(column) * share
+                placed.width = share
+                return placed
             })
             cluster = []
             clusterEnd = Int.min

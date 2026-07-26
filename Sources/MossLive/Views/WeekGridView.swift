@@ -39,9 +39,6 @@ struct WeekGridView: View {
     var body: some View {
         VStack(spacing: 0) {
             dayHeaders
-            if layout.hasAllDay {
-                allDayRow
-            }
             Divider()
             ScrollView {
                 ZStack(alignment: .topLeading) {
@@ -97,33 +94,6 @@ struct WeekGridView: View {
     private var monthLabel: String {
         guard let first = layout.days.first?.date else { return "" }
         return first.formatted(.dateTime.month(.abbreviated))
-    }
-
-    /// Excursions and the rest: above the grid, the way Kalender does it,
-    /// rather than as a full-height column that shoves the day aside.
-    private var allDayRow: some View {
-        HStack(alignment: .top, spacing: Self.columnGap) {
-            Text("ganztags")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .frame(width: Self.axisWidth, alignment: .leading)
-            ForEach(visibleDays) { day in
-                VStack(spacing: 3) {
-                    ForEach(day.allDay, id: \.self) { title in
-                        Text(title)
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 6)
     }
 
     // MARK: The grid
@@ -182,11 +152,13 @@ struct WeekGridView: View {
                 holidaySlab(holiday)
             } else {
                 ForEach(day.blocks) { block in
-                    let width = (geometry.size.width + 2) / CGFloat(block.columns) - 2
                     blockView(block, day: day)
-                        .frame(width: max(20, width), height: blockHeight(block))
+                        .frame(
+                            width: max(20, geometry.size.width * block.width - 2),
+                            height: blockHeight(block)
+                        )
                         .offset(
-                            x: (geometry.size.width + 2) / CGFloat(block.columns) * CGFloat(block.column),
+                            x: geometry.size.width * block.offset,
                             y: CGFloat(block.start - layout.startMinute) * Self.scale
                         )
                 }

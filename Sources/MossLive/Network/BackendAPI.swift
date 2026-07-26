@@ -98,14 +98,34 @@ struct BackendAPI {
         let substitution: Bool
         let info: String
 
+        /// Only sent by a server that reads WebUntis' newer view API. The
+        /// period's own id is a stabler identity than the hour it falls in,
+        /// and `layoutStart`/`layoutWidth` (0…1000 across the day) is
+        /// WebUntis' own answer to which parallel column a lesson belongs in —
+        /// the same numbers its web app lays the week out with. Absent from an
+        /// older server, and then worked out on this side instead.
+        let periodId: Int?
+        let kind: String?
+        let layoutStart: Int?
+        let layoutWidth: Int?
+
         enum CodingKeys: String, CodingKey {
             case date, start, end, subject, title, teacher, room, cancelled, substitution, info
             case startMs = "start_ms"
             case endMs = "end_ms"
             case subjectLong = "subject_long"
+            case periodId = "period_id"
+            case kind = "type"
+            case layoutStart = "layout_start"
+            case layoutWidth = "layout_width"
         }
 
-        var id: String { "\(date)-\(start)-\(subject)" }
+        /// Two parallel lessons of the same subject in the same hour are one
+        /// timetable away; the period id settles it when there is one.
+        var id: String {
+            if let periodId { return "period-\(periodId)" }
+            return "\(date)-\(start)-\(end)-\(subject)-\(room)"
+        }
         var startDate: Date? { startMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
         var endDate: Date? { endMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     }
