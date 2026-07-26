@@ -1,11 +1,18 @@
-# `/timetable/week` — what the app wants from the server
+# `/timetable/week` — the contract behind the Stunden grid
 
-The Stunden tab draws the school week as a grid. It has everything it needs
-except **holidays**, which the iPad has no way to learn: it only ever talks to
-the Fedora backend, and only the backend talks to WebUntis.
+The Stunden tab draws the school week as a grid, and it needs **holidays**,
+which the iPad has no way to learn: it only ever talks to the Fedora backend,
+and only the backend talks to WebUntis.
 
-This is the contract the app already reads. Nothing here needs an app release —
-the client ships with it and uses whatever arrives.
+**Implemented** in echo-backend (`timetable-week` branch): the holidays were
+already in the WebUntis response the backend was making, sitting in each day's
+`backEntries` beside the lessons, and were being discarded. No new auth, no
+migration — the client's five-day fallback below is now only for a server that
+predates it.
+
+Verified against the real timetable: `Sommerferien 2026-07-04 … 2026-07-30`
+comes back for every week it covers, and KW 31 returns Monday to Thursday empty
+with Friday's four lessons — the same thing the WebUntis app shows.
 
 ## What the app asks for
 
@@ -110,6 +117,12 @@ de-duplicate by range.
 `position1…position7` are not fixed roles — read the `type` inside each rather
 than the position number. A substitution keeps the replacement in `current` and
 the original in `removed`.
+
+**`status: "CHANGED"` is not a substitution on its own.** Live data has
+`Ausflug Eckernförde`, `Escaperoom Kiel` and a class-council hour all marked
+CHANGED with nothing removed. A swapped **teacher or room** is a Vertretung; a
+class dropped from the roster is not, and WebUntis itself only strikes that one
+through.
 
 Note that a day out (`Ausflug`, 07:55–15:25) arrives as an ordinary
 `gridEntries` row of `type: "EVENT"` with a narrow `layoutWidth`, **not** as a
