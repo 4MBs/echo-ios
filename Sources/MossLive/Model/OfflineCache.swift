@@ -27,6 +27,9 @@ enum OfflineCache {
         static let timetableDay = "timetable-day"
 
         static func lesson(_ id: String) -> String { "lesson-\(id)" }
+        /// One entry per week, keyed by its Monday, so a week already looked
+        /// at opens without the server.
+        static func timetableWeek(_ mondayKey: String) -> String { "timetable-week-\(mondayKey)" }
         static func cover(_ id: String) -> String { "cover-\(id)" }
     }
 
