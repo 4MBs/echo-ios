@@ -10,24 +10,37 @@ struct SubjectLessonsView: View {
     let api: BackendAPI
     let subjectID: String
 
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var months: [MonthGroup] = []
+    @State private var title = "Fach"
     @State private var actionError: String?
 
     var body: some View {
         List {
             ForEach(months) { month in
                 Section {
-                    ForEach(month.lessons) { lesson in
+                    ForEach(Array(month.lessons.enumerated()), id: \.element.id) { index, lesson in
                         NavigationLink {
                             LessonDetailView(api: api, info: lesson)
                         } label: {
                             LessonRow(info: lesson)
                         }
+                        // Ours, so a cancelled swipe cannot leave the row
+                        // square-cornered on the way back.
+                        .listRowBackground(
+                            GroupedRowBackground(
+                                isFirst: index == 0,
+                                isLast: index == month.lessons.count - 1
+                            )
+                        )
                         .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                Task { actionError = await archive.delete(lesson, api: api) }
-                            } label: {
-                                Label("Löschen", systemImage: "trash")
+                            if model.connectivity.isOnline {
+                                Button(role: .destructive) {
+                                    Task { actionError = await archive.delete(lesson, api: api) }
+                                } label: {
+                                    Label("Löschen", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -38,19 +51,9 @@ struct SubjectLessonsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(archive.group(id: subjectID)?.title ?? "Fach")
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .overlay {
-            if months.isEmpty {
-                ContentUnavailableView {
-                    Label("Keine Stunden mehr", systemImage: "graduationcap")
-                } description: {
-                    Text("In diesem Fach ist nichts mehr gespeichert.")
-                }
-                .groupedScreen()
-            }
-        }
-        // Grouped when the archive changes — a deletion, a refresh — and not
+        // Regrouped when the archive changes — a deletion, a refresh — and not
         // once per redraw.
         .onChange(of: archive.lessons.count, initial: true) { regroup() }
         .alert(
@@ -65,6 +68,16 @@ struct SubjectLessonsView: View {
 
     private func regroup() {
         let lessons = archive.group(id: subjectID)?.lessons ?? []
+        if let current = archive.group(id: subjectID)?.title {
+            title = current
+        }
+        // The last lesson in a subject takes the subject with it: staying on a
+        // page for something that no longer exists is worse than going back.
+        guard !lessons.isEmpty else {
+            months = []
+            dismiss()
+            return
+        }
         let calendar = Calendar.current
         months = Dictionary(grouping: lessons) { lesson in
             calendar.date(from: calendar.dateComponents([.year, .month], from: lesson.startedAt))

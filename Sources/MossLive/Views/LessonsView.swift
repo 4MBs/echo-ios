@@ -12,6 +12,7 @@ struct LessonsView: View {
 
     @State private var archive = LessonArchive()
     @State private var searchText = ""
+    @State private var subjectToDelete: SubjectGroup?
     @State private var actionError: String?
 
     private var api: BackendAPI { model.api }
@@ -20,8 +21,10 @@ struct LessonsView: View {
     var body: some View {
         NavigationStack {
             content
+                // The page arrives rather than appearing: loading, empty and
+                // library are three states of one screen.
+                .animation(.easeInOut(duration: 0.25), value: archive.loading)
                 .navigationTitle("Stunden")
-                .searchable(text: $searchText, prompt: "Stunde suchen")
                 .navigationDestination(for: String.self) { subject in
                     SubjectLessonsView(archive: archive, api: api, subjectID: subject)
                 }
@@ -37,11 +40,16 @@ struct LessonsView: View {
         .task { await archive.load(api: api) }
     }
 
+    /// The search field belongs to the library, not to the tab: with nothing
+    /// stored there is nothing to search, and a field that can only ever come
+    /// up empty is furniture. It is attached to the library itself, so it
+    /// arrives with the first lesson and leaves with the last.
     @ViewBuilder
     private var content: some View {
         if archive.loading {
             ProgressView("Lade Stunden…")
                 .groupedScreen()
+                .transition(.opacity)
         } else if archive.isEmpty, let error = archive.loadError {
             ErrorState(error) { await archive.load(api: api) }
                 .groupedScreen()
@@ -52,30 +60,31 @@ struct LessonsView: View {
                 Text("Nimm eine Stunde auf, dann erscheint sie hier.")
             }
             .groupedScreen()
-        } else if query.isEmpty {
-            library
+            .transition(.opacity)
         } else {
-            results
+            library
+                .transition(.opacity)
         }
     }
 
+    @ViewBuilder
     private var library: some View {
+        // Once per redraw, not once per section: the overlay needs the same
+        // answer the page does.
+        let matches = query.isEmpty ? [] : archive.matching(query)
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                if !archive.recent.isEmpty {
-                    shelf("Zuletzt") {
-                        lessonCard(archive.recent)
-                    }
-                }
-                shelf("Fächer") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: 14)], spacing: 14) {
-                        ForEach(archive.subjects) { group in
-                            NavigationLink(value: group.id) {
-                                SubjectCard(group: group)
-                            }
-                            .buttonStyle(.plain)
+                if query.isEmpty {
+                    if !archive.recent.isEmpty {
+                        shelf("Zuletzt") {
+                            lessonCard(archive.recent)
                         }
                     }
+                    shelf("Fächer") {
+                        subjectGrid
+                    }
+                } else {
+                    lessonCard(matches)
                 }
             }
             .padding(.horizontal, 20)
@@ -83,23 +92,50 @@ struct LessonsView: View {
         }
         .groupedScreen()
         .refreshable { await archive.load(api: api) }
+        .searchable(text: $searchText, prompt: "Stunde suchen")
+        .overlay {
+            if !query.isEmpty, matches.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .groupedScreen()
+            }
+        }
+        .animation(.snappy, value: query.isEmpty)
+        .confirmationDialog(
+            subjectToDelete.map { "Alle Stunden in \($0.title) löschen?" } ?? "",
+            isPresented: Binding(
+                get: { subjectToDelete != nil },
+                set: { if !$0 { subjectToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Löschen", role: .destructive) {
+                if let group = subjectToDelete {
+                    Task { actionError = await archive.deleteSubject(id: group.id, api: api) }
+                }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        }
     }
 
-    /// A search asks about lessons, not about subjects: it answers with the
-    /// lessons themselves.
-    @ViewBuilder
-    private var results: some View {
-        let items = archive.matching(query)
-        if items.isEmpty {
-            ContentUnavailableView.search(text: query)
-                .groupedScreen()
-        } else {
-            ScrollView {
-                lessonCard(items)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 22)
+    private var subjectGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: 14)], spacing: 14) {
+            ForEach(archive.subjects) { group in
+                NavigationLink(value: group.id) {
+                    SubjectCard(group: group)
+                }
+                .buttonStyle(.card)
+                .contextMenu {
+                    // Deleting is the server's copy to delete, so it is not
+                    // offered when the server cannot be reached.
+                    if model.connectivity.isOnline {
+                        Button(role: .destructive) {
+                            subjectToDelete = group
+                        } label: {
+                            Label("Fach löschen", systemImage: "trash")
+                        }
+                    }
+                }
             }
-            .groupedScreen()
         }
     }
 
@@ -112,19 +148,26 @@ struct LessonsView: View {
     }
 
     /// Lessons as rows on one inset card — the grouped-list surface, built by
-    /// hand because this page is a gallery rather than a list.
+    /// hand because this page is a gallery rather than a list. The chevron is
+    /// drawn here for the same reason: a list would have supplied it, and
+    /// without it the rows read as labels rather than as somewhere to go.
     private func lessonCard(_ items: [BackendAPI.LessonInfo]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, lesson in
                 NavigationLink {
                     LessonDetailView(api: api, info: lesson)
                 } label: {
-                    LessonRow(info: lesson)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 10) {
+                        LessonRow(info: lesson)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.card)
                 if index < items.count - 1 {
                     Divider().padding(.leading, 60)
                 }

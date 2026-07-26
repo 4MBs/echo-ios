@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import SwiftUI
 
 /// The lesson archive: loaded once, sorted once, grouped once.
 ///
@@ -42,15 +42,45 @@ final class LessonArchive {
 
     /// Deletes the server's copy, then the local one. Returns a message when
     /// the server refused, so the caller can put it in front of the user.
+    ///
+    /// The removal is animated here rather than at each call site: the shelf,
+    /// the grid and the month sections all show the same lessons, and they
+    /// should all collapse in one movement.
     func delete(_ lesson: BackendAPI.LessonInfo, api: BackendAPI) async -> String? {
         do {
             try await api.deleteLesson(id: lesson.id)
             BackendAPI.purgeCachedAudio(id: lesson.id)
-            apply(lessons.filter { $0.id != lesson.id })
+            withAnimation(.snappy) {
+                apply(lessons.filter { $0.id != lesson.id })
+            }
             return nil
         } catch {
             return error.localizedDescription
         }
+    }
+
+    /// Deletes a whole subject, the counterpart to deleting one lesson.
+    /// Whatever the server did take is applied even if it then refuses one, so
+    /// the screen never claims something is still there when it is gone.
+    func deleteSubject(id: String, api: BackendAPI) async -> String? {
+        var removed: Set<String> = []
+        var failure: String?
+        for lesson in group(id: id)?.lessons ?? [] {
+            do {
+                try await api.deleteLesson(id: lesson.id)
+                BackendAPI.purgeCachedAudio(id: lesson.id)
+                removed.insert(lesson.id)
+            } catch {
+                failure = error.localizedDescription
+                break
+            }
+        }
+        if !removed.isEmpty {
+            withAnimation(.snappy) {
+                apply(lessons.filter { !removed.contains($0.id) })
+            }
+        }
+        return failure
     }
 
     func group(id: String) -> SubjectGroup? {

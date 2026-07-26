@@ -40,6 +40,48 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
     return SubjectStyle(symbol: "graduationcap.fill", color: .blue)
 }
 
+/// The inset-grouped row surface, drawn here instead of by the list.
+///
+/// A grouped row's corners are computed by the system from where the row sits
+/// in its section, and that background is taken out and put back while a swipe
+/// action animates. On the way back the fill lands before the corner mask
+/// does — which is the flash of square corners at the end of a swipe that was
+/// cancelled. Owning the background leaves nothing to put back.
+struct GroupedRowBackground: View {
+    let isFirst: Bool
+    let isLast: Bool
+
+    /// The system's inset-grouped corner radius.
+    private static let radius: CGFloat = 10
+
+    var body: some View {
+        UnevenRoundedRectangle(
+            topLeadingRadius: isFirst ? Self.radius : 0,
+            bottomLeadingRadius: isLast ? Self.radius : 0,
+            bottomTrailingRadius: isLast ? Self.radius : 0,
+            topTrailingRadius: isFirst ? Self.radius : 0,
+            style: .continuous
+        )
+        .fill(Color(.secondarySystemGroupedBackground))
+    }
+}
+
+/// Cards answer a press the way the system's do: a small dip, and nothing
+/// else. Without it a tappable card is indistinguishable from a picture of
+/// one, which is most of what makes a screen feel dead.
+struct CardPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == CardPressStyle {
+    static var card: CardPressStyle { CardPressStyle() }
+}
+
 /// Settings-style list icon: white glyph on a colored rounded square.
 struct IconTile: View {
     let systemName: String
