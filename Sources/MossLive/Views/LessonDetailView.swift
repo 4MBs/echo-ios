@@ -1,318 +1,442 @@
 import SwiftUI
 
-/// One lesson, as three cards on the grouped canvas: what it was about, the
-/// recording, and what was said.
+/// The measurements the lesson page is built from.
 ///
-/// The parts of a lesson are different kinds of thing — a paragraph you read, a
-/// control you operate, a document you scan — and putting them in one list made
-/// them all look like settings rows. Each gets its own card, on the same canvas
-/// the subject folders sit on, so the tab holds together.
+/// The gutter is the load-bearing one. Timestamps hang in it and the thread of
+/// the transcript stands on its inner edge, so the page has a single left
+/// margin and that margin is made of time.
+enum LessonMetrics {
+    static let gutter: CGFloat = 52
+    static let threadGap: CGFloat = 14
+    static let textInset: CGFloat = 10
+    static let measure: CGFloat = 760
+    static let rail: CGFloat = 276
+
+    /// Where the transcript's glyphs start: past the gutter, past the thread.
+    static var textLeading: CGFloat { gutter + threadGap + textInset }
+}
+
+/// A position in the recording, spelled the way this screen spells it.
 ///
-/// There is no switch between Zusammenfassung and Transkript: they are the top
-/// and the bottom of one page, and a switch that rebuilt hundreds of transcript
-/// lines on every tap was the slowest thing on the screen. The summary is
-/// parsed from Markdown once when it arrives, and the spoken line comes from
-/// `player.activeIndex`, which changes when the line changes rather than seven
-/// times a second.
+/// An offset rather than a time of day: the number under the scrubber, the
+/// number beside a transcript line and the number you would say out loud to
+/// find the moment again are then all the same number.
+func lessonOffsetLabel(_ seconds: Double) -> String {
+    let total = max(0, Int(seconds.rounded()))
+    let hours = total / 3600
+    let rest = total % 3600
+    if hours > 0 {
+        return String(format: "%d:%02d:%02d", hours, rest / 60, rest % 60)
+    }
+    return String(format: "%02d:%02d", rest / 60, rest % 60)
+}
+
+/// Where playback would start.
+///
+/// Its own little box rather than a `@State` on the screen, because a `@State`
+/// invalidates the view that owns it: dragging the scrubber would have rebuilt
+/// the whole page sixty times a second to move one line. As an observed object
+/// only the two views that read it — the waveform and the clock — redraw.
+@MainActor
+@Observable
+final class LessonPlayhead {
+    var time: Double = 0
+}
+
+/// One recorded lesson: what it was about, everything that was said, and the
+/// recording itself.
+///
+/// Built on one rule: **down is later**. The transcript runs down the page, so
+/// the recording runs down the rail beside it — the waveform stands on end and
+/// the playhead is a cut across it. A transport bar along the bottom, which is
+/// what a player usually gets, would have set time running rightwards while
+/// everything it refers to ran downwards, and the two axes never meet.
+///
+/// The second idea is that the transcript is not prose. Nobody reads four
+/// hundred lines of a classroom; the transcript is an index into the audio, so
+/// every line is a place you can tap to hear it, and the summary — the part
+/// that is actually read — is the page's lead text rather than a card among
+/// cards.
 struct LessonDetailView: View {
     let api: BackendAPI
     let info: BackendAPI.LessonInfo
 
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
-    @State private var detail: BackendAPI.LessonDetail?
-    /// Parsed once. The raw text is kept beside it for sharing, which wants
-    /// characters rather than attributes.
-    @State private var summary: AttributedString?
-    @State private var summaryText: String?
-    @State private var peaks: [Double] = []
-    @State private var loadError: Error?
-    @State private var summarizing = false
-    @State private var errorMessage: String?
     @State private var player = LessonAudioPlayer()
+    @State private var playhead = LessonPlayhead()
+    @State private var detail: BackendAPI.LessonDetail?
+    @State private var lines: [TranscriptLine] = []
+    @State private var summary: AttributedString?
+    @State private var peaks: [Double] = []
+    @State private var shareText = ""
+    @State private var loadError: Error?
+    @State private var cachedAt: Date?
+    @State private var isLoading = true
+    @State private var isSummarizing = false
+    @State private var summaryError: String?
+    /// Whether the page follows the playhead. Any drag turns it off: being
+    /// pulled back to the recording while reading ahead of it is worse than
+    /// losing sight of the highlight, and re-arming is one tap.
+    @State private var follow = true
 
-    /// The readable column. Text set across the full width of an iPad is a
-    /// wall; every reading app on the system stops somewhere around here.
-    private static let column: CGFloat = 700
+    private var style: SubjectStyle { subjectStyle(for: info.subject) }
+    private var hasAudio: Bool { detail?.hasAudio ?? info.hasAudio }
+
+    /// The list already told us how long the lesson ran, so the timeline is
+    /// drawable — and aimable — before the recording has been downloaded.
+    private var duration: Double {
+        player.duration > 0 ? player.duration : info.durationSeconds
+    }
 
     var body: some View {
-        Group {
-            if let detail {
-                page(detail)
-            } else if let loadError {
-                ErrorState(loadError) { await load() }
-                    .groupedScreen()
-            } else {
-                ProgressView("Lade Stunde…")
-                    .groupedScreen()
-            }
-        }
-        .navigationTitle(info.subject ?? info.title ?? "Aufnahme")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            if let detail {
+        layout
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle(info.subject ?? info.title ?? "Stunde")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: lessonShareText(summary: summaryText, segments: detail.segments)) {
-                        Image(systemName: "square.and.arrow.up")
+                    ShareLink(item: shareText) {
+                        Label("Teilen", systemImage: "square.and.arrow.up")
                     }
+                    .disabled(shareText.isEmpty)
                 }
             }
+            .task { await load() }
+            .onDisappear { player.stop() }
+    }
+
+    @ViewBuilder
+    private var layout: some View {
+        if sizeClass == .compact {
+            page
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if hasAudio {
+                        LessonTransportBar(
+                            peaks: peaks, duration: duration, tint: style.color,
+                            player: player, playhead: playhead,
+                            toggle: toggle, skip: skip
+                        )
+                    }
+                }
+        } else {
+            HStack(spacing: 0) {
+                LessonTimeRail(
+                    info: info, style: style, peaks: peaks, duration: duration,
+                    hasAudio: hasAudio, cachedAt: cachedAt,
+                    player: player, playhead: playhead,
+                    toggle: toggle, skip: skip
+                )
+                .frame(width: LessonMetrics.rail)
+                Divider()
+                page
+            }
         }
-        .onDisappear { player.stop() }
-        .task { await load() }
     }
 
     // MARK: - The page
 
-    private func page(_ detail: BackendAPI.LessonDetail) -> some View {
+    private var page: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    facts
-                    summaryCard
-                    if info.hasAudio { playerCard }
-                    if !detail.segments.isEmpty { transcriptCard(detail) }
+                VStack(alignment: .leading, spacing: 0) {
+                    if sizeClass == .compact {
+                        LessonHeadline(info: info, style: style, compact: true)
+                            .padding(.bottom, 24)
+                    }
+                    summaryBlock
+                    transcriptBlock
                 }
-                .frame(maxWidth: Self.column)
+                .padding(.horizontal, 28)
+                .padding(.top, 24)
+                .padding(.bottom, 48)
+                .frame(maxWidth: LessonMetrics.measure)
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 32)
             }
-            .groupedScreen()
-            // Playback carries the page with it, the way a transcript that can
-            // be played is expected to behave.
+            // Reading wins over following. This runs before the scroll view
+            // consumes the drag, and never fights a scroll it did not cause.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12).onChanged { _ in
+                    if follow { follow = false }
+                }
+            )
+            // `activeIndex`, never `currentTime`: this moves once per spoken
+            // line instead of seven times a second.
             .onChange(of: player.activeIndex) { _, index in
-                guard player.isPlaying, let index else { return }
-                withAnimation(.easeInOut(duration: 0.25)) {
+                guard follow, let index else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
                     proxy.scrollTo(index, anchor: .center)
                 }
             }
         }
+        .background(Color(.secondarySystemGroupedBackground))
     }
 
-    /// When it was, where, and with whom — as chips rather than three list rows
-    /// saying one fact each.
-    private var facts: some View {
-        HStack(spacing: 8) {
-            ForEach(chips, id: \.self) { chip in
-                Text(chip)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 2)
-    }
-
-    private var chips: [String] {
-        let start = info.startedAt
-        let end = start.addingTimeInterval(info.durationSeconds)
-        var out = [
-            start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                + ", " + start.formatted(date: .omitted, time: .shortened)
-                + "–" + end.formatted(date: .omitted, time: .shortened),
-        ]
-        if let room = info.room, !room.isEmpty { out.append("Raum \(room)") }
-        if let teacher = info.teacher, !teacher.isEmpty { out.append(teacher) }
-        return out
-    }
-
-    // MARK: - Cards
-
-    private func cardHeader(_ title: String, systemImage: String, trailing: String? = nil) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: systemImage)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            if let trailing {
-                Text(trailing)
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            cardHeader("Zusammenfassung", systemImage: "sparkles")
-            if let summary {
-                Text(summary)
-                    .font(.body)
-                    .lineSpacing(5)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if summarizing {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("Wird geschrieben…").foregroundStyle(.secondary)
-                }
-                .font(.callout)
-                .padding(.vertical, 2)
-            } else {
-                summaryPrompt
-            }
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
-
-    /// The server writes summaries by itself when a recording ends, so an
-    /// absent one means it was skipped or it failed — not that nobody has
-    /// pressed the button yet.
-    private var summaryPrompt: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(model.connectivity.isOnline
-                ? "Für diese Stunde wurde keine geschrieben."
-                : "Für diese Stunde wurde keine geschrieben. Dafür wird der Server gebraucht.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Button("Jetzt erstellen") {
-                Task { await generateSummary() }
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .controlSize(.small)
-            .disabled(summarizing || !model.connectivity.isOnline)
-        }
-    }
-
-    private var playerCard: some View {
-        LessonPlayer(player: player, api: api, lessonId: info.id, peaks: peaks)
-            .padding(14)
-            .frame(maxWidth: .infinity)
-            .cardSurface()
-    }
-
-    private func transcriptCard(_ detail: BackendAPI.LessonDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            cardHeader(
-                "Transkript",
-                systemImage: "text.alignleft",
-                trailing: "\(detail.segments.count) Zeilen"
-            )
-            LazyVStack(alignment: .leading, spacing: 2) {
-                ForEach(detail.segments.indices, id: \.self) { index in
-                    line(detail.segments[index], isActive: player.activeIndex == index)
-                        .id(index)
-                }
-            }
-            if info.hasAudio {
-                Text("Zeile antippen, um sie ab dieser Stelle anzuhören.")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
-
-    /// A line is only a control where there is something to play.
+    /// The lead text of the page, set larger than the record below it because
+    /// it is the part anyone actually reads.
     @ViewBuilder
-    private func line(_ segment: TranscriptSegment, isActive: Bool) -> some View {
-        if info.hasAudio {
-            Button {
-                Task {
-                    if await player.ensureLoaded(api: api, lessonId: info.id) {
-                        player.playFrom(segment.t0)
-                    }
+    private var summaryBlock: some View {
+        if isSummarizing {
+            SummaryPlaceholder()
+        } else if let summary {
+            Text(summary)
+                .font(.title3)
+                .lineSpacing(7)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if isLoading {
+            SummaryPlaceholder()
+        } else {
+            MissingSummary(isOnline: model.connectivity.isOnline, message: summaryError) {
+                await writeSummary()
+            }
+        }
+    }
+
+    private var transcriptBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().padding(.top, 32)
+            transcriptHeading
+                .padding(.top, 16)
+                .padding(.bottom, 2)
+            transcriptBody
+        }
+    }
+
+    @ViewBuilder
+    private var transcriptBody: some View {
+        if !lines.isEmpty {
+            transcriptLines
+        } else if let loadError {
+            ErrorState(loadError) { await load() }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 28)
+        } else if isLoading {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 44)
+        } else {
+            Text("Von dieser Stunde wurde nichts aufgezeichnet.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.top, 14)
+        }
+    }
+
+    private var transcriptLines: some View {
+        let active = player.activeIndex
+        return LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(lines) { line in
+                LessonTranscriptLine(
+                    line: line,
+                    tint: style.color,
+                    isActive: active == line.id,
+                    canPlay: hasAudio
+                ) {
+                    play(from: line.start)
                 }
+            }
+        }
+    }
+
+    private var transcriptHeading: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("Transkript")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(countLabel)
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+            followControl
+        }
+    }
+
+    private var countLabel: String {
+        let count = lines.isEmpty ? info.segmentCount : lines.count
+        return count == 1 ? "1 Beitrag" : "\(count) Beiträge"
+    }
+
+    @ViewBuilder
+    private var followControl: some View {
+        if hasAudio, !lines.isEmpty {
+            Button {
+                follow.toggle()
             } label: {
-                lineBody(segment, isActive: isActive)
+                Label(
+                    follow ? "Folgt" : "Folgen",
+                    systemImage: follow ? "arrow.down.circle.fill" : "arrow.down.circle"
+                )
+                .font(.footnote)
+                .foregroundStyle(follow ? style.color : Color.secondary)
             }
             .buttonStyle(.plain)
-        } else {
-            lineBody(segment, isActive: isActive)
         }
     }
 
-    private func lineBody(_ segment: TranscriptSegment, isActive: Bool) -> some View {
-        SegmentRow(segment: segment, isPartial: false, isActive: isActive)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                isActive ? Theme.accent.opacity(0.12) : .clear,
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
+    // MARK: - Playback
+
+    private func play(from time: Double) {
+        playhead.time = time
+        Task {
+            guard await player.ensureLoaded(api: api, lessonId: info.id) else { return }
+            follow = true
+            player.playFrom(time)
+        }
+    }
+
+    private func toggle() {
+        Task {
+            guard await player.ensureLoaded(api: api, lessonId: info.id) else { return }
+            if player.isPlaying {
+                player.togglePlayPause()
+                return
+            }
+            follow = true
+            // Aiming the timeline before the recording had arrived left the
+            // mark somewhere the player has never been.
+            if abs(player.currentTime - playhead.time) > 0.5 {
+                player.playFrom(playhead.time)
+            } else {
+                player.togglePlayPause()
+            }
+        }
+    }
+
+    private func skip(_ delta: Double) {
+        let from = max(player.currentTime, playhead.time)
+        let target = min(max(0, from + delta), max(duration - 0.2, 0))
+        playhead.time = target
+        player.seek(to: target)
     }
 
     // MARK: - Loading
 
-    /// The stored copy first, so a lesson opens instantly and opens at all
-    /// without a server; the server's copy replaces it when there is one.
     private func load() async {
+        guard detail == nil else { return }
+        // The list handed us a subject, a time and the opening of the summary.
+        // Showing them straight away is why this page never opens as a spinner.
+        if summary == nil, let excerpt = info.summaryExcerpt, !excerpt.isEmpty {
+            summary = renderedMarkdown(excerpt)
+        }
+        loadError = nil
+        isLoading = true
         let key = OfflineCache.Key.lesson(info.id)
+        let storedAt = OfflineCache.savedAt(key: key)
         if let stored = OfflineCache.load(BackendAPI.LessonDetail.self, key: key) {
             apply(stored)
         }
-        if peaks.isEmpty,
-           let stored = OfflineCache.load([Double].self, key: OfflineCache.Key.waveform(info.id)) {
-            peaks = stored
-        }
+        peaks = OfflineCache.load([Double].self, key: OfflineCache.Key.waveform(info.id)) ?? []
         do {
-            let loaded = try await api.lesson(id: info.id)
-            apply(loaded)
-            OfflineCache.save(loaded, as: key)
+            let fetched = try await api.lesson(id: info.id)
+            apply(fetched)
+            OfflineCache.save(fetched, as: key)
+            cachedAt = nil
         } catch {
-            if detail == nil { loadError = error }
+            if detail == nil { loadError = error } else { cachedAt = storedAt }
         }
+        isLoading = false
         await loadWaveform()
     }
 
-    /// The waveform is decoration on a control that works without it, so a
-    /// server too old to know the endpoint just gets a plain track.
     private func loadWaveform() async {
-        guard info.hasAudio, peaks.isEmpty else { return }
-        guard let fresh = try? await api.waveform(id: info.id), !fresh.isEmpty else { return }
-        peaks = fresh
-        OfflineCache.save(fresh, as: OfflineCache.Key.waveform(info.id))
+        guard hasAudio, peaks.isEmpty else { return }
+        // A 404 here is the ordinary answer for a lesson recorded before the
+        // server kept audio. There is nothing to tell the reader about it.
+        guard let fetched = try? await api.waveform(id: info.id), !fetched.isEmpty else { return }
+        peaks = fetched
+        OfflineCache.save(fetched, as: OfflineCache.Key.waveform(info.id))
     }
 
-    /// Everything the page derives from a loaded lesson, worked out once here
-    /// rather than on every redraw: the Markdown parse, and the transcript the
-    /// player highlights against.
-    private func apply(_ loaded: BackendAPI.LessonDetail) {
-        detail = loaded
-        setSummary(loaded.summary)
-        player.track(loaded.segments)
+    /// Everything the page needs is worked out here, once, when the lesson
+    /// arrives — the Markdown, the export text, who each voice belongs to and
+    /// which lines open a turn. A body that did any of it would do all of it
+    /// again every time the playhead moved.
+    private func apply(_ fetched: BackendAPI.LessonDetail) {
+        detail = fetched
+        let book = SpeakerBook.infer(
+            from: fetched.segments,
+            teacher: fetched.teacher ?? info.teacher
+        )
+        lines = TranscriptLine.build(from: fetched.segments, speakers: book)
+        if let text = fetched.summary, !text.isEmpty {
+            summary = renderedMarkdown(text)
+        }
+        shareText = lessonShareText(summary: fetched.summary, segments: fetched.segments)
+        player.track(fetched.segments)
     }
 
-    private func setSummary(_ text: String?) {
-        summaryText = text
-        summary = text.map(renderedMarkdown)
-    }
-
-    private func generateSummary() async {
-        summarizing = true
-        errorMessage = nil
+    private func writeSummary() async {
+        guard !isSummarizing else { return }
+        isSummarizing = true
+        summaryError = nil
+        defer { isSummarizing = false }
         do {
             let text = try await api.summarize(id: info.id)
-            setSummary(text)
-            // Keep the stored copy current, or the summary would vanish the
-            // next time the lesson is opened without a server.
-            if var stored = detail {
-                stored.summary = text
-                detail = stored
-                OfflineCache.save(stored, as: OfflineCache.Key.lesson(info.id))
+            summary = renderedMarkdown(text)
+            detail?.summary = text
+            if let detail {
+                OfflineCache.save(detail, as: OfflineCache.Key.lesson(info.id))
+                shareText = lessonShareText(summary: text, segments: detail.segments)
             }
         } catch {
-            errorMessage = error.localizedDescription
+            summaryError = error.localizedDescription
         }
-        summarizing = false
+    }
+}
+
+// MARK: - Summary states
+
+/// The shape of the paragraph that is coming. Used while the lesson loads and
+/// while the server writes one, which takes seconds — long enough that a page
+/// jumping from a spinner to three paragraphs reads as a different page.
+struct SummaryPlaceholder: View {
+    @State private var dim = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            ForEach([1.0, 0.97, 0.93, 0.55], id: \.self) { fraction in
+                Capsule()
+                    .fill(Color.primary.opacity(0.09))
+                    .frame(height: 13)
+                    .scaleEffect(x: fraction, anchor: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(dim ? 0.45 : 1)
+        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: dim)
+        .onAppear { dim = true }
+    }
+}
+
+/// A lesson without a summary is an oddity — the server writes one when the
+/// recording ends — so this is a sentence and a small button, not an empty
+/// state taking over the page and handing the reader a job.
+struct MissingSummary: View {
+    let isOnline: Bool
+    let message: String?
+    let write: () async -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Für diese Stunde wurde keine Zusammenfassung geschrieben.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            if let message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button {
+                Task { await write() }
+            } label: {
+                Label("Nachtragen lassen", systemImage: "sparkles")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!isOnline)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
