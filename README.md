@@ -56,6 +56,14 @@ period afterwards, so the archive matches the timetable rather than the tape.
 
 ### The lesson archive
 
+Stunden is a grid of folders, one per subject, each in its own colour with its
+own icon. The folders come from WebUntis rather than from what happens to have
+been recorded, so every subject you take has its place from the first launch and
+an empty archive still looks like your own timetable. **Sonstige** collects
+whatever was recorded while no lesson was running — the holidays, an evening, a
+free period — and is the one folder the timetable cannot supply. Open a folder
+and the subject's recordings are there, a section per school day.
+
 Transcript and audio both stay on the server. Tap any line of a transcript and
 the audio plays from that moment. One tap per lesson also produces a summary of
 what was taught, which is cached, so the second look is free.

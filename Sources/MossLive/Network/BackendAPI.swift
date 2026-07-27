@@ -122,6 +122,21 @@ struct BackendAPI {
         let lessons: [Lesson]
     }
 
+    /// One subject of the school year — a folder in the Stunden grid.
+    struct SubjectInfo: Codable, Identifiable, Sendable, Equatable {
+        /// The WebUntis code, e.g. `MAT`.
+        let short: String
+        /// The name a person would use, when WebUntis carries a separate one.
+        let long: String?
+        /// What the folder is called — and byte for byte the string a recording
+        /// of this subject is labeled with, which is how a folder finds its
+        /// recordings without a second lookup.
+        let name: String
+        let teachers: [String]
+
+        var id: String { name }
+    }
+
     struct APIError: LocalizedError {
         let message: String
         /// Nothing answered at the other end, as opposed to something answering
@@ -208,6 +223,16 @@ struct BackendAPI {
     func timetableDay(date: String? = nil) async throws -> TimetableDay {
         let query = date.map { [URLQueryItem(name: "date", value: $0)] }
         return try await JSONDecoder().decode(TimetableDay.self, from: request("/timetable/day", query: query))
+    }
+
+    /// The subjects the Stunden grid draws its folders from. Empty when no
+    /// timetable is connected, which leaves the grid to the archive alone.
+    func timetableSubjects() async throws -> [SubjectInfo] {
+        struct Response: Decodable {
+            let subjects: [SubjectInfo]
+        }
+        let data = try await request("/timetable/subjects")
+        return try JSONDecoder().decode(Response.self, from: data).subjects
     }
 
     func submitWebUntisCredentials(school: String, username: String, password: String) async throws {
