@@ -1,17 +1,19 @@
 import SwiftUI
 
-/// One lesson as a single document: what it was about, then what was said.
+/// One lesson, as three cards on the grouped canvas: what it was about, the
+/// recording, and what was said.
 ///
-/// There is no switch between Zusammenfassung and Transkript, because there is
-/// nothing to switch — they are the top and the bottom of the same page, and a
-/// switch that rebuilt hundreds of transcript lines on every tap was the
-/// slowest thing on the screen.
+/// The parts of a lesson are different kinds of thing — a paragraph you read, a
+/// control you operate, a document you scan — and putting them in one list made
+/// them all look like settings rows. Each gets its own card, on the same canvas
+/// the subject folders sit on, so the tab holds together.
 ///
-/// The rest of the old lag was in what the page recomputed while it simply sat
-/// there. The summary was re-parsed from Markdown on every redraw, and every
-/// redraw was driven by the audio player's clock, which ticks seven times a
-/// second. The summary is now parsed once, when it arrives, and the spoken line
-/// comes from `player.activeIndex`, which changes when the line changes.
+/// There is no switch between Zusammenfassung and Transkript: they are the top
+/// and the bottom of one page, and a switch that rebuilt hundreds of transcript
+/// lines on every tap was the slowest thing on the screen. The summary is
+/// parsed from Markdown once when it arrives, and the spoken line comes from
+/// `player.activeIndex`, which changes when the line changes rather than seven
+/// times a second.
 struct LessonDetailView: View {
     let api: BackendAPI
     let info: BackendAPI.LessonInfo
@@ -23,6 +25,7 @@ struct LessonDetailView: View {
     /// characters rather than attributes.
     @State private var summary: AttributedString?
     @State private var summaryText: String?
+    @State private var peaks: [Double] = []
     @State private var loadError: Error?
     @State private var summarizing = false
     @State private var errorMessage: String?
@@ -30,70 +33,52 @@ struct LessonDetailView: View {
 
     /// The readable column. Text set across the full width of an iPad is a
     /// wall; every reading app on the system stops somewhere around here.
-    private static let column: CGFloat = 680
-
-    private enum Anchor: Hashable {
-        case transcript
-    }
+    private static let column: CGFloat = 700
 
     var body: some View {
         Group {
             if let detail {
-                document(detail)
+                page(detail)
             } else if let loadError {
                 ErrorState(loadError) { await load() }
+                    .groupedScreen()
             } else {
                 ProgressView("Lade Stunde…")
+                    .groupedScreen()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).ignoresSafeArea())
         .navigationTitle(info.subject ?? info.title ?? "Aufnahme")
-        .navigationBarTitleDisplayMode(.inline)
-        .onDisappear { player.stop() }
-        .task { await load() }
-    }
-
-    // MARK: - The page
-
-    private func document(_ detail: BackendAPI.LessonDetail) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    header
-                    summaryBlock
-                    if !detail.segments.isEmpty {
-                        transcriptBlock(detail)
-                    }
-                }
-                .frame(maxWidth: Self.column)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 22)
-                .padding(.top, 14)
-                .padding(.bottom, 44)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) { audioBar }
-            .toolbar {
-                // Inside the reader, so the button can reach the proxy. Going
-                // back up is the scroll view's own job (a tap on the status
-                // bar), so there is only one direction worth offering.
-                if !detail.segments.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                proxy.scrollTo(Anchor.transcript, anchor: .top)
-                            }
-                        } label: {
-                            Label("Zum Transkript", systemImage: "text.alignleft")
-                        }
-                    }
-                }
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            if let detail {
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(item: lessonShareText(summary: summaryText, segments: detail.segments)) {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
             }
+        }
+        .onDisappear { player.stop() }
+        .task { await load() }
+    }
+
+    // MARK: - The page
+
+    private func page(_ detail: BackendAPI.LessonDetail) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    facts
+                    summaryCard
+                    if info.hasAudio { playerCard }
+                    if !detail.segments.isEmpty { transcriptCard(detail) }
+                }
+                .frame(maxWidth: Self.column)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+            }
+            .groupedScreen()
             // Playback carries the page with it, the way a transcript that can
             // be played is expected to behave.
             .onChange(of: player.activeIndex) { _, index in
@@ -105,67 +90,58 @@ struct LessonDetailView: View {
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        let style = subjectStyle(for: info.subject)
-        return HStack(alignment: .top, spacing: 14) {
-            Image(systemName: style.symbol)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .background(style.color.gradient, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(info.title ?? info.subject ?? "Aufnahme")
-                    .font(.title2.weight(.semibold))
-                Text(metaLine)
-                    .font(.subheadline)
+    /// When it was, where, and with whom — as chips rather than three list rows
+    /// saying one fact each.
+    private var facts: some View {
+        HStack(spacing: 8) {
+            ForEach(chips, id: \.self) { chip in
+                Text(chip)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
             }
             Spacer(minLength: 0)
         }
+        .padding(.top, 2)
     }
 
-    /// Date, time, room and teacher on one line, where three list rows used to
-    /// say the same thing one fact at a time.
-    private var metaLine: String {
+    private var chips: [String] {
         let start = info.startedAt
         let end = start.addingTimeInterval(info.durationSeconds)
-        var parts = [
-            start.formatted(date: .abbreviated, time: .omitted)
-                + " · \(start.formatted(date: .omitted, time: .shortened))–"
-                + end.formatted(date: .omitted, time: .shortened),
+        var out = [
+            start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                + ", " + start.formatted(date: .omitted, time: .shortened)
+                + "–" + end.formatted(date: .omitted, time: .shortened),
         ]
-        if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
-        if let teacher = info.teacher, !teacher.isEmpty { parts.append(teacher) }
-        return parts.joined(separator: " · ")
+        if let room = info.room, !room.isEmpty { out.append("Raum \(room)") }
+        if let teacher = info.teacher, !teacher.isEmpty { out.append(teacher) }
+        return out
     }
 
-    private func heading(_ text: String) -> some View {
-        Text(text)
-            .font(.title3.weight(.semibold))
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    // MARK: - Cards
 
-    /// The recording is only playable if it is already on the iPad or can
-    /// still be fetched; offering a player that cannot start is worse than not
-    /// offering one.
-    @ViewBuilder
-    private var audioBar: some View {
-        if info.hasAudio, model.connectivity.isOnline || BackendAPI.cachedAudio(id: info.id) != nil {
-            LessonAudioBar(player: player, api: api, lessonId: info.id)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(.bar)
+    private func cardHeader(_ title: String, systemImage: String, trailing: String? = nil) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: systemImage)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            if let trailing {
+                Text(trailing)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
-    // MARK: - Zusammenfassung
-
-    @ViewBuilder
-    private var summaryBlock: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            heading("Zusammenfassung")
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            cardHeader("Zusammenfassung", systemImage: "sparkles")
             if let summary {
                 Text(summary)
                     .font(.body)
@@ -175,28 +151,13 @@ struct LessonDetailView: View {
             } else if summarizing {
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("Wird geschrieben…")
-                        .foregroundStyle(.secondary)
+                    Text("Wird geschrieben…").foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 6)
+                .font(.callout)
+                .padding(.vertical, 2)
             } else {
                 summaryPrompt
             }
-        }
-    }
-
-    private var summaryPrompt: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(model.connectivity.isOnline
-                ? "Noch keine. Die KI schreibt sie aus dem Transkript dieser Stunde."
-                : "Noch keine. Dafür wird der Server gebraucht.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Button("Zusammenfassung erstellen") {
-                Task { await generateSummary() }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(summarizing || !model.connectivity.isOnline)
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote)
@@ -208,12 +169,40 @@ struct LessonDetailView: View {
         .cardSurface()
     }
 
-    // MARK: - Transkript
+    /// The server writes summaries by itself when a recording ends, so an
+    /// absent one means it was skipped or it failed — not that nobody has
+    /// pressed the button yet.
+    private var summaryPrompt: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(model.connectivity.isOnline
+                ? "Für diese Stunde wurde keine geschrieben."
+                : "Für diese Stunde wurde keine geschrieben. Dafür wird der Server gebraucht.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Jetzt erstellen") {
+                Task { await generateSummary() }
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+            .disabled(summarizing || !model.connectivity.isOnline)
+        }
+    }
 
-    private func transcriptBlock(_ detail: BackendAPI.LessonDetail) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            heading("Transkript")
-                .id(Anchor.transcript)
+    private var playerCard: some View {
+        LessonPlayer(player: player, api: api, lessonId: info.id, peaks: peaks)
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .cardSurface()
+    }
+
+    private func transcriptCard(_ detail: BackendAPI.LessonDetail) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            cardHeader(
+                "Transkript",
+                systemImage: "text.alignleft",
+                trailing: "\(detail.segments.count) Zeilen"
+            )
             LazyVStack(alignment: .leading, spacing: 2) {
                 ForEach(detail.segments.indices, id: \.self) { index in
                     line(detail.segments[index], isActive: player.activeIndex == index)
@@ -224,9 +213,12 @@ struct LessonDetailView: View {
                 Text("Zeile antippen, um sie ab dieser Stelle anzuhören.")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 4)
+                    .padding(.top, 2)
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
     }
 
     /// A line is only a control where there is something to play.
@@ -250,12 +242,12 @@ struct LessonDetailView: View {
 
     private func lineBody(_ segment: TranscriptSegment, isActive: Bool) -> some View {
         SegmentRow(segment: segment, isPartial: false, isActive: isActive)
-            .padding(.vertical, 4)
+            .padding(.vertical, 5)
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 isActive ? Theme.accent.opacity(0.12) : .clear,
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
             )
     }
 
@@ -268,6 +260,10 @@ struct LessonDetailView: View {
         if let stored = OfflineCache.load(BackendAPI.LessonDetail.self, key: key) {
             apply(stored)
         }
+        if peaks.isEmpty,
+           let stored = OfflineCache.load([Double].self, key: OfflineCache.Key.waveform(info.id)) {
+            peaks = stored
+        }
         do {
             let loaded = try await api.lesson(id: info.id)
             apply(loaded)
@@ -275,6 +271,16 @@ struct LessonDetailView: View {
         } catch {
             if detail == nil { loadError = error }
         }
+        await loadWaveform()
+    }
+
+    /// The waveform is decoration on a control that works without it, so a
+    /// server too old to know the endpoint just gets a plain track.
+    private func loadWaveform() async {
+        guard info.hasAudio, peaks.isEmpty else { return }
+        guard let fresh = try? await api.waveform(id: info.id), !fresh.isEmpty else { return }
+        peaks = fresh
+        OfflineCache.save(fresh, as: OfflineCache.Key.waveform(info.id))
     }
 
     /// Everything the page derives from a loaded lesson, worked out once here

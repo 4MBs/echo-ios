@@ -65,11 +65,14 @@ free period — and is the one folder the timetable cannot supply. Open a folder
 and the subject's recordings are there, each row leading with its date and the
 opening of its summary, so the list reads for what was taught rather than when.
 
-A lesson is one page: what it was about, then what was said. Transcript and
-audio both stay on the server. Tap any line of a transcript and the audio plays
-from that moment, and the page follows the recording as it goes. One tap per
-lesson also produces a summary of what was taught, which is cached, so the
-second look is free.
+A lesson is three cards: what it was about, the recording, and what was said.
+The summary writes itself when the recording ends — the archive is a dozen
+lessons of one subject at nearly the same time of day, and being told what each
+one covered should not cost a button press per lesson. Transcript and audio both
+stay on the server. The recording plays from its own waveform, so the silence
+before the lesson started is visible rather than something you drag to find, and
+tapping any line of the transcript plays from that moment while the page follows
+along.
 
 ### Lernen
 
