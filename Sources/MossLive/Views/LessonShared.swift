@@ -241,50 +241,64 @@ struct EmptyState: View {
     }
 }
 
-/// One lesson as a list row: subject tile, title, meta line, and small
-/// icons for what the lesson already has (summary, duration).
+/// One lesson as a row inside its subject's folder.
+///
+/// The date leads, because inside a folder that already says "Mathematik" the
+/// date is the only thing that tells one recording from the next — everything
+/// the old row led with (the subject tile, the subject name, the room) was the
+/// same on every row down the page. What follows it is the opening of the
+/// summary, so the list can be read for what was taught rather than for when.
 struct LessonRow: View {
     let info: BackendAPI.LessonInfo
 
     var body: some View {
-        let style = subjectStyle(for: info.subject)
-        HStack(spacing: 12) {
-            IconTile(systemName: style.symbol, color: style.color)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(info.startedAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
+                    .font(.body)
                     .lineLimit(1)
-                Text(secondaryLine)
+                Text(timeLine)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            HStack(spacing: 8) {
-                if info.hasSummary {
-                    Image(systemName: "text.badge.star")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if info.hasAudio {
+                    Image(systemName: "waveform")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
-                Text(durationChip)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
+            secondLine
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
-    private var durationChip: String {
+    /// When it started and how long it ran. Not the room: inside a folder that
+    /// is the same on nearly every row, and the lesson's own page says it.
+    private var timeLine: String {
+        info.startedAt.formatted(date: .omitted, time: .shortened) + " · " + durationText
+    }
+
+    private var durationText: String {
         let minutes = Int(info.durationSeconds) / 60
         return minutes > 0 ? "\(minutes) Min" : "\(Int(info.durationSeconds)) s"
     }
 
-    /// Start-end time range, plus the room when known.
-    private var secondaryLine: String {
-        let start = info.startedAt
-        let end = start.addingTimeInterval(info.durationSeconds)
-        let range = "\(start.formatted(date: .omitted, time: .shortened)) - "
-            + end.formatted(date: .omitted, time: .shortened)
-        var parts = [range]
-        if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
-        return parts.joined(separator: " · ")
+    /// Two lines of the summary — or an honest word about there not being one,
+    /// which is a state worth seeing at a glance rather than a blank row.
+    @ViewBuilder
+    private var secondLine: some View {
+        if let excerpt = info.summaryExcerpt, !excerpt.isEmpty {
+            Text(excerpt)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        } else {
+            Text(info.segmentCount > 0 ? "Noch keine Zusammenfassung" : "Kein Transkript")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
     }
 }

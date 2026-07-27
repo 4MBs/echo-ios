@@ -59,12 +59,12 @@ struct TranscriptEmptyState: View {
 struct SegmentRow: View {
     let segment: TranscriptSegment
     let isPartial: Bool
+    /// The line currently being spoken, while the recording plays.
+    var isActive = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(timestamp)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
+            stamp
                 .frame(width: 42, alignment: .trailing)
             Text(segment.text)
                 .font(.body)
@@ -72,6 +72,19 @@ struct SegmentRow: View {
                 .italic(isPartial)
                 .foregroundStyle(isPartial ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Written as two branches rather than one conditional style: `.tertiary`
+    /// and a `Color` are different types, and the ternary would need erasing
+    /// through `AnyShapeStyle` to sit in one expression.
+    @ViewBuilder
+    private var stamp: some View {
+        let text = Text(timestamp).font(.caption.monospacedDigit())
+        if isActive {
+            text.foregroundStyle(Theme.accent)
+        } else {
+            text.foregroundStyle(.tertiary)
         }
     }
 
