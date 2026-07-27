@@ -1,43 +1,71 @@
 import SwiftUI
 
-/// SF Symbol + color for a school subject's list icon tile.
+/// SF Symbol + color for a school subject's icon tile and folder.
 struct SubjectStyle {
     let symbol: String
     let color: Color
 }
 
-/// Best-effort keyword match from subject name to icon style.
+/// A handful of subjects more than the system palette has distinct colours for.
+/// Same character as the system ones — saturated, mid-brightness — so a folder
+/// built from one sits beside a folder built from `.blue` without looking like
+/// it came from somewhere else.
+private extension Color {
+    static let subjectTerracotta = Color(hue: 0.045, saturation: 0.60, brightness: 0.82)
+    static let subjectAmber = Color(hue: 0.108, saturation: 0.82, brightness: 0.86)
+    static let subjectSteel = Color(hue: 0.575, saturation: 0.32, brightness: 0.62)
+    static let subjectPlum = Color(hue: 0.885, saturation: 0.48, brightness: 0.68)
+}
+
+/// The catch-all folder: everything recorded while no lesson was running — the
+/// holidays, an evening, a free period.
+let otherSubjectName = "Sonstige"
+
+/// Best-effort keyword match from a subject name to its icon and colour.
+///
+/// Matched against the name the backend labels a recording with, which is
+/// WebUntis' long name where it has one (`Mathematik`, `Wirtschaft/Politik`,
+/// `MINT - Mittelstufe`) and the short code where it does not. Keywords are
+/// tried in order, so a compound name lands on the more specific entry:
+/// `Wirtschaft/Politik` is its own subject rather than either half.
 func subjectStyle(for subject: String?) -> SubjectStyle {
-    guard let subject = subject?.lowercased() else {
-        return SubjectStyle(symbol: "graduationcap.fill", color: .gray)
+    let fallback = SubjectStyle(symbol: "graduationcap.fill", color: .blue)
+    guard let subject = subject?.lowercased(), !subject.isEmpty else {
+        return SubjectStyle(symbol: "tray.full.fill", color: .gray)
     }
     let map: [(String, SubjectStyle)] = [
+        ("sonstige", .init(symbol: "tray.full.fill", color: .gray)),
+        // compounds first — each of these contains a keyword further down
+        ("wirtschaft", .init(symbol: "chart.line.uptrend.xyaxis", color: .subjectAmber)),
+        ("mint", .init(symbol: "gearshape.2.fill", color: .cyan)),
+        ("förderband", .init(symbol: "sparkles", color: .yellow)),
+        ("forderband", .init(symbol: "sparkles", color: .yellow)),
+        ("hospitation", .init(symbol: "eye.fill", color: .subjectSteel)),
         ("mathe", .init(symbol: "x.squareroot", color: .blue)),
         ("math", .init(symbol: "x.squareroot", color: .blue)),
         ("physik", .init(symbol: "atom", color: .indigo)),
         ("chemie", .init(symbol: "testtube.2", color: .purple)),
         ("bio", .init(symbol: "leaf.fill", color: .green)),
-        ("informatik", .init(symbol: "desktopcomputer", color: .cyan)),
+        ("informatik", .init(symbol: "desktopcomputer", color: .subjectSteel)),
         ("deutsch", .init(symbol: "text.book.closed.fill", color: .red)),
         ("englisch", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("franz", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("latein", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("spanisch", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("geschichte", .init(symbol: "clock.fill", color: .brown)),
+        ("franz", .init(symbol: "character.book.closed.fill", color: .subjectPlum)),
+        ("latein", .init(symbol: "building.columns.fill", color: .subjectTerracotta)),
+        ("spanisch", .init(symbol: "character.book.closed.fill", color: .yellow)),
+        ("geschichte", .init(symbol: "hourglass", color: .brown)),
         ("erdkunde", .init(symbol: "globe.europe.africa.fill", color: .teal)),
         ("geo", .init(symbol: "globe.europe.africa.fill", color: .teal)),
-        ("musik", .init(symbol: "music.note", color: .pink)),
-        ("kunst", .init(symbol: "paintpalette.fill", color: .mint)),
-        ("sport", .init(symbol: "figure.run", color: .green)),
+        ("musik", .init(symbol: "music.note", color: .subjectPlum)),
+        ("kunst", .init(symbol: "paintpalette.fill", color: .pink)),
+        ("sport", .init(symbol: "figure.run", color: .mint)),
         ("religion", .init(symbol: "book.closed.fill", color: .indigo)),
-        ("ethik", .init(symbol: "person.2.fill", color: .indigo)),
-        ("politik", .init(symbol: "building.columns.fill", color: .brown)),
-        ("wirtschaft", .init(symbol: "chart.line.uptrend.xyaxis", color: .green)),
+        ("ethik", .init(symbol: "person.2.fill", color: .subjectSteel)),
+        ("politik", .init(symbol: "building.columns.fill", color: .subjectAmber)),
     ]
     for (keyword, style) in map where subject.contains(keyword) {
         return style
     }
-    return SubjectStyle(symbol: "graduationcap.fill", color: .blue)
+    return fallback
 }
 
 /// Settings-style list icon: white glyph on a colored rounded square.

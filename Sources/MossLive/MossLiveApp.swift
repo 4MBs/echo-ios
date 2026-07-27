@@ -137,10 +137,10 @@ enum AppTab: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .aufnahme: "waveform"
-        // A calendar, not a bookshelf: this tab holds one folder per school
-        // day. The shelf read as books, and Bibliothek two rows below is
-        // books — two book glyphs in a list of five is one too many.
-        case .stunden: "calendar"
+        // A folder, not a bookshelf: this tab holds one folder per subject.
+        // The shelf read as books, and Bibliothek two rows below is books —
+        // two book glyphs in a list of five is one too many.
+        case .stunden: "folder"
         case .lernen: "brain.head.profile"
         case .bibliothek: "book.closed"
         case .chat: "bubble.left.and.text.bubble.right"

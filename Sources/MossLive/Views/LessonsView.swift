@@ -1,19 +1,24 @@
 import SwiftUI
 
-/// "Stunden": the archive grouped into one folder per school day. A folder
-/// opens the day's lessons; a lesson opens Zusammenfassung/Transkript.
-/// Abfragen lives in the Lernen tab.
+/// "Stunden": the archive as a grid of folders, one per subject.
+///
+/// The folders come from the timetable rather than from the archive, so a
+/// subject has its place before its first recording does and an empty archive
+/// still looks like your own school week. "Sonstige" is the catch-all for
+/// everything recorded while no lesson was running — the holidays, an evening,
+/// a free period — which is the one folder that cannot come from WebUntis.
+///
+/// A folder opens the subject's recordings by day; a lesson opens
+/// Zusammenfassung/Transkript. Abfragen lives in the Lernen tab.
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
 
     @State private var lessons: [BackendAPI.LessonInfo] = []
+    @State private var catalogue: [BackendAPI.SubjectInfo] = []
     @State private var loading = true
     @State private var loadError: Error?
-    @State private var subjectFilter: String?
-    @State private var newestFirst = true
+    @State private var sort: FolderSort = .name
     @State private var searchText = ""
-    @State private var dayToDelete: Date?
-    @State private var actionError: String?
 
     private var api: BackendAPI { model.api }
 
@@ -21,243 +26,284 @@ struct LessonsView: View {
         NavigationStack {
             content
                 .navigationTitle("Stunden")
-                .searchable(text: $searchText, prompt: "Suchen")
+                .searchable(text: $searchText, prompt: "Fach oder Stunde suchen")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        filterMenu
+                        sortMenu
                     }
                 }
         }
         .task { await load() }
     }
 
-    private var subjects: [String] {
-        Array(Set(lessons.compactMap(\.subject))).sorted()
-    }
+    /// How the grid is laid out. `.name` is the default because a folder you
+    /// are looking for is one you already know the name of.
+    enum FolderSort: String, CaseIterable, Identifiable {
+        case name, recent, count
 
-    /// One folder per calendar day, lessons inside in chronological order.
-    private var days: [(day: Date, lessons: [BackendAPI.LessonInfo])] {
-        var filtered = lessons
-        if let subjectFilter {
-            filtered = filtered.filter { $0.subject == subjectFilter }
-        }
-        let query = searchText.trimmingCharacters(in: .whitespaces)
-        if !query.isEmpty {
-            filtered = filtered.filter {
-                ($0.title ?? "").localizedCaseInsensitiveContains(query)
-                    || ($0.subject ?? "").localizedCaseInsensitiveContains(query)
-                    || ($0.teacher ?? "").localizedCaseInsensitiveContains(query)
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .name: "Name"
+            case .recent: "Zuletzt aufgenommen"
+            case .count: "Anzahl Aufnahmen"
             }
         }
-        let grouped = Dictionary(grouping: filtered) { Calendar.current.startOfDay(for: $0.startedAt) }
-        return grouped
-            .sorted { newestFirst ? $0.key > $1.key : $0.key < $1.key }
-            .map { ($0.key, $0.value.sorted { $0.startedAt < $1.startedAt }) }
     }
+
+    // MARK: - Folders
+
+    /// The grid's folders: every subject of the school year, plus any subject
+    /// only the archive still remembers, plus Sonstige.
+    private var folders: [SubjectFolder] {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        let matching = query.isEmpty ? lessons : lessons.filter { $0.matches(query) }
+
+        var filed: [String: [BackendAPI.LessonInfo]] = [:]
+        var unfiled: [BackendAPI.LessonInfo] = []
+        for lesson in matching {
+            let subject = (lesson.subject ?? "").trimmingCharacters(in: .whitespaces)
+            if subject.isEmpty {
+                unfiled.append(lesson)
+            } else {
+                filed[subject, default: []].append(lesson)
+            }
+        }
+
+        // A search narrows the grid to folders that answer it — either by name,
+        // or by holding a recording that does.
+        var names = Set(filed.keys)
+        if query.isEmpty {
+            names.formUnion(catalogue.map(\.name))
+        } else {
+            names.formUnion(catalogue.map(\.name).filter { $0.localizedCaseInsensitiveContains(query) })
+        }
+
+        var out = names.map { name in
+            SubjectFolder(name: name, lessons: (filed[name] ?? []).sortedNewestFirst, isOther: false)
+        }
+        out.sort(by: sort.areInOrder)
+
+        let wantsOther = query.isEmpty
+            || !unfiled.isEmpty
+            || otherSubjectName.localizedCaseInsensitiveContains(query)
+        if wantsOther {
+            out.append(SubjectFolder(name: otherSubjectName, lessons: unfiled.sortedNewestFirst, isOther: true))
+        }
+        return out
+    }
+
+    // MARK: - Body
 
     @ViewBuilder
     private var content: some View {
         if loading {
             ProgressView("Lade Stunden…")
                 .groupedScreen()
-        } else if lessons.isEmpty, let loadError {
+        } else if lessons.isEmpty, catalogue.isEmpty, let loadError {
             ErrorState(loadError) { await load() }
                 .groupedScreen()
-        } else if lessons.isEmpty {
+        } else if lessons.isEmpty, catalogue.isEmpty {
             ContentUnavailableView {
-                Label("Noch keine Stunden", systemImage: "calendar")
+                Label("Noch keine Stunden", systemImage: "folder")
             } description: {
-                Text("Nimm eine Stunde auf, dann erscheint sie hier.")
+                Text(
+                    "Nimm eine Stunde auf, dann erscheint sie hier. "
+                        + "Mit verbundenem Stundenplan steht für jedes Fach schon ein Ordner bereit."
+                )
             }
             .groupedScreen()
+        } else if folders.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+                .groupedScreen()
         } else {
-            List {
-                ForEach(days, id: \.day) { entry in
-                    NavigationLink {
-                        DayView(api: api, day: entry.day, lessons: entry.lessons) {
-                            await load()
-                        }
-                    } label: {
-                        DayRow(day: entry.day, lessons: entry.lessons)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        // Deleting is the server's copy to delete, so it waits
-                        // for the server rather than half-happening here.
-                        if model.connectivity.isOnline {
-                            Button(role: .destructive) {
-                                dayToDelete = entry.day
-                            } label: {
-                                Label("Löschen", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-            }
-            .listStyle(.insetGrouped)
-            .refreshable { await load() }
-            .confirmationDialog(
-                "Alle Stunden dieses Tages löschen?",
-                isPresented: Binding(
-                    get: { dayToDelete != nil },
-                    set: { if !$0 { dayToDelete = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Tag löschen", role: .destructive) {
-                    if let day = dayToDelete {
-                        Task { await deleteDay(day) }
-                    }
-                }
-                Button("Abbrechen", role: .cancel) {}
-            }
-            .alert(
-                "Löschen fehlgeschlagen",
-                isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(actionError ?? "")
-            }
+            grid
         }
     }
 
-    /// Subject filter and sort order, as a standard toolbar menu.
-    private var filterMenu: some View {
-        Menu {
-            Picker("Fach", selection: $subjectFilter) {
-                Text("Alle Fächer").tag(String?.none)
-                ForEach(subjects, id: \.self) { subject in
-                    Text(subject).tag(String?.some(subject))
+    private var grid: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 20)],
+                spacing: 22
+            ) {
+                ForEach(folders) { folder in
+                    NavigationLink {
+                        SubjectView(api: api, folder: folder) { await load() }
+                    } label: {
+                        SubjectFolderTile(
+                            name: folder.name,
+                            count: folder.lessons.count,
+                            style: subjectStyle(for: folder.name)
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            Divider()
-            Picker("Sortierung", selection: $newestFirst) {
-                Text("Neueste zuerst").tag(true)
-                Text("Älteste zuerst").tag(false)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .animation(.snappy, value: sort)
+        }
+        .groupedScreen()
+        .refreshable { await load() }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sortierung", selection: $sort) {
+                ForEach(FolderSort.allCases) { option in
+                    Text(option.title).tag(option)
+                }
             }
         } label: {
-            Label(
-                "Filter",
-                systemImage: subjectFilter == nil
-                    ? "line.3.horizontal.decrease.circle"
-                    : "line.3.horizontal.decrease.circle.fill"
-            )
+            Label("Sortieren", systemImage: "arrow.up.arrow.down.circle")
         }
     }
 
+    // MARK: - Loading
+
     private func load() async {
-        let key = OfflineCache.Key.lessons
-        if lessons.isEmpty, let cached = OfflineCache.load([BackendAPI.LessonInfo].self, key: key) {
+        if lessons.isEmpty,
+           let cached = OfflineCache.load([BackendAPI.LessonInfo].self, key: OfflineCache.Key.lessons) {
             lessons = cached
         }
-        loading = lessons.isEmpty
+        if catalogue.isEmpty,
+           let cached = OfflineCache.load(
+               [BackendAPI.SubjectInfo].self,
+               key: OfflineCache.Key.timetableSubjects
+           ) {
+            catalogue = cached
+        }
+        loading = lessons.isEmpty && catalogue.isEmpty
         loadError = nil
+
+        async let recorded = api.listLessons()
+        async let subjects = api.timetableSubjects()
+
         do {
-            let fresh = try await api.listLessons().filter { $0.segmentCount > 0 }
-            lessons = fresh
-            OfflineCache.save(fresh, as: key)
+            let archive = try await recorded
+            let usable = archive.filter { $0.segmentCount > 0 }
+            lessons = usable
+            OfflineCache.save(usable, as: OfflineCache.Key.lessons)
         } catch {
             // The archive is a list of what was recorded on this iPad. Keeping
             // it readable without the server is the whole point of storing it.
             if lessons.isEmpty { loadError = error }
         }
+        // The catalogue is the nicety, not the archive: a server with no
+        // timetable connected — or one too old to know the endpoint — simply
+        // leaves the grid to the subjects that were actually recorded. It has
+        // to be awaited on every path, or the fetch is cancelled on the way out.
+        if let fresh = try? await subjects, !fresh.isEmpty {
+            catalogue = fresh
+            OfflineCache.save(fresh, as: OfflineCache.Key.timetableSubjects)
+        }
         loading = false
     }
-
-    private func deleteDay(_ day: Date) async {
-        let targets = lessons.filter { Calendar.current.isDate($0.startedAt, inSameDayAs: day) }
-        do {
-            for lesson in targets {
-                try await api.deleteLesson(id: lesson.id)
-                BackendAPI.purgeCachedAudio(id: lesson.id)
-            }
-            withAnimation(.snappy) {
-                lessons.removeAll { Calendar.current.isDate($0.startedAt, inSameDayAs: day) }
-            }
-        } catch {
-            actionError = error.localizedDescription
-            await load()
-        }
-    }
 }
 
-/// One day as a folder row: date, lesson count badge, and the subjects.
-struct DayRow: View {
-    let day: Date
+// MARK: - The folder model
+
+/// One folder in the Stunden grid: a subject, and what is filed under it.
+struct SubjectFolder: Identifiable {
+    let name: String
     let lessons: [BackendAPI.LessonInfo]
+    /// The catch-all. It is not a subject, so it is appended after the sort
+    /// rather than taking part in one and never competes alphabetically.
+    let isOther: Bool
 
-    var body: some View {
-        HStack(spacing: 12) {
-            IconTile(systemName: "folder.fill", color: .blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(day.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+    /// Prefixed out of the way so a real subject actually called "Sonstige"
+    /// could still have its own folder beside the catch-all.
+    var id: String { isOther ? "\u{1}sonstige" : name }
+
+    var latest: Date? { lessons.map(\.startedAt).max() }
+}
+
+extension LessonsView.FolderSort {
+    /// Empty folders always trail the ones with something in them: sorting by
+    /// what you last recorded should not put fourteen untouched subjects on top.
+    func areInOrder(_ lhs: SubjectFolder, _ rhs: SubjectFolder) -> Bool {
+        switch self {
+        case .name:
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        case .recent:
+            switch (lhs.latest, rhs.latest) {
+            case let (left?, right?): return left > right
+            case (nil, _?): return false
+            case (_?, nil): return true
+            case (nil, nil): return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
+        case .count:
+            if lhs.lessons.count != rhs.lessons.count {
+                return lhs.lessons.count > rhs.lessons.count
+            }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
-        .padding(.vertical, 2)
-        .badge(lessons.count)
-    }
-
-    private var subtitle: String {
-        let names = lessons.compactMap { $0.subject ?? $0.title }
-        guard !names.isEmpty else {
-            return lessons.count == 1 ? "1 Stunde" : "\(lessons.count) Stunden"
-        }
-        var seen = Set<String>()
-        let unique = names.filter { seen.insert($0).inserted }
-        return unique.joined(separator: ", ")
     }
 }
 
-/// One school day: the day's lessons as a list with standard swipe-to-delete.
-struct DayView: View {
+extension BackendAPI.LessonInfo {
+    /// Free-text match over everything a lesson is named by.
+    func matches(_ query: String) -> Bool {
+        (title ?? "").localizedCaseInsensitiveContains(query)
+            || (subject ?? "").localizedCaseInsensitiveContains(query)
+            || (teacher ?? "").localizedCaseInsensitiveContains(query)
+            || (room ?? "").localizedCaseInsensitiveContains(query)
+    }
+}
+
+extension [BackendAPI.LessonInfo] {
+    var sortedNewestFirst: [BackendAPI.LessonInfo] {
+        sorted { $0.startedAt > $1.startedAt }
+    }
+}
+
+// MARK: - Inside a folder
+
+/// One subject: its recordings, newest day first, a section per school day.
+struct SubjectView: View {
     let api: BackendAPI
-    let day: Date
+    let folder: SubjectFolder
     let onChanged: () async -> Void
 
     @State private var lessons: [BackendAPI.LessonInfo]
     @State private var actionError: String?
-    @Environment(\.dismiss) private var dismiss
 
-    init(
-        api: BackendAPI,
-        day: Date,
-        lessons: [BackendAPI.LessonInfo],
-        onChanged: @escaping () async -> Void
-    ) {
+    init(api: BackendAPI, folder: SubjectFolder, onChanged: @escaping () async -> Void) {
         self.api = api
-        self.day = day
+        self.folder = folder
         self.onChanged = onChanged
-        _lessons = State(initialValue: lessons)
+        _lessons = State(initialValue: folder.lessons)
+    }
+
+    /// The subject's recordings grouped into the days they were made on.
+    private var days: [(day: Date, lessons: [BackendAPI.LessonInfo])] {
+        Dictionary(grouping: lessons) { Calendar.current.startOfDay(for: $0.startedAt) }
+            .sorted { $0.key > $1.key }
+            .map { ($0.key, $0.value.sorted { $0.startedAt < $1.startedAt }) }
     }
 
     var body: some View {
-        List {
-            ForEach(lessons) { lesson in
-                NavigationLink {
-                    LessonDetailView(api: api, info: lesson)
-                } label: {
-                    LessonRow(info: lesson)
+        Group {
+            if lessons.isEmpty {
+                ContentUnavailableView {
+                    Label("Noch keine Aufnahmen", systemImage: subjectStyle(for: folder.name).symbol)
+                } description: {
+                    Text(folder.isOther
+                        ? "Aufnahmen außerhalb des Stundenplans landen hier."
+                        : "Nimm eine Stunde in \(folder.name) auf, dann erscheint sie hier.")
                 }
-            }
-            .onDelete { offsets in
-                let targets = offsets.map { lessons[$0] }
-                Task {
-                    for lesson in targets {
-                        await delete(lesson)
-                    }
-                }
+                .groupedScreen()
+            } else {
+                list
             }
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle(day.formatted(date: .complete, time: .omitted))
+        .navigationTitle(folder.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
+            if !lessons.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) { EditButton() }
             }
         }
         .alert(
@@ -270,6 +316,31 @@ struct DayView: View {
         }
     }
 
+    private var list: some View {
+        List {
+            ForEach(days, id: \.day) { entry in
+                Section(entry.day.formatted(.dateTime.weekday(.wide).day().month(.wide).year())) {
+                    ForEach(entry.lessons) { lesson in
+                        NavigationLink {
+                            LessonDetailView(api: api, info: lesson)
+                        } label: {
+                            LessonRow(info: lesson)
+                        }
+                    }
+                    .onDelete { offsets in
+                        let targets = offsets.map { entry.lessons[$0] }
+                        Task {
+                            for lesson in targets {
+                                await delete(lesson)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
     private func delete(_ lesson: BackendAPI.LessonInfo) async {
         do {
             try await api.deleteLesson(id: lesson.id)
@@ -278,8 +349,6 @@ struct DayView: View {
                 lessons.removeAll { $0.id == lesson.id }
             }
             await onChanged()
-            // the day folder no longer exists in the archive: leave it
-            if lessons.isEmpty { dismiss() }
         } catch {
             actionError = error.localizedDescription
         }
