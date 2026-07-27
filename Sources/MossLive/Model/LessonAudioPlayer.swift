@@ -85,6 +85,16 @@ final class LessonAudioPlayer {
         startTicker()
     }
 
+    /// Move the playhead without deciding whether to play: scrubbing a paused
+    /// recording should leave it paused, and scrubbing a playing one should not
+    /// interrupt it.
+    func seek(to time: Double) {
+        guard let player else { return }
+        player.currentTime = clamp(time, player)
+        currentTime = player.currentTime
+        refreshActiveIndex()
+    }
+
     func togglePlayPause() {
         guard let player else { return }
         if player.isPlaying {

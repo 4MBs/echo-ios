@@ -261,6 +261,17 @@ struct BackendAPI {
         try await JSONDecoder().decode(LessonDetail.self, from: request("/sessions/\(id)"))
     }
 
+    /// The lesson's audio as peaks in 0…1, for the player's scrubber. The
+    /// server derives it from the stored recording, so it exists for lessons
+    /// recorded long before the scrubber did.
+    func waveform(id: String) async throws -> [Double] {
+        struct Response: Decodable {
+            let peaks: [Double]
+        }
+        let data = try await request("/sessions/\(id)/waveform")
+        return try JSONDecoder().decode(Response.self, from: data).peaks
+    }
+
     func summarize(id: String) async throws -> String {
         struct Response: Decodable {
             let summary: String
