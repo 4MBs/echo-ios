@@ -261,7 +261,8 @@ extension [BackendAPI.LessonInfo] {
 
 // MARK: - Inside a folder
 
-/// One subject: its recordings, newest day first, a section per school day.
+/// One subject: its recordings, newest first, each row leading with its date
+/// and the opening of its summary.
 struct SubjectView: View {
     let api: BackendAPI
     let folder: SubjectFolder
@@ -277,11 +278,11 @@ struct SubjectView: View {
         _lessons = State(initialValue: folder.lessons)
     }
 
-    /// The subject's recordings grouped into the days they were made on.
-    private var days: [(day: Date, lessons: [BackendAPI.LessonInfo])] {
-        Dictionary(grouping: lessons) { Calendar.current.startOfDay(for: $0.startedAt) }
-            .sorted { $0.key > $1.key }
-            .map { ($0.key, $0.value.sorted { $0.startedAt < $1.startedAt }) }
+    /// Newest first, and flat: every row now leads with its own date, so a
+    /// header above it saying the same date again is one line of chrome per
+    /// lesson in a list where most days hold exactly one.
+    private var ordered: [BackendAPI.LessonInfo] {
+        lessons.sortedNewestFirst
     }
 
     var body: some View {
@@ -318,22 +319,18 @@ struct SubjectView: View {
 
     private var list: some View {
         List {
-            ForEach(days, id: \.day) { entry in
-                Section(entry.day.formatted(.dateTime.weekday(.wide).day().month(.wide).year())) {
-                    ForEach(entry.lessons) { lesson in
-                        NavigationLink {
-                            LessonDetailView(api: api, info: lesson)
-                        } label: {
-                            LessonRow(info: lesson)
-                        }
-                    }
-                    .onDelete { offsets in
-                        let targets = offsets.map { entry.lessons[$0] }
-                        Task {
-                            for lesson in targets {
-                                await delete(lesson)
-                            }
-                        }
+            ForEach(ordered) { lesson in
+                NavigationLink {
+                    LessonDetailView(api: api, info: lesson)
+                } label: {
+                    LessonRow(info: lesson)
+                }
+            }
+            .onDelete { offsets in
+                let targets = offsets.map { ordered[$0] }
+                Task {
+                    for lesson in targets {
+                        await delete(lesson)
                     }
                 }
             }

@@ -62,11 +62,14 @@ been recorded, so every subject you take has its place from the first launch and
 an empty archive still looks like your own timetable. **Sonstige** collects
 whatever was recorded while no lesson was running — the holidays, an evening, a
 free period — and is the one folder the timetable cannot supply. Open a folder
-and the subject's recordings are there, a section per school day.
+and the subject's recordings are there, each row leading with its date and the
+opening of its summary, so the list reads for what was taught rather than when.
 
-Transcript and audio both stay on the server. Tap any line of a transcript and
-the audio plays from that moment. One tap per lesson also produces a summary of
-what was taught, which is cached, so the second look is free.
+A lesson is one page: what it was about, then what was said. Transcript and
+audio both stay on the server. Tap any line of a transcript and the audio plays
+from that moment, and the page follows the recording as it goes. One tap per
+lesson also produces a summary of what was taught, which is cached, so the
+second look is free.
 
 ### Lernen
 

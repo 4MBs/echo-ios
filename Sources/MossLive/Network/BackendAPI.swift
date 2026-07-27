@@ -11,6 +11,9 @@ struct BackendAPI {
         let speechSeconds: Double
         let durationSeconds: Double
         let hasSummary: Bool
+        /// The opening of the summary, so the lesson list can say what the
+        /// lesson was about instead of only when it was.
+        let summaryExcerpt: String?
         let hasAudio: Bool
         let title: String?
         let subject: String?
@@ -25,6 +28,7 @@ struct BackendAPI {
             case speechSeconds = "speech_seconds"
             case durationSeconds = "duration_seconds"
             case hasSummary = "has_summary"
+            case summaryExcerpt = "summary_excerpt"
             case hasAudio = "has_audio"
         }
 
@@ -37,6 +41,8 @@ struct BackendAPI {
             speechSeconds = try c.decode(Double.self, forKey: .speechSeconds)
             durationSeconds = try c.decode(Double.self, forKey: .durationSeconds)
             hasSummary = try c.decodeIfPresent(Bool.self, forKey: .hasSummary) ?? false
+            // tolerate a server that predates the lesson list showing previews
+            summaryExcerpt = try c.decodeIfPresent(String.self, forKey: .summaryExcerpt)
             // tolerate a not-yet-updated server (field added alongside audio recording)
             hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
             title = try c.decodeIfPresent(String.self, forKey: .title)
