@@ -1,43 +1,71 @@
 import SwiftUI
 
-/// SF Symbol + color for a school subject's list icon tile.
+/// SF Symbol + color for a school subject's icon tile and folder.
 struct SubjectStyle {
     let symbol: String
     let color: Color
 }
 
-/// Best-effort keyword match from subject name to icon style.
+/// A handful of subjects more than the system palette has distinct colours for.
+/// Same character as the system ones — saturated, mid-brightness — so a folder
+/// built from one sits beside a folder built from `.blue` without looking like
+/// it came from somewhere else.
+private extension Color {
+    static let subjectTerracotta = Color(hue: 0.045, saturation: 0.60, brightness: 0.82)
+    static let subjectAmber = Color(hue: 0.108, saturation: 0.82, brightness: 0.86)
+    static let subjectSteel = Color(hue: 0.575, saturation: 0.32, brightness: 0.62)
+    static let subjectPlum = Color(hue: 0.885, saturation: 0.48, brightness: 0.68)
+}
+
+/// The catch-all folder: everything recorded while no lesson was running — the
+/// holidays, an evening, a free period.
+let otherSubjectName = "Sonstige"
+
+/// Best-effort keyword match from a subject name to its icon and colour.
+///
+/// Matched against the name the backend labels a recording with, which is
+/// WebUntis' long name where it has one (`Mathematik`, `Wirtschaft/Politik`,
+/// `MINT - Mittelstufe`) and the short code where it does not. Keywords are
+/// tried in order, so a compound name lands on the more specific entry:
+/// `Wirtschaft/Politik` is its own subject rather than either half.
 func subjectStyle(for subject: String?) -> SubjectStyle {
-    guard let subject = subject?.lowercased() else {
-        return SubjectStyle(symbol: "graduationcap.fill", color: .gray)
+    let fallback = SubjectStyle(symbol: "graduationcap.fill", color: .blue)
+    guard let subject = subject?.lowercased(), !subject.isEmpty else {
+        return SubjectStyle(symbol: "tray.full.fill", color: .gray)
     }
     let map: [(String, SubjectStyle)] = [
+        ("sonstige", .init(symbol: "tray.full.fill", color: .gray)),
+        // compounds first — each of these contains a keyword further down
+        ("wirtschaft", .init(symbol: "chart.line.uptrend.xyaxis", color: .subjectAmber)),
+        ("mint", .init(symbol: "gearshape.2.fill", color: .cyan)),
+        ("förderband", .init(symbol: "sparkles", color: .yellow)),
+        ("forderband", .init(symbol: "sparkles", color: .yellow)),
+        ("hospitation", .init(symbol: "eye.fill", color: .subjectSteel)),
         ("mathe", .init(symbol: "x.squareroot", color: .blue)),
         ("math", .init(symbol: "x.squareroot", color: .blue)),
         ("physik", .init(symbol: "atom", color: .indigo)),
         ("chemie", .init(symbol: "testtube.2", color: .purple)),
         ("bio", .init(symbol: "leaf.fill", color: .green)),
-        ("informatik", .init(symbol: "desktopcomputer", color: .cyan)),
+        ("informatik", .init(symbol: "desktopcomputer", color: .subjectSteel)),
         ("deutsch", .init(symbol: "text.book.closed.fill", color: .red)),
         ("englisch", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("franz", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("latein", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("spanisch", .init(symbol: "character.book.closed.fill", color: .orange)),
-        ("geschichte", .init(symbol: "clock.fill", color: .brown)),
+        ("franz", .init(symbol: "character.book.closed.fill", color: .subjectPlum)),
+        ("latein", .init(symbol: "building.columns.fill", color: .subjectTerracotta)),
+        ("spanisch", .init(symbol: "character.book.closed.fill", color: .yellow)),
+        ("geschichte", .init(symbol: "hourglass", color: .brown)),
         ("erdkunde", .init(symbol: "globe.europe.africa.fill", color: .teal)),
         ("geo", .init(symbol: "globe.europe.africa.fill", color: .teal)),
-        ("musik", .init(symbol: "music.note", color: .pink)),
-        ("kunst", .init(symbol: "paintpalette.fill", color: .mint)),
-        ("sport", .init(symbol: "figure.run", color: .green)),
+        ("musik", .init(symbol: "music.note", color: .subjectPlum)),
+        ("kunst", .init(symbol: "paintpalette.fill", color: .pink)),
+        ("sport", .init(symbol: "figure.run", color: .mint)),
         ("religion", .init(symbol: "book.closed.fill", color: .indigo)),
-        ("ethik", .init(symbol: "person.2.fill", color: .indigo)),
-        ("politik", .init(symbol: "building.columns.fill", color: .brown)),
-        ("wirtschaft", .init(symbol: "chart.line.uptrend.xyaxis", color: .green)),
+        ("ethik", .init(symbol: "person.2.fill", color: .subjectSteel)),
+        ("politik", .init(symbol: "building.columns.fill", color: .subjectAmber)),
     ]
     for (keyword, style) in map where subject.contains(keyword) {
         return style
     }
-    return SubjectStyle(symbol: "graduationcap.fill", color: .blue)
+    return fallback
 }
 
 /// Settings-style list icon: white glyph on a colored rounded square.
@@ -72,65 +100,6 @@ func lessonShareText(summary: String?, segments: [TranscriptSegment]) -> String 
     parts.append("TRANSKRIPT")
     parts.append(contentsOf: segments.map(\.text))
     return parts.joined(separator: "\n")
-}
-
-// MARK: - Audio playback bar
-
-struct LessonAudioBar: View {
-    let player: LessonAudioPlayer
-    let api: BackendAPI
-    let lessonId: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Button {
-                Task {
-                    guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
-                    if !player.isPlaying, player.currentTime == 0 {
-                        player.playFrom(0)
-                    } else {
-                        player.togglePlayPause()
-                    }
-                }
-            } label: {
-                Group {
-                    if player.isLoading {
-                        ProgressView()
-                    } else {
-                        Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 32))
-                    }
-                }
-                .frame(width: 34, height: 34)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.accent)
-
-            VStack(alignment: .leading, spacing: 5) {
-                ProgressView(value: player.duration > 0 ? min(player.currentTime / player.duration, 1) : 0)
-                HStack {
-                    Text(timeString(player.currentTime))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(trailingLabel)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(player.errorMessage != nil ? .red : .secondary)
-                }
-            }
-        }
-    }
-
-    private var trailingLabel: String {
-        if player.errorMessage != nil { return "Audio nicht verfügbar" }
-        if player.isReady { return timeString(player.duration) }
-        return "Aufnahme abspielen"
-    }
-
-    private func timeString(_ time: Double) -> String {
-        let total = Int(time.rounded())
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
 }
 
 // MARK: - Shared list states
@@ -213,50 +182,64 @@ struct EmptyState: View {
     }
 }
 
-/// One lesson as a list row: subject tile, title, meta line, and small
-/// icons for what the lesson already has (summary, duration).
+/// One lesson as a row inside its subject's folder.
+///
+/// The date leads, because inside a folder that already says "Mathematik" the
+/// date is the only thing that tells one recording from the next — everything
+/// the old row led with (the subject tile, the subject name, the room) was the
+/// same on every row down the page. What follows it is the opening of the
+/// summary, so the list can be read for what was taught rather than for when.
 struct LessonRow: View {
     let info: BackendAPI.LessonInfo
 
     var body: some View {
-        let style = subjectStyle(for: info.subject)
-        HStack(spacing: 12) {
-            IconTile(systemName: style.symbol, color: style.color)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(info.title ?? info.startedAt.formatted(date: .abbreviated, time: .shortened))
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(info.startedAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
+                    .font(.body)
                     .lineLimit(1)
-                Text(secondaryLine)
+                Text(timeLine)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            HStack(spacing: 8) {
-                if info.hasSummary {
-                    Image(systemName: "text.badge.star")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if info.hasAudio {
+                    Image(systemName: "waveform")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
-                Text(durationChip)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
+            secondLine
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
-    private var durationChip: String {
+    /// When it started and how long it ran. Not the room: inside a folder that
+    /// is the same on nearly every row, and the lesson's own page says it.
+    private var timeLine: String {
+        info.startedAt.formatted(date: .omitted, time: .shortened) + " · " + durationText
+    }
+
+    private var durationText: String {
         let minutes = Int(info.durationSeconds) / 60
         return minutes > 0 ? "\(minutes) Min" : "\(Int(info.durationSeconds)) s"
     }
 
-    /// Start-end time range, plus the room when known.
-    private var secondaryLine: String {
-        let start = info.startedAt
-        let end = start.addingTimeInterval(info.durationSeconds)
-        let range = "\(start.formatted(date: .omitted, time: .shortened)) - "
-            + end.formatted(date: .omitted, time: .shortened)
-        var parts = [range]
-        if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
-        return parts.joined(separator: " · ")
+    /// Two lines of the summary — or an honest word about there not being one,
+    /// which is a state worth seeing at a glance rather than a blank row.
+    @ViewBuilder
+    private var secondLine: some View {
+        if let excerpt = info.summaryExcerpt, !excerpt.isEmpty {
+            Text(excerpt)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        } else {
+            Text(info.segmentCount > 0 ? "Noch keine Zusammenfassung" : "Kein Transkript")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
     }
 }

@@ -11,6 +11,9 @@ struct BackendAPI {
         let speechSeconds: Double
         let durationSeconds: Double
         let hasSummary: Bool
+        /// The opening of the summary, so the lesson list can say what the
+        /// lesson was about instead of only when it was.
+        let summaryExcerpt: String?
         let hasAudio: Bool
         let title: String?
         let subject: String?
@@ -25,6 +28,7 @@ struct BackendAPI {
             case speechSeconds = "speech_seconds"
             case durationSeconds = "duration_seconds"
             case hasSummary = "has_summary"
+            case summaryExcerpt = "summary_excerpt"
             case hasAudio = "has_audio"
         }
 
@@ -37,6 +41,8 @@ struct BackendAPI {
             speechSeconds = try c.decode(Double.self, forKey: .speechSeconds)
             durationSeconds = try c.decode(Double.self, forKey: .durationSeconds)
             hasSummary = try c.decodeIfPresent(Bool.self, forKey: .hasSummary) ?? false
+            // tolerate a server that predates the lesson list showing previews
+            summaryExcerpt = try c.decodeIfPresent(String.self, forKey: .summaryExcerpt)
             // tolerate a not-yet-updated server (field added alongside audio recording)
             hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
             title = try c.decodeIfPresent(String.self, forKey: .title)
@@ -120,6 +126,21 @@ struct BackendAPI {
         let enabled: Bool
         let date: String?
         let lessons: [Lesson]
+    }
+
+    /// One subject of the school year — a folder in the Stunden grid.
+    struct SubjectInfo: Codable, Identifiable, Sendable, Equatable {
+        /// The WebUntis code, e.g. `MAT`.
+        let short: String
+        /// The name a person would use, when WebUntis carries a separate one.
+        let long: String?
+        /// What the folder is called — and byte for byte the string a recording
+        /// of this subject is labeled with, which is how a folder finds its
+        /// recordings without a second lookup.
+        let name: String
+        let teachers: [String]
+
+        var id: String { name }
     }
 
     struct APIError: LocalizedError {
@@ -210,6 +231,16 @@ struct BackendAPI {
         return try await JSONDecoder().decode(TimetableDay.self, from: request("/timetable/day", query: query))
     }
 
+    /// The subjects the Stunden grid draws its folders from. Empty when no
+    /// timetable is connected, which leaves the grid to the archive alone.
+    func timetableSubjects() async throws -> [SubjectInfo] {
+        struct Response: Decodable {
+            let subjects: [SubjectInfo]
+        }
+        let data = try await request("/timetable/subjects")
+        return try JSONDecoder().decode(Response.self, from: data).subjects
+    }
+
     func submitWebUntisCredentials(school: String, username: String, password: String) async throws {
         _ = try await request(
             "/timetable/credentials",
@@ -228,6 +259,17 @@ struct BackendAPI {
 
     func lesson(id: String) async throws -> LessonDetail {
         try await JSONDecoder().decode(LessonDetail.self, from: request("/sessions/\(id)"))
+    }
+
+    /// The lesson's audio as peaks in 0…1, for the player's scrubber. The
+    /// server derives it from the stored recording, so it exists for lessons
+    /// recorded long before the scrubber did.
+    func waveform(id: String) async throws -> [Double] {
+        struct Response: Decodable {
+            let peaks: [Double]
+        }
+        let data = try await request("/sessions/\(id)/waveform")
+        return try JSONDecoder().decode(Response.self, from: data).peaks
     }
 
     func summarize(id: String) async throws -> String {
