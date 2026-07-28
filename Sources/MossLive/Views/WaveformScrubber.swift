@@ -15,6 +15,9 @@ struct WaveformScrubber: View {
     let progress: Double
     /// Called with a fraction of the whole while the finger is down.
     let onScrub: (Double) -> Void
+    /// How tall the bars are drawn. The lesson page gives it more room than a
+    /// row-sized control would.
+    var height: CGFloat = 38
 
     /// Bars are ~3.5pt apart, which is dense enough to read as a waveform and
     /// coarse enough that a 45-minute lesson does not become a grey block.
@@ -61,7 +64,7 @@ struct WaveformScrubber: View {
             )
             .animation(isDragging ? nil : .linear(duration: 0.15), value: progress)
         }
-        .frame(height: 38)
+        .frame(height: height)
         .accessibilityElement()
         .accessibilityLabel("Aufnahme")
         .accessibilityValue("\(Int((progress * 100).rounded())) Prozent")
@@ -82,29 +85,124 @@ struct WaveformScrubber: View {
     }
 }
 
-/// The lesson's recording: play/pause, skip back, the waveform, and the clock.
+/// The lesson's recording as a panel: the waveform across the full width, the
+/// clock under its two ends, and the transport centred below.
+///
+/// The waveform is the widest thing here because it is the only part that has
+/// something to say before you press anything — where the talking is, and where
+/// the twenty minutes of group work are. The transport is centred under it
+/// rather than beside it, so the eye lands on the waveform first and the buttons
+/// sit where a thumb already expects them.
 struct LessonPlayer: View {
     let player: LessonAudioPlayer
     let api: BackendAPI
     let lessonId: String
     let peaks: [Double]
+    /// The length the archive knows, shown until the file itself is loaded —
+    /// otherwise the header reads 0:00 until the first press.
+    let knownDuration: Double
 
     var body: some View {
-        HStack(spacing: 14) {
-            playButton
-            VStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            VStack(spacing: 6) {
                 scrubber
-                HStack {
-                    Text(timeString(player.currentTime))
-                    Spacer()
-                    Text(trailingLabel)
-                        .foregroundStyle(player.errorMessage != nil ? .red : .secondary)
-                }
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+                clock
             }
-            skipBackButton
+            transport
+            footer
         }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "waveform")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(Theme.accent)
+            Text("Audio")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("·")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+            Text(timeString(totalDuration))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            overflowMenu
+        }
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Button {
+                Task {
+                    guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
+                    player.playFrom(0)
+                }
+            } label: {
+                Label("Von vorn abspielen", systemImage: "arrow.counterclockwise")
+            }
+            Picker("Geschwindigkeit", selection: rateBinding) {
+                ForEach(LessonAudioPlayer.rates, id: \.self) { rate in
+                    Text(rateLabel(rate)).tag(rate)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+                .background(Color(.tertiarySystemFill), in: Circle())
+        }
+        .accessibilityLabel("Weitere Wiedergabeoptionen")
+    }
+
+    // MARK: - Waveform and clock
+
+    @ViewBuilder
+    private var scrubber: some View {
+        if peaks.isEmpty {
+            // No envelope (no audio, or a server that cannot decode it): a
+            // plain track still scrubs, and says so by looking like one.
+            ProgressView(value: fraction)
+                .frame(height: 52)
+        } else {
+            WaveformScrubber(
+                peaks: peaks,
+                progress: fraction,
+                onScrub: { target in
+                    Task {
+                        guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
+                        player.seek(to: target * max(player.duration, 0))
+                    }
+                },
+                height: 52
+            )
+        }
+    }
+
+    private var clock: some View {
+        HStack {
+            Text(timeString(player.currentTime))
+            Spacer(minLength: 0)
+            Text(timeString(totalDuration))
+        }
+        .font(.footnote.monospacedDigit())
+        .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Transport
+
+    private var transport: some View {
+        HStack(spacing: 26) {
+            skipButton(seconds: -15, symbol: "gobackward.15", label: "15 Sekunden zurück")
+            playButton
+            skipButton(seconds: 15, symbol: "goforward.15", label: "15 Sekunden vor")
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var playButton: some View {
@@ -124,57 +222,96 @@ struct LessonPlayer: View {
                     ProgressView().tint(.white)
                 } else {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 17, weight: .bold))
+                        .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(.white)
                         // play reads centred when nudged off centre
-                        .offset(x: player.isPlaying ? 0 : 1.5)
+                        .offset(x: player.isPlaying ? 0 : 2)
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 64, height: 64)
+            .shadow(color: Theme.accent.opacity(0.35), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(player.isPlaying ? "Pause" : "Abspielen")
     }
 
-    /// Only offered once there is something to go back through.
-    @ViewBuilder
-    private var skipBackButton: some View {
+    private func skipButton(seconds: Double, symbol: String, label: String) -> some View {
         Button {
-            player.seek(to: max(0, player.currentTime - 15))
+            let target = player.currentTime + seconds
+            player.seek(to: min(max(0, target), max(0, player.duration)))
         } label: {
-            Image(systemName: "gobackward.15")
-                .font(.system(size: 20))
-                .foregroundStyle(player.isReady ? Theme.accent : Color(.tertiaryLabel))
+            Image(systemName: symbol)
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(player.isReady ? Color.primary : Color(.tertiaryLabel))
+                .frame(width: 46, height: 46)
+                .background(Color(.tertiarySystemFill), in: Circle())
         }
         .buttonStyle(.plain)
         .disabled(!player.isReady)
-        .accessibilityLabel("15 Sekunden zurück")
+        .accessibilityLabel(label)
     }
 
-    @ViewBuilder
-    private var scrubber: some View {
-        if peaks.isEmpty {
-            // No envelope (no audio, or a server that cannot decode it): a
-            // plain track still scrubs, and says so by looking like one.
-            ProgressView(value: fraction)
-                .frame(height: 38)
-        } else {
-            WaveformScrubber(peaks: peaks, progress: fraction) { target in
-                Task {
-                    guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
-                    player.seek(to: target * max(player.duration, 0))
-                }
+    // MARK: - Footer
+
+    /// The speed sits out at the edge and the status in the middle, so the
+    /// status can be centred under the transport without the speed pushing it
+    /// off-centre when its label grows from "1 ×" to "1,25 ×".
+    private var footer: some View {
+        ZStack {
+            Text(statusLabel)
+                .font(.footnote)
+                .foregroundStyle(player.errorMessage != nil ? .red : .secondary)
+                .frame(maxWidth: .infinity)
+            HStack {
+                rateMenu
+                Spacer(minLength: 0)
             }
         }
     }
 
-    private var fraction: Double {
-        player.duration > 0 ? min(player.currentTime / player.duration, 1) : 0
+    private var rateMenu: some View {
+        Menu {
+            Picker("Geschwindigkeit", selection: rateBinding) {
+                ForEach(LessonAudioPlayer.rates, id: \.self) { rate in
+                    Text(rateLabel(rate)).tag(rate)
+                }
+            }
+        } label: {
+            Text(rateLabel(player.rate))
+                .font(.footnote.weight(.medium).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(Color(.tertiarySystemFill), in: Capsule())
+        }
+        .accessibilityLabel("Wiedergabegeschwindigkeit")
     }
 
-    private var trailingLabel: String {
-        if player.errorMessage != nil { return "Audio nicht verfügbar" }
-        if player.isReady { return "−" + timeString(max(0, player.duration - player.currentTime)) }
+    private var rateBinding: Binding<Double> {
+        Binding(get: { player.rate }, set: { player.setRate($0) })
+    }
+
+    private func rateLabel(_ rate: Double) -> String {
+        let number = rate.formatted(.number.precision(.fractionLength(0 ... 2)))
+        return "\(number) ×"
+    }
+
+    // MARK: - Values
+
+    /// The archive's length until the file is loaded, then the file's own —
+    /// they agree, but only one of them exists before the first press.
+    private var totalDuration: Double {
+        player.isReady ? player.duration : knownDuration
+    }
+
+    private var fraction: Double {
+        let total = totalDuration
+        return total > 0 ? min(player.currentTime / total, 1) : 0
+    }
+
+    private var statusLabel: String {
+        if let errorMessage = player.errorMessage { return errorMessage }
+        if player.isPlaying { return "Wird abgespielt" }
         return "Aufnahme abspielen"
     }
 
