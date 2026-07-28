@@ -53,12 +53,33 @@ struct LearnView: View {
         return formatter
     }()
 
+    /// Where a deck card's menu sends you.
+    ///
+    /// Held here rather than in the card, because `navigationDestination` has to
+    /// be declared on a view that stays alive. A card in a `LazyVGrid` does not:
+    /// scroll it off and its destination goes with it. One declaration on the
+    /// screen itself, and the cards only have to say where they want to go.
+    @State private var deckRoute: DeckRoute?
+
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Lernen")
                 .navigationBarTitleDisplayMode(.inline)
+                .navigationDestination(item: $deckRoute) { route in
+                    deckDestination(route)
+                }
         }
+    }
+
+    private func deckDestination(_ route: DeckRoute) -> some View {
+        let name = route.subject ?? "Ohne Fach"
+        return ReviewView(
+            api: api,
+            title: route.practice ? "\(name) üben" : name,
+            mode: route.practice ? ReviewView.Mode.practice : ReviewView.Mode.review,
+            loader: loader(subject: route.subject, dueOnly: !route.practice)
+        )
     }
 
     /// Lessons that don't have a card deck yet, newest first.
@@ -182,13 +203,19 @@ struct LearnView: View {
     /// what this screen is for — there are a dozen subjects, all of them on
     /// screen at once — so the white pill that field occupied went to the thing
     /// that *is*: what is due, and one tap to it.
+    ///
     /// On a full-screen iPad the greeting and the pill sit side by side. Stacked,
     /// they leave two thirds of a 1000pt-wide card as empty blue — which is the
-    /// difference between a header and a banner nobody asked for. Narrow enough
-    /// (portrait, Split View, Slide Over) and it folds back to the stack the
-    /// design was drawn as.
+    /// difference between a header and a banner nobody asked for. Narrow the
+    /// window enough and it folds back to the stack the design was drawn as.
+    /// Measured, not asked of the size class: iPadOS 26 windows resize freely,
+    /// so there is no longer a discrete "compact" state to branch on.
     private func greetingCard(_ overview: BackendAPI.LearnOverview, wide: Bool) -> some View {
-        Group {
+        // Spelled out rather than written inline in the frame: `minHeight` takes
+        // an optional, and a bare-literal ternary flowing into one is the kind
+        // of inference this codebase has been bitten by before.
+        let height: CGFloat = wide ? 210 : 230
+        return Group {
             if wide {
                 HStack(alignment: .center, spacing: 32) {
                     greetingText
@@ -206,8 +233,10 @@ struct LearnView: View {
         }
         .font(.largeTitle.weight(.bold))
         .padding(26)
-        .frame(maxWidth: .infinity, minHeight: wide ? 210 : 230, alignment: .leading)
-        .background(headerBackground)
+        .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
+        // The closure form, not `.background(someView)` — that overload has been
+        // deprecated since iOS 15.
+        .background { headerBackground }
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .accessibilityElement(children: .contain)
     }
@@ -324,7 +353,8 @@ struct LearnView: View {
                         api: api,
                         subject: subject,
                         due: loader(subject: subject.subject, dueOnly: true),
-                        practice: loader(subject: subject.subject, dueOnly: false)
+                        practice: loader(subject: subject.subject, dueOnly: false),
+                        route: $deckRoute
                     )
                 }
             }
@@ -340,11 +370,16 @@ struct LearnView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeading("Noch nicht abgefragt")
             VStack(spacing: 0) {
-                ForEach(Array(waiting.enumerated()), id: \.element.id) { item in
-                    if item.offset > 0 {
+                // A rule between rows, but not above the first one — the card's
+                // own top edge is already that line. Compared by id against the
+                // head of the list rather than by counting, which would want an
+                // index and an index would want a key path into a tuple.
+                let first = waiting.first?.id
+                ForEach(waiting) { lesson in
+                    if lesson.id != first {
                         Divider().padding(.leading, 62)
                     }
-                    pendingRow(item.element)
+                    pendingRow(lesson)
                         .disabled(!model.connectivity.isOnline)
                 }
             }
@@ -475,6 +510,16 @@ struct LearnView: View {
     }
 }
 
+/// A deck, and how it is being opened. The whole route, so the screen can
+/// rebuild the destination from it without holding a closure per card.
+private struct DeckRoute: Hashable {
+    /// `nil` is the deck of recordings that were never filed under a subject.
+    let subject: String?
+    /// Practice asks the whole deck and never touches the schedule; review asks
+    /// only what is due and does.
+    let practice: Bool
+}
+
 /// One subject's deck on the dashboard: the card, the tap, and the menu.
 ///
 /// The menu is a sibling of the navigation link rather than a control inside its
@@ -490,14 +535,10 @@ private struct SubjectDeckCard: View {
     let subject: BackendAPI.LearnSubject
     let due: () async throws -> [BackendAPI.LearnCard]
     let practice: () async throws -> [BackendAPI.LearnCard]
+    /// The screen's one navigation destination. The tap on the card itself is a
+    /// plain `NavigationLink` and needs nothing; only the menu has to ask.
+    @Binding var route: DeckRoute?
 
-    /// Where the menu sends you. The tap on the card itself is a plain
-    /// `NavigationLink`; only the menu needs a route it can trigger.
-    private enum Route: Hashable {
-        case review, practice
-    }
-
-    @State private var route: Route?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var name: String { subject.subject ?? "Ohne Fach" }
@@ -528,25 +569,19 @@ private struct SubjectDeckCard: View {
 
             DeckCardMenu {
                 Button {
-                    route = .review
+                    route = DeckRoute(subject: subject.subject, practice: false)
                 } label: {
                     Label("Fällige Karten", systemImage: "sparkles")
                 }
                 .disabled(subject.due == 0)
                 Button {
-                    route = .practice
+                    route = DeckRoute(subject: subject.subject, practice: true)
                 } label: {
                     Label("Alle Karten üben", systemImage: "arrow.clockwise")
                 }
                 .disabled(subject.total == 0)
             }
             .padding(6)
-        }
-        .navigationDestination(item: $route) { target in
-            switch target {
-            case .review: reviewDestination
-            case .practice: practiceDestination
-            }
         }
         // Cards settle in as they reach the middle of the scroll view rather
         // than arriving already there. Kept small on purpose: a card that is
