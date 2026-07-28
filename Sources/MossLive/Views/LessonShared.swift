@@ -4,6 +4,17 @@ import SwiftUI
 struct SubjectStyle {
     let symbol: String
     let color: Color
+
+    /// The same glyph without its fill.
+    ///
+    /// For the places a symbol is drawn large and in white on the subject's own
+    /// colour: at 26pt a filled glyph is a white blob, and it is the outline
+    /// that reads as an atom or a leaf. Derived rather than listed a second
+    /// time, because every entry below is either already an outline or a `.fill`
+    /// whose base name is itself a symbol.
+    var outlineSymbol: String {
+        symbol.hasSuffix(".fill") ? String(symbol.dropLast(5)) : symbol
+    }
 }
 
 /// A handful of subjects more than the system palette has distinct colours for.

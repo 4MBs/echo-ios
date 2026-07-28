@@ -80,6 +80,10 @@ Each lesson becomes a quiz deck, scheduled on a Leitner ladder. A card you get
 wrong returns tomorrow; a card you get right returns after 1, 3, 7, 14 and 30
 days. Only exam-relevant material becomes cards.
 
+The tab opens as a dashboard: a greeting, the one tap that starts what is due
+today, and under it a card per subject in the subject's own colour. The name it
+greets is set in Einstellungen → Lernen.
+
 ### Chat and the answer note
 
 The chat answers free-form questions about the running recording or any past
