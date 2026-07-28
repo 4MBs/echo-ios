@@ -64,10 +64,15 @@ func deckCardColor(_ color: Color, contrast: ColorSchemeContrast = .standard) ->
 struct SubjectDeckTile: View {
     let name: String
     let due: Int
-    let total: Int
+    let cardCount: Int
+    /// How many recordings are filed under the subject. Nought means the card is
+    /// drawn but does not open, and it says so by going grey.
+    let lessonCount: Int
     let style: SubjectStyle
 
     @Environment(\.colorSchemeContrast) private var contrast
+
+    private var isEmpty: Bool { lessonCount == 0 }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -76,6 +81,10 @@ struct SubjectDeckTile: View {
                 .fill(.black.opacity(0.22))
             label
         }
+        // Saturation, not opacity: a card faded against the page background
+        // takes its white text down with it, and this one still has to be read.
+        // Draining the colour greys the fill and leaves the contrast alone.
+        .saturation(isEmpty ? 0.16 : 1)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .aspectRatio(1.2, contentMode: .fit)
         .accessibilityElement(children: .combine)
@@ -111,14 +120,16 @@ struct SubjectDeckTile: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// A deck that has never been generated says so rather than showing a
-    /// nought, and one with nothing due says how big it is rather than saying
-    /// "0 fällig" — the number that matters is only interesting when it is not
-    /// zero.
+    /// The most specific true thing there is room for. A subject with nothing in
+    /// it says so; one with recordings but no decks counts the recordings; one
+    /// with a deck counts the deck, and leads with what is due when something
+    /// is — "0 fällig" is a number worth nobody's attention.
     private var statusLabel: String {
-        guard total > 0 else { return "Keine Karten" }
-        let cards = total == 1 ? "1 Karte" : "\(total) Karten"
-        return due > 0 ? "\(due) fällig · \(cards)" : cards
+        if isEmpty { return "Keine Aufnahmen" }
+        let cards = cardCount == 1 ? "1 Karte" : "\(cardCount) Karten"
+        if due > 0 { return "\(due) fällig · \(cards)" }
+        if cardCount > 0 { return cards }
+        return lessonCount == 1 ? "1 Stunde" : "\(lessonCount) Stunden"
     }
 }
 
@@ -171,7 +182,8 @@ struct DeckCardButtonStyle: ButtonStyle {
                 SubjectDeckTile(
                     name: name,
                     due: name == "Mathematik" ? 4 : 0,
-                    total: name == "Chemie" ? 0 : 22,
+                    cardCount: name == "Chemie" ? 0 : 22,
+                    lessonCount: name == "Erdkunde" ? 0 : 3,
                     style: subjectStyle(for: name)
                 )
             }

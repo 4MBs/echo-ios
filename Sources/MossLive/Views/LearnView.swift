@@ -4,7 +4,7 @@ import UserNotifications
 /// "Lernen": the spaced-repetition home, as a dashboard.
 ///
 /// It opens with who it is talking to and the one thing worth doing right now,
-/// then a grid of the subjects there are cards for. The schedule lives on the
+/// then a grid of every subject of the school year. The schedule lives on the
 /// server (Leitner ladder), but the deck itself is kept here — cards never
 /// change once written, so learning is the one thing in the app that has no
 /// business needing a network.
@@ -13,15 +13,26 @@ import UserNotifications
 /// lessons with no deck yet. Everything was the same height and the same
 /// weight, so the screen had no answer to the question it exists to answer —
 /// *what should I do now*. The header answers it, and the grid is the map.
+///
+/// The grid is the whole body. A subject opens its lessons and a lesson opens
+/// its cards, so the recordings with no deck yet are found where they belong —
+/// inside the subject they were taught in — rather than in a second list
+/// underneath that had every subject mixed together.
 struct LearnView: View {
     @Environment(AppModel.self) private var model
 
     @State private var overview: BackendAPI.LearnOverview?
     @State private var lessons: [BackendAPI.LessonInfo] = []
     @State private var cards: [BackendAPI.LearnCard] = []
+    /// Every subject of the school year, from the timetable. The grid is built
+    /// from this rather than from the deck, so a subject you have not recorded
+    /// yet still has its card.
+    @State private var catalogue: [BackendAPI.SubjectInfo] = []
     @State private var loading = true
     @State private var refreshing = false
     @State private var loadError: Error?
+    /// The subject whose card was tapped while it had nothing in it.
+    @State private var emptySubject: String?
 
     private var api: BackendAPI { model.api }
 
@@ -44,15 +55,6 @@ struct LearnView: View {
         dueTotal: 0, cardTotal: 0, subjects: [], sessionsWithCards: []
     )
 
-    /// Dates come off the server as plain `YYYY-MM-DD`, which compares
-    /// correctly as text — no parsing, no time zone to get wrong.
-    private static let day: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     /// Where a deck card's menu sends you.
     ///
     /// Held here rather than in the card, because `navigationDestination` has to
@@ -69,25 +71,89 @@ struct LearnView: View {
                 .navigationDestination(item: $deckRoute) { route in
                     deckDestination(route)
                 }
+                .alert(
+                    "Noch keine Aufnahmen",
+                    isPresented: Binding(
+                        get: { emptySubject != nil },
+                        set: { if !$0 { emptySubject = nil } }
+                    ),
+                    presenting: emptySubject
+                ) { _ in
+                    Button("OK", role: .cancel) {}
+                } message: { subject in
+                    Text("In \(subject) ist noch nichts aufgenommen. "
+                        + "Nimm eine Stunde in diesem Fach auf, dann entstehen hier Karten.")
+                }
+                .sensoryFeedback(.warning, trigger: emptySubject)
         }
     }
 
     private func deckDestination(_ route: DeckRoute) -> some View {
-        let name = route.subject ?? "Ohne Fach"
-        return ReviewView(
+        ReviewView(
             api: api,
-            title: route.practice ? "\(name) üben" : name,
+            title: route.practice ? "\(route.name) üben" : route.name,
             mode: route.practice ? ReviewView.Mode.practice : ReviewView.Mode.review,
-            loader: loader(subject: route.subject, dueOnly: !route.practice)
+            loader: loader(route.scope, dueOnly: !route.practice)
         )
     }
 
-    /// Lessons that don't have a card deck yet, newest first.
-    private var pendingLessons: [BackendAPI.LessonInfo] {
-        let withCards = Set(shownOverview?.sessionsWithCards ?? [])
-        return lessons
-            .filter { $0.segmentCount > 0 && !withCards.contains($0.id) }
-            .sorted { $0.startedAt > $1.startedAt }
+    /// The grid: every subject of the school year, plus any subject only the
+    /// archive still remembers, plus Sonstige.
+    ///
+    /// Nothing is filtered out for being empty. A timetable subject with no
+    /// recordings is a real subject you have not recorded yet, and hiding it
+    /// would make the grid rearrange itself every time a lesson was taped.
+    private var folders: [LearnFolder] {
+        var filed: [String: [BackendAPI.LessonInfo]] = [:]
+        var unfiled: [BackendAPI.LessonInfo] = []
+        for lesson in lessons {
+            let subject = (lesson.subject ?? "").trimmingCharacters(in: .whitespaces)
+            if subject.isEmpty {
+                unfiled.append(lesson)
+            } else {
+                filed[subject, default: []].append(lesson)
+            }
+        }
+
+        // The server's per-subject counts, keyed the way the archive labels a
+        // recording. The empty key is the catch-all's.
+        var counts: [String: BackendAPI.LearnSubject] = [:]
+        for entry in shownOverview?.subjects ?? [] {
+            counts[entry.subject ?? ""] = entry
+        }
+
+        var names = Set(filed.keys)
+        names.formUnion(catalogue.map(\.name))
+        var out = names.map { name in
+            LearnFolder(
+                name: name,
+                subject: name,
+                lessons: (filed[name] ?? []).sortedNewestFirst,
+                due: counts[name]?.due ?? 0,
+                cardCount: counts[name]?.total ?? 0
+            )
+        }
+        out.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+
+        // Sonstige is not a subject, so it is appended after the sort rather
+        // than competing alphabetically with the ones that are.
+        out.append(
+            LearnFolder(
+                name: otherSubjectName,
+                subject: nil,
+                lessons: unfiled.sortedNewestFirst,
+                due: counts[""]?.due ?? 0,
+                cardCount: counts[""]?.total ?? 0
+            )
+        )
+        return out
+    }
+
+    /// Every lesson's cards, keyed by session. Built once for the whole screen:
+    /// working it out per subject would walk the entire deck once per card in
+    /// the grid.
+    private var decksBySession: [String: LessonDeck] {
+        lessonDecks(from: cards, answered: model.reviews.answeredIDs)
     }
 
     /// What the screen actually shows. With a server that is the server's
@@ -112,18 +178,21 @@ struct LearnView: View {
         )
     }
 
-    /// Due, and not already answered on a card whose result is still queued —
-    /// otherwise the same question comes back around the same afternoon.
     private func isDue(_ card: BackendAPI.LearnCard) -> Bool {
-        card.dueDate <= Self.day.string(from: Date()) && !model.reviews.answeredIDs.contains(card.id)
+        isCardDue(card, today: LearnDay.today, answered: model.reviews.answeredIDs)
     }
 
-    private func storedCards(subject: String?, dueOnly: Bool) -> [BackendAPI.LearnCard] {
-        cards.filter { card in
-            guard subject == nil || card.subject == subject else { return false }
-            // Practice never touches the schedule, so it may ask anything.
-            return dueOnly ? isDue(card) : true
+    private func matches(_ card: BackendAPI.LearnCard, _ scope: SubjectScope) -> Bool {
+        switch scope {
+        case .everything: true
+        case .named(let name): card.subject == name
+        case .unfiled: card.subject == nil
         }
+    }
+
+    private func storedCards(_ scope: SubjectScope, dueOnly: Bool) -> [BackendAPI.LearnCard] {
+        // Practice never touches the schedule, so it may ask anything.
+        cards.filter { matches($0, scope) && (dueOnly ? isDue($0) : true) }
     }
 
     /// Ask the server, and fall back to the stored deck when it cannot be
@@ -133,14 +202,19 @@ struct LearnView: View {
     /// The fallback is taken here rather than inside the closure: this runs
     /// while the view is on screen, and reading the environment from an
     /// escaping closure that outlives the body is not allowed.
-    private func loader(subject: String?, dueOnly: Bool) -> () async throws -> [BackendAPI.LearnCard] {
+    private func loader(_ scope: SubjectScope, dueOnly: Bool) -> () async throws -> [BackendAPI.LearnCard] {
         let client = api
-        let stored = storedCards(subject: subject, dueOnly: dueOnly)
+        let stored = storedCards(scope, dueOnly: dueOnly)
+        // Sonstige never goes to the server: there is no query for "cards whose
+        // subject is absent", and asking with an empty one would return the
+        // whole deck instead.
+        if scope.isUnfiled { return { stored } }
+        let query = scope.query
         return {
             do {
                 return dueOnly
-                    ? try await client.dueCards(subject: subject)
-                    : try await client.allCards(subject: subject)
+                    ? try await client.dueCards(subject: query)
+                    : try await client.allCards(subject: query)
             } catch {
                 guard !stored.isEmpty else { throw error }
                 return stored
@@ -165,19 +239,17 @@ struct LearnView: View {
     }
 
     private func dashboard(_ overview: BackendAPI.LearnOverview) -> some View {
-        let waiting = pendingLessons
+        let grid = folders
+        let decks = decksBySession
+        let nothingAtAll = lessons.isEmpty && catalogue.isEmpty
         return GeometryReader { geo in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     greetingCard(overview, wide: geo.size.width >= Self.wideHeaderWidth)
-                    if !overview.subjects.isEmpty {
-                        subjectsSection(overview)
-                    }
-                    if !waiting.isEmpty {
-                        pendingSection(waiting)
-                    }
-                    if overview.cardTotal == 0, waiting.isEmpty {
+                    if nothingAtAll {
                         emptyCard
+                    } else {
+                        subjectsSection(grid, decks: decks)
                     }
                     if !model.reviews.pending.isEmpty {
                         queuedNote
@@ -289,7 +361,7 @@ struct LearnView: View {
                     api: api,
                     title: "Heute lernen",
                     mode: .review,
-                    loader: loader(subject: nil, dueOnly: true)
+                    loader: loader(.everything, dueOnly: true)
                 )
             }
         } else if overview.cardTotal > 0 {
@@ -302,7 +374,7 @@ struct LearnView: View {
                     api: api,
                     title: "Üben",
                     mode: .practice,
-                    loader: loader(subject: nil, dueOnly: false)
+                    loader: loader(.everything, dueOnly: false)
                 )
             }
         }
@@ -341,89 +413,24 @@ struct LearnView: View {
 
     // MARK: - Fächer
 
-    private func subjectsSection(_ overview: BackendAPI.LearnOverview) -> some View {
+    private func subjectsSection(_ grid: [LearnFolder], decks: [String: LessonDeck]) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeading("Fächer")
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 18)],
                 spacing: 18
             ) {
-                ForEach(overview.subjects) { subject in
+                ForEach(grid) { folder in
                     SubjectDeckCard(
                         api: api,
-                        subject: subject,
-                        due: loader(subject: subject.subject, dueOnly: true),
-                        practice: loader(subject: subject.subject, dueOnly: false),
-                        route: $deckRoute
+                        folder: folder,
+                        decks: decks,
+                        route: $deckRoute,
+                        onBlocked: { emptySubject = folder.name }
                     )
                 }
             }
         }
-    }
-
-    // MARK: - Noch nicht abgefragt
-
-    /// Lessons whose deck has never been written. A card of rows rather than
-    /// more tiles: these are not places to go back to, they are one-off jobs
-    /// that disappear the moment they are done.
-    private func pendingSection(_ waiting: [BackendAPI.LessonInfo]) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeading("Noch nicht abgefragt")
-            VStack(spacing: 0) {
-                // A rule between rows, but not above the first one — the card's
-                // own top edge is already that line. Compared by id against the
-                // head of the list rather than by counting, which would want an
-                // index and an index would want a key path into a tuple.
-                let first = waiting.first?.id
-                ForEach(waiting) { lesson in
-                    if lesson.id != first {
-                        Divider().padding(.leading, 62)
-                    }
-                    pendingRow(lesson)
-                        .disabled(!model.connectivity.isOnline)
-                }
-            }
-            .cardSurface(cornerRadius: 20)
-            // The deck for a lesson has to be written before it can be learned,
-            // and writing it is the AI's job on the server.
-            Text(model.connectivity.isOnline
-                ? "Beim ersten Abfragen entsteht der Kartensatz der Stunde."
-                : "Neue Kartensätze schreibt die KI auf dem Server — dafür wird eine Verbindung gebraucht.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-        }
-    }
-
-    private func pendingRow(_ lesson: BackendAPI.LessonInfo) -> some View {
-        let style = subjectStyle(for: lesson.subject)
-        return NavigationLink {
-            ReviewView(
-                api: api,
-                title: lesson.title ?? "Stunde abfragen",
-                mode: .review
-            ) {
-                try await api.generateCards(sessionId: lesson.id)
-            }
-        } label: {
-            HStack(spacing: 14) {
-                IconTile(systemName: style.symbol, color: style.color)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(lesson.title ?? "Aufnahme")
-                        .foregroundStyle(.primary)
-                    Text(lesson.startedAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "plus.circle")
-                    .foregroundStyle(Theme.accent)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - The quiet corners
@@ -477,6 +484,7 @@ struct LearnView: View {
         let overviewKey = OfflineCache.Key.learnOverview
         let cardsKey = OfflineCache.Key.learnCards
         let lessonsKey = OfflineCache.Key.lessons
+        let subjectsKey = OfflineCache.Key.timetableSubjects
 
         // First time in: everything stored, so the screen is usable before —
         // and without — a reply.
@@ -485,8 +493,18 @@ struct LearnView: View {
             cards = OfflineCache.load([BackendAPI.LearnCard].self, key: cardsKey) ?? []
             lessons = OfflineCache.load([BackendAPI.LessonInfo].self, key: lessonsKey) ?? []
         }
+        if catalogue.isEmpty {
+            catalogue = OfflineCache.load([BackendAPI.SubjectInfo].self, key: subjectsKey) ?? []
+        }
         if shownOverview == nil { loading = true }
         loadError = nil
+
+        // The catalogue is the nicety, not the archive: a server with no
+        // timetable connected — or one too old to know the endpoint — leaves the
+        // grid to the subjects that were actually recorded. It is awaited on
+        // every path below, or the fetch is cancelled on the way out.
+        async let remoteSubjects = api.timetableSubjects()
+
         do {
             async let remoteOverview = api.learnOverview()
             async let remoteLessons = api.listLessons()
@@ -506,6 +524,10 @@ struct LearnView: View {
         } catch {
             if shownOverview == nil { loadError = error }
         }
+        if let fresh = try? await remoteSubjects, !fresh.isEmpty {
+            catalogue = fresh
+            OfflineCache.save(fresh, as: subjectsKey)
+        }
         loading = false
     }
 }
@@ -513,75 +535,47 @@ struct LearnView: View {
 /// A deck, and how it is being opened. The whole route, so the screen can
 /// rebuild the destination from it without holding a closure per card.
 private struct DeckRoute: Hashable {
-    /// `nil` is the deck of recordings that were never filed under a subject.
-    let subject: String?
+    let scope: SubjectScope
+    /// What to call it on the screen it opens.
+    let name: String
     /// Practice asks the whole deck and never touches the schedule; review asks
     /// only what is due and does.
     let practice: Bool
 }
 
-/// One subject's deck on the dashboard: the card, the tap, and the menu.
+/// One subject on the dashboard: the card, where it goes, and the menu.
+///
+/// A subject with recordings opens its list of lessons. A subject with none is
+/// still drawn — it is a subject of the school year whether or not it has been
+/// recorded — but it opens nothing, because the screen behind it would be blank.
+/// Tapping it says so instead.
 ///
 /// The menu is a sibling of the navigation link rather than a control inside its
 /// label. A `Menu` nested in a link's label does not reliably get its own taps —
 /// the link takes them — so the ellipsis is layered over the card and wins the
-/// hit test by being on top of it.
-///
-/// It also carries what a grid has no other room for. As a list row, "Üben" was
-/// a swipe action and a long press; a tile can be neither, and practising a deck
-/// with nothing due is the reason to open a subject on most evenings.
+/// hit test by being on top of it. It carries the two shortcuts past the lesson
+/// list: everything due in the subject, and the whole deck as practice.
 private struct SubjectDeckCard: View {
     let api: BackendAPI
-    let subject: BackendAPI.LearnSubject
-    let due: () async throws -> [BackendAPI.LearnCard]
-    let practice: () async throws -> [BackendAPI.LearnCard]
-    /// The screen's one navigation destination. The tap on the card itself is a
-    /// plain `NavigationLink` and needs nothing; only the menu has to ask.
+    let folder: LearnFolder
+    let decks: [String: LessonDeck]
+    /// The screen's one navigation destination, for the menu's two shortcuts.
+    /// The tap on the card itself is a plain `NavigationLink` and needs nothing.
     @Binding var route: DeckRoute?
+    /// Called when a card with nothing in it is tapped.
+    let onBlocked: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var name: String { subject.subject ?? "Ohne Fach" }
 
     var body: some View {
         // Read out here rather than inside the transition closure, which is
         // `@Sendable` and would otherwise be capturing the view itself.
         let moves = !reduceMotion
         return ZStack(alignment: .topTrailing) {
-            NavigationLink {
-                // Tapping the card does the obvious thing: learn what is due,
-                // or — when nothing is — practise, rather than opening a screen
-                // that says there is nothing here.
-                if subject.due > 0 {
-                    reviewDestination
-                } else {
-                    practiceDestination
-                }
-            } label: {
-                SubjectDeckTile(
-                    name: name,
-                    due: subject.due,
-                    total: subject.total,
-                    style: subjectStyle(for: subject.subject)
-                )
+            opener
+            if !folder.isEmpty {
+                menu
             }
-            .buttonStyle(DeckCardButtonStyle())
-
-            DeckCardMenu {
-                Button {
-                    route = DeckRoute(subject: subject.subject, practice: false)
-                } label: {
-                    Label("Fällige Karten", systemImage: "sparkles")
-                }
-                .disabled(subject.due == 0)
-                Button {
-                    route = DeckRoute(subject: subject.subject, practice: true)
-                } label: {
-                    Label("Alle Karten üben", systemImage: "arrow.clockwise")
-                }
-                .disabled(subject.total == 0)
-            }
-            .padding(6)
         }
         // Cards settle in as they reach the middle of the scroll view rather
         // than arriving already there. Kept small on purpose: a card that is
@@ -594,12 +588,59 @@ private struct SubjectDeckCard: View {
         }
     }
 
-    private var reviewDestination: some View {
-        ReviewView(api: api, title: name, mode: .review, loader: due)
+    /// A link when there is somewhere to go, a button when there is not.
+    ///
+    /// Not `.disabled()` on the link: a disabled control is dimmed by the system
+    /// and then silent, and silence is the one thing a tap on an empty subject
+    /// must not be — the card looks exactly like the fifteen next to it.
+    @ViewBuilder
+    private var opener: some View {
+        if folder.isEmpty {
+            Button(action: onBlocked) { tile }
+                .buttonStyle(DeckCardButtonStyle())
+                .accessibilityHint("Noch keine Aufnahmen")
+        } else {
+            NavigationLink {
+                LearnSubjectView(
+                    api: api,
+                    name: folder.name,
+                    scope: folder.scope,
+                    lessons: folder.lessons,
+                    decks: decks
+                )
+            } label: {
+                tile
+            }
+            .buttonStyle(DeckCardButtonStyle())
+        }
     }
 
-    private var practiceDestination: some View {
-        ReviewView(api: api, title: "\(name) üben", mode: .practice, loader: practice)
+    private var tile: some View {
+        SubjectDeckTile(
+            name: folder.name,
+            due: folder.due,
+            cardCount: folder.cardCount,
+            lessonCount: folder.lessons.count,
+            style: subjectStyle(for: folder.name)
+        )
+    }
+
+    private var menu: some View {
+        DeckCardMenu {
+            Button {
+                route = DeckRoute(scope: folder.scope, name: folder.name, practice: false)
+            } label: {
+                Label("Alle fälligen Karten", systemImage: "sparkles")
+            }
+            .disabled(folder.due == 0)
+            Button {
+                route = DeckRoute(scope: folder.scope, name: folder.name, practice: true)
+            } label: {
+                Label("Alle Karten üben", systemImage: "arrow.clockwise")
+            }
+            .disabled(folder.cardCount == 0)
+        }
+        .padding(6)
     }
 }
 
