@@ -1,17 +1,23 @@
 import SwiftUI
+import UIKit
 
-/// One lesson, as three cards on the grouped canvas: what it was about, the
-/// recording, and what was said.
+/// One lesson, as two columns on a wide screen: the recording and what it was
+/// about on the left, what was said on the right.
 ///
-/// The parts of a lesson are different kinds of thing — a paragraph you read, a
-/// control you operate, a document you scan — and putting them in one list made
-/// them all look like settings rows. Each gets its own card, on the same canvas
-/// the subject folders sit on, so the tab holds together.
+/// The page used to be one 700pt column down the middle of an iPad, which meant
+/// the transcript — the longest thing here by an order of magnitude — was
+/// reached by scrolling past everything else, and the two thirds of the display
+/// either side of it were empty. Side by side, the summary and the player stay
+/// on screen while the transcript is read, and the transcript gets a column of
+/// its own to be long in.
 ///
-/// There is no switch between Zusammenfassung and Transkript: they are the top
-/// and the bottom of one page, and a switch that rebuilt hundreds of transcript
-/// lines on every tap was the slowest thing on the screen. The summary is
-/// parsed from Markdown once when it arrives, and the spoken line comes from
+/// Below `twoColumnWidth` (portrait, Slide Over, a split view) it folds back
+/// into one column in the same order.
+///
+/// There is no switch between Zusammenfassung and Transkript: they are two
+/// halves of one page, and a switch that rebuilt hundreds of transcript lines on
+/// every tap was the slowest thing on the screen. The summary is parsed from
+/// Markdown once when it arrives, and the spoken line comes from
 /// `player.activeIndex`, which changes when the line changes rather than seven
 /// times a second.
 struct LessonDetailView: View {
@@ -21,9 +27,9 @@ struct LessonDetailView: View {
     @Environment(AppModel.self) private var model
 
     @State private var detail: BackendAPI.LessonDetail?
-    /// Parsed once. The raw text is kept beside it for sharing, which wants
-    /// characters rather than attributes.
-    @State private var summary: AttributedString?
+    /// Parsed once. The raw text is kept beside it for sharing and copying,
+    /// which want characters rather than attributes.
+    @State private var summary: ParsedSummary?
     @State private var summaryText: String?
     @State private var peaks: [Double] = []
     @State private var loadError: Error?
@@ -31,9 +37,9 @@ struct LessonDetailView: View {
     @State private var errorMessage: String?
     @State private var player = LessonAudioPlayer()
 
-    /// The readable column. Text set across the full width of an iPad is a
-    /// wall; every reading app on the system stops somewhere around here.
-    private static let column: CGFloat = 700
+    /// Where two columns start being wider than a readable measure each. An
+    /// iPad in landscape is well past it; in portrait it is not.
+    private static let twoColumnWidth: CGFloat = 880
 
     var body: some View {
         Group {
@@ -48,6 +54,7 @@ struct LessonDetailView: View {
             }
         }
         .navigationTitle(info.subject ?? info.title ?? "Aufnahme")
+        .navigationSubtitle(factsLine)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             if let detail {
@@ -65,20 +72,58 @@ struct LessonDetailView: View {
     // MARK: - The page
 
     private func page(_ detail: BackendAPI.LessonDetail) -> some View {
+        GeometryReader { geo in
+            if geo.size.width >= Self.twoColumnWidth {
+                wide(detail)
+            } else {
+                narrow(detail)
+            }
+        }
+        .groupedScreen()
+    }
+
+    private func wide(_ detail: BackendAPI.LessonDetail) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    if info.hasAudio { playerCard }
+                    summaryCard
+                }
+                .padding(.bottom, 24)
+            }
+            .frame(maxWidth: .infinity)
+
+            TranscriptCard(
+                segments: detail.segments,
+                player: player,
+                hasAudio: info.hasAudio,
+                ownsScrolling: true,
+                onPlay: play(from:)
+            )
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+        .padding(.bottom, 16)
+    }
+
+    private func narrow(_ detail: BackendAPI.LessonDetail) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    facts
-                    summaryCard
+                VStack(spacing: 16) {
                     if info.hasAudio { playerCard }
-                    if !detail.segments.isEmpty { transcriptCard(detail) }
+                    summaryCard
+                    TranscriptCard(
+                        segments: detail.segments,
+                        player: player,
+                        hasAudio: info.hasAudio,
+                        ownsScrolling: false,
+                        onPlay: play(from:)
+                    )
                 }
-                .frame(maxWidth: Self.column)
-                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 32)
             }
-            .groupedScreen()
             // Playback carries the page with it, the way a transcript that can
             // be played is expected to behave.
             .onChange(of: player.activeIndex) { _, index in
@@ -90,64 +135,49 @@ struct LessonDetailView: View {
         }
     }
 
-    /// When it was, where, and with whom — as chips rather than three list rows
-    /// saying one fact each.
-    private var facts: some View {
-        HStack(spacing: 8) {
-            ForEach(chips, id: \.self) { chip in
-                Text(chip)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 2)
-    }
-
-    private var chips: [String] {
+    /// When it was, where, and with whom — under the title, where the system
+    /// puts the second line about a thing rather than in a row of its own.
+    private var factsLine: String {
         let start = info.startedAt
         let end = start.addingTimeInterval(info.durationSeconds)
-        var out = [
+        var parts = [
             start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
                 + ", " + start.formatted(date: .omitted, time: .shortened)
                 + "–" + end.formatted(date: .omitted, time: .shortened),
         ]
-        if let room = info.room, !room.isEmpty { out.append("Raum \(room)") }
-        if let teacher = info.teacher, !teacher.isEmpty { out.append(teacher) }
-        return out
+        if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
+        if let teacher = info.teacher, !teacher.isEmpty { parts.append(teacher) }
+        return parts.joined(separator: " · ")
     }
 
-    // MARK: - Cards
-
-    private func cardHeader(_ title: String, systemImage: String, trailing: String? = nil) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: systemImage)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            if let trailing {
-                Text(trailing)
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
+    private func play(from time: Double) {
+        Task {
+            if await player.ensureLoaded(api: api, lessonId: info.id) {
+                player.playFrom(time)
             }
         }
     }
 
+    // MARK: - Cards
+
+    private var playerCard: some View {
+        LessonPlayer(
+            player: player,
+            api: api,
+            lessonId: info.id,
+            peaks: peaks,
+            knownDuration: info.durationSeconds
+        )
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .cardSurface(cornerRadius: 20)
+    }
+
     private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            cardHeader("Zusammenfassung", systemImage: "sparkles")
+        VStack(alignment: .leading, spacing: 12) {
+            summaryHeader
             if let summary {
-                Text(summary)
-                    .font(.body)
-                    .lineSpacing(5)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                SummaryBody(summary: summary)
             } else if summarizing {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -164,9 +194,23 @@ struct LessonDetailView: View {
                     .foregroundStyle(.red)
             }
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
+        .cardSurface(cornerRadius: 20)
+    }
+
+    private var summaryHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+            Text("Zusammenfassung")
+                .font(.headline)
+            Spacer(minLength: 0)
+            if let summaryText {
+                CopyButton(text: summaryText)
+            }
+        }
     }
 
     /// The server writes summaries by itself when a recording ends, so an
@@ -187,68 +231,6 @@ struct LessonDetailView: View {
             .controlSize(.small)
             .disabled(summarizing || !model.connectivity.isOnline)
         }
-    }
-
-    private var playerCard: some View {
-        LessonPlayer(player: player, api: api, lessonId: info.id, peaks: peaks)
-            .padding(14)
-            .frame(maxWidth: .infinity)
-            .cardSurface()
-    }
-
-    private func transcriptCard(_ detail: BackendAPI.LessonDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            cardHeader(
-                "Transkript",
-                systemImage: "text.alignleft",
-                trailing: "\(detail.segments.count) Zeilen"
-            )
-            LazyVStack(alignment: .leading, spacing: 2) {
-                ForEach(detail.segments.indices, id: \.self) { index in
-                    line(detail.segments[index], isActive: player.activeIndex == index)
-                        .id(index)
-                }
-            }
-            if info.hasAudio {
-                Text("Zeile antippen, um sie ab dieser Stelle anzuhören.")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
-
-    /// A line is only a control where there is something to play.
-    @ViewBuilder
-    private func line(_ segment: TranscriptSegment, isActive: Bool) -> some View {
-        if info.hasAudio {
-            Button {
-                Task {
-                    if await player.ensureLoaded(api: api, lessonId: info.id) {
-                        player.playFrom(segment.t0)
-                    }
-                }
-            } label: {
-                lineBody(segment, isActive: isActive)
-            }
-            .buttonStyle(.plain)
-        } else {
-            lineBody(segment, isActive: isActive)
-        }
-    }
-
-    private func lineBody(_ segment: TranscriptSegment, isActive: Bool) -> some View {
-        SegmentRow(segment: segment, isPartial: false, isActive: isActive)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                isActive ? Theme.accent.opacity(0.12) : .clear,
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
     }
 
     // MARK: - Loading
@@ -294,7 +276,7 @@ struct LessonDetailView: View {
 
     private func setSummary(_ text: String?) {
         summaryText = text
-        summary = text.map(renderedMarkdown)
+        summary = text.map { ParsedSummary($0) }
     }
 
     private func generateSummary() async {
@@ -314,5 +296,310 @@ struct LessonDetailView: View {
             errorMessage = error.localizedDescription
         }
         summarizing = false
+    }
+}
+
+// MARK: - Summary
+
+/// A summary split into the paragraph that opens it and the points that follow.
+///
+/// The model is asked for prose and then a list, and it obliges — but as one
+/// blob of Markdown, which rendered as an undifferentiated wall with bullet
+/// characters in it. Splitting it here lets the list be a list.
+struct ParsedSummary {
+    let intro: AttributedString?
+    let points: [AttributedString]
+
+    init(_ text: String) {
+        var introLines: [String] = []
+        var points: [String] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let point = Self.bulletBody(trimmed) {
+                points.append(point)
+            } else if !trimmed.isEmpty, points.isEmpty {
+                introLines.append(trimmed)
+            } else if !trimmed.isEmpty {
+                // Prose after the list has started is a wrapped line, not a new
+                // paragraph: it belongs to the point above it.
+                points[points.count - 1] += " " + trimmed
+            }
+        }
+        let intro = introLines.joined(separator: " ")
+        self.intro = intro.isEmpty ? nil : renderedMarkdown(intro)
+        self.points = points.map(renderedMarkdown)
+    }
+
+    /// The text of a list item, or nil when the line is not one. Covers what
+    /// the model actually emits: a bullet character, a dash, an asterisk, or a
+    /// number followed by a dot or a bracket.
+    private static func bulletBody(_ line: String) -> String? {
+        for marker in ["• ", "- ", "* ", "– ", "— "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count))
+        }
+        guard let dot = line.firstIndex(where: { $0 == "." || $0 == ")" }) else { return nil }
+        let head = line[line.startIndex ..< dot]
+        guard !head.isEmpty, head.count <= 2, head.allSatisfy(\.isNumber) else { return nil }
+        let body = line[line.index(after: dot)...].trimmingCharacters(in: .whitespaces)
+        return body.isEmpty ? nil : body
+    }
+}
+
+private struct SummaryBody: View {
+    let summary: ParsedSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let intro = summary.intro {
+                Text(intro)
+                    .font(.body)
+                    .lineSpacing(5)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !summary.points.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(Array(summary.points.enumerated()), id: \.offset) { index, text in
+                        pointRow(index: index, text: text)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A numbered chip rather than a bullet character: the points are the
+    /// beats of the lesson in order, and a number says so where a dot does not.
+    private func pointRow(index: Int, text: AttributedString) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(index + 1)")
+                .font(.footnote.weight(.bold).monospacedDigit())
+                .foregroundStyle(Theme.accent)
+                .frame(width: 24, height: 24)
+                .background(Theme.accent.opacity(0.15), in: Circle())
+            Text(text)
+                .font(.callout)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            Color(.tertiarySystemFill),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+    }
+}
+
+/// Copies once and says so, then goes back to being a button.
+private struct CopyButton: View {
+    let text: String
+
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = text
+            withAnimation(.snappy) { copied = true }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation(.snappy) { copied = false }
+            }
+        } label: {
+            Label(
+                copied ? "Kopiert" : "Kopieren",
+                systemImage: copied ? "checkmark" : "doc.on.doc"
+            )
+            .font(.footnote)
+            .foregroundStyle(copied ? Color.green : .secondary)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Transcript
+
+/// What was said, as a searchable column of timestamped lines.
+///
+/// On a wide screen this owns its scrolling, so the transcript is a column that
+/// scrolls beside a summary that stays put. Folded into one column it does not,
+/// because a scroll view inside a scroll view is a trap for a finger.
+private struct TranscriptCard: View {
+    let segments: [TranscriptSegment]
+    let player: LessonAudioPlayer
+    let hasAudio: Bool
+    let ownsScrolling: Bool
+    let onPlay: (Double) -> Void
+
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            searchField
+            if matches.isEmpty {
+                noMatches
+            } else if ownsScrolling {
+                scrollingLines
+            } else {
+                lines
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface(cornerRadius: 20)
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "list.bullet")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+            Text("Transkript")
+                .font(.headline)
+            Spacer(minLength: 0)
+            Text("\(matches.count) Zeilen")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color(.tertiarySystemFill), in: Capsule())
+            Button {
+                searchFocused = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Transkript durchsuchen")
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            TextField("Transkript durchsuchen", text: $query)
+                .textFieldStyle(.plain)
+                .font(.callout)
+                .focused($searchFocused)
+                .submitLabel(.search)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Suche leeren")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            Color(.tertiarySystemFill),
+            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+        )
+    }
+
+    private var scrollingLines: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                lines
+            }
+            .onChange(of: player.activeIndex) { _, index in
+                guard player.isPlaying, let index else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(index, anchor: .center)
+                }
+            }
+        }
+    }
+
+    /// Worked out once per redraw and handed to the loop: read inside the
+    /// `ForEach` body it would be rebuilt for every row on the page.
+    private var lines: some View {
+        let rows = matches
+        let lastIndex = rows.last?.index
+        return LazyVStack(spacing: 0) {
+            ForEach(rows, id: \.index) { match in
+                line(match)
+                    .id(match.index)
+                if match.index != lastIndex {
+                    Divider().padding(.leading, 74)
+                }
+            }
+        }
+    }
+
+    private var noMatches: some View {
+        Text(segments.isEmpty ? "Kein Transkript." : "Keine Zeile enthält „\(query)“.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+    }
+
+    /// A line is only a control where there is something to play.
+    @ViewBuilder
+    private func line(_ match: Match) -> some View {
+        if hasAudio {
+            Button { onPlay(match.segment.t0) } label: { lineBody(match) }
+                .buttonStyle(.plain)
+        } else {
+            lineBody(match)
+        }
+    }
+
+    private func lineBody(_ match: Match) -> some View {
+        let isActive = player.activeIndex == match.index
+        return HStack(alignment: .top, spacing: 0) {
+            // The bar is drawn always and made invisible when inactive, so the
+            // text does not shift sideways as the playhead moves down the page.
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(isActive ? Theme.accent : .clear)
+                .frame(width: 3)
+                .padding(.vertical, 2)
+            Text(timestamp(match.segment.t0))
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(isActive ? Theme.accent : Theme.accent.opacity(0.75))
+                .frame(width: 58, alignment: .leading)
+                .padding(.leading, 11)
+            Text(match.segment.text)
+                .font(.callout)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 11)
+        .padding(.trailing, 6)
+        .background(
+            isActive ? Theme.accent.opacity(0.12) : .clear,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func timestamp(_ time: Double) -> String {
+        let total = Int(time)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    /// A segment with the index it has in the full transcript — searching must
+    /// not renumber the lines the player highlights against.
+    private struct Match {
+        let index: Int
+        let segment: TranscriptSegment
+    }
+
+    private var matches: [Match] {
+        let all = segments.enumerated().map { Match(index: $0.offset, segment: $0.element) }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return all }
+        return all.filter { $0.segment.text.localizedCaseInsensitiveContains(trimmed) }
     }
 }

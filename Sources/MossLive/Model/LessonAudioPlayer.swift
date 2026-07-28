@@ -17,6 +17,15 @@ final class LessonAudioPlayer {
     private(set) var loadedLessonId: String?
     var errorMessage: String?
 
+    /// Playback speed. A lesson is someone talking, and talking is the one
+    /// thing that survives being sped up — so the control belongs on the
+    /// player rather than in a menu three taps away.
+    private(set) var rate: Double = 1
+
+    /// The offered speeds. Below 1 is missing on purpose: a recording of a
+    /// classroom is already slower than reading it.
+    static let rates: [Double] = [1, 1.25, 1.5, 2]
+
     /// Which transcript line the playhead is inside.
     ///
     /// Kept as its own property rather than worked out from `currentTime` on
@@ -62,6 +71,10 @@ final class LessonAudioPlayer {
                 configuredSession = true
             }
             let player = try AVAudioPlayer(contentsOf: fileURL)
+            // Must be set before prepareToPlay, or the rate is ignored for
+            // the whole life of this player.
+            player.enableRate = true
+            player.rate = Float(rate)
             player.prepareToPlay()
             self.player = player
             duration = player.duration
@@ -93,6 +106,13 @@ final class LessonAudioPlayer {
         player.currentTime = clamp(time, player)
         currentTime = player.currentTime
         refreshActiveIndex()
+    }
+
+    /// Change speed without disturbing playback: AVAudioPlayer applies a new
+    /// rate to a running player, and remembers it for the next `play()`.
+    func setRate(_ value: Double) {
+        rate = value
+        player?.rate = Float(value)
     }
 
     func togglePlayPause() {
