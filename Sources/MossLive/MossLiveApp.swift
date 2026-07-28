@@ -14,38 +14,26 @@ struct MossLiveApp: App {
 
 /// iPad shell: a dedicated, collapsible system sidebar. Unlike an adaptable
 /// tab view, this never turns the app navigation into a bar across the top.
+///
+/// The rows are the system's, not ours. This column used to set its own row
+/// height, its own insets and its own selection capsule, all measured off
+/// screenshots of Apple's sidebars. Under the new design a sidebar is a
+/// floating Liquid Glass surface the system styles, lights and insets itself,
+/// and hand-set metrics fight that rather than match it — the platform adapts,
+/// and anything pinned to last year's numbers stops adapting with it.
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @State private var selection: AppTab? = .aufnahme
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
-    /// Measured off Apple's own sidebars rather than guessed: TV and Podcasts
-    /// both step 44pt from one row to the next, which is the standard iOS row
-    /// height and the smallest thing the guidelines call tappable. SwiftUI adds
-    /// about four points above and below the label by default, and that is the
-    /// whole of why this column read looser than theirs.
-    private static let rowHeight: CGFloat = 44
-
-    /// The list keeps a margin from the sidebar edge — the selection capsule
-    /// starts there — and insets the row's content within it. Both are named so
-    /// the pinned footer can line its icon up with the list's.
-    private static let listMargin: CGFloat = 10
-    private static let rowInset: CGFloat = 20
-
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             List(AppTab.navigation, selection: $selection) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
-                    .frame(height: Self.rowHeight)
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0, leading: Self.rowInset,
-                            bottom: 0, trailing: Self.rowInset
-                        )
-                    )
                     .tag(tab)
             }
-            .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 300)
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 sidebarFooter
             }
@@ -67,36 +55,25 @@ struct MainTabView: View {
     /// the column the bottom edge it was missing. The offline line shares the
     /// footer, which is where Apple keeps what is true of the whole app rather
     /// than of one screen.
+    ///
+    /// It is a `List` of one rather than a button dressed as a row, so its
+    /// height, its insets and its selection are the same system-drawn things as
+    /// the rows above it — previously they were a hand-drawn approximation that
+    /// only matched at one point size, in one appearance, on one iPad.
     private var sidebarFooter: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
             SidebarOfflineNote()
-                .padding(.horizontal, Self.rowInset)
-            settingsRow
+                .padding(.horizontal, 20)
+                .padding(.bottom, 4)
+            List(selection: $selection) {
+                Label(AppTab.einstellungen.title, systemImage: AppTab.einstellungen.systemImage)
+                    .tag(AppTab.einstellungen)
+            }
+            .listStyle(.sidebar)
+            .scrollDisabled(true)
+            .frame(height: 52)
         }
-        .padding(.horizontal, Self.listMargin)
-        .padding(.bottom, 6)
-    }
-
-    private var settingsRow: some View {
-        let selected = selection == .einstellungen
-        return Button {
-            selection = .einstellungen
-        } label: {
-            Label(AppTab.einstellungen.title, systemImage: AppTab.einstellungen.systemImage)
-                .padding(.horizontal, Self.rowInset)
-                .frame(height: Self.rowHeight)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundStyle(selected ? Theme.accent : Color.primary)
-                .background {
-                    if selected {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.primary.opacity(0.09))
-                    }
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder

@@ -7,9 +7,12 @@ import UIKit
 /// The page used to be one 700pt column down the middle of an iPad, which meant
 /// the transcript — the longest thing here by an order of magnitude — was
 /// reached by scrolling past everything else, and the two thirds of the display
-/// either side of it were empty. Side by side, the summary and the player stay
-/// on screen while the transcript is read, and the transcript gets a column of
+/// either side of it were empty. Side by side, the transcript gets a column of
 /// its own to be long in.
+///
+/// The player is pinned at both widths. It is a control, and the guidelines are
+/// plain about it — controls stay put while content moves beneath them — so the
+/// summary scrolls under it rather than carrying it along.
 ///
 /// Below `twoColumnWidth` (portrait, Slide Over, a split view) it folds back
 /// into one column in the same order.
@@ -29,7 +32,7 @@ struct LessonDetailView: View {
     @State private var detail: BackendAPI.LessonDetail?
     /// Parsed once. The raw text is kept beside it for sharing and copying,
     /// which want characters rather than attributes.
-    @State private var summary: ParsedSummary?
+    @State private var summary: AttributedString?
     @State private var summaryText: String?
     @State private var peaks: [Double] = []
     @State private var loadError: Error?
@@ -82,14 +85,20 @@ struct LessonDetailView: View {
         .groupedScreen()
     }
 
+    /// The recording and the summary on the left, the transcript on the right.
+    ///
+    /// The player does not scroll. It is a control, and the guidelines are
+    /// plain about it: controls stay put while content moves beneath them. It
+    /// is also the one thing on this page you reach for *while* reading
+    /// something else, which is exactly what scrolling it away would prevent.
     private func wide(_ detail: BackendAPI.LessonDetail) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            ScrollView {
-                VStack(spacing: 16) {
-                    if info.hasAudio { playerCard }
+            VStack(spacing: 16) {
+                if info.hasAudio { playerCard }
+                ScrollView {
                     summaryCard
+                        .padding(.bottom, 24)
                 }
-                .padding(.bottom, 24)
             }
             .frame(maxWidth: .infinity)
 
@@ -107,11 +116,13 @@ struct LessonDetailView: View {
         .padding(.bottom, 16)
     }
 
+    /// One column, and the player still does not scroll — it is pinned to the
+    /// top and the summary and transcript run underneath it, so the control
+    /// behaves the same way at both widths.
     private func narrow(_ detail: BackendAPI.LessonDetail) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 16) {
-                    if info.hasAudio { playerCard }
                     summaryCard
                     TranscriptCard(
                         segments: detail.segments,
@@ -130,6 +141,13 @@ struct LessonDetailView: View {
                 guard player.isPlaying, let index else { return }
                 withAnimation(.easeInOut(duration: 0.25)) {
                     proxy.scrollTo(index, anchor: .center)
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 12) {
+                if info.hasAudio {
+                    playerCard
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
                 }
             }
         }
@@ -177,7 +195,11 @@ struct LessonDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             summaryHeader
             if let summary {
-                SummaryBody(summary: summary)
+                Text(summary)
+                    .font(.body)
+                    .lineSpacing(5)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else if summarizing {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -276,7 +298,7 @@ struct LessonDetailView: View {
 
     private func setSummary(_ text: String?) {
         summaryText = text
-        summary = text.map { ParsedSummary($0) }
+        summary = text.map(renderedMarkdown)
     }
 
     private func generateSummary() async {
@@ -300,96 +322,6 @@ struct LessonDetailView: View {
 }
 
 // MARK: - Summary
-
-/// A summary split into the paragraph that opens it and the points that follow.
-///
-/// The model is asked for prose and then a list, and it obliges — but as one
-/// blob of Markdown, which rendered as an undifferentiated wall with bullet
-/// characters in it. Splitting it here lets the list be a list.
-struct ParsedSummary {
-    let intro: AttributedString?
-    let points: [AttributedString]
-
-    init(_ text: String) {
-        var introLines: [String] = []
-        var points: [String] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if let point = Self.bulletBody(trimmed) {
-                points.append(point)
-            } else if !trimmed.isEmpty, points.isEmpty {
-                introLines.append(trimmed)
-            } else if !trimmed.isEmpty {
-                // Prose after the list has started is a wrapped line, not a new
-                // paragraph: it belongs to the point above it.
-                points[points.count - 1] += " " + trimmed
-            }
-        }
-        let intro = introLines.joined(separator: " ")
-        self.intro = intro.isEmpty ? nil : renderedMarkdown(intro)
-        self.points = points.map(renderedMarkdown)
-    }
-
-    /// The text of a list item, or nil when the line is not one. Covers what
-    /// the model actually emits: a bullet character, a dash, an asterisk, or a
-    /// number followed by a dot or a bracket.
-    private static func bulletBody(_ line: String) -> String? {
-        for marker in ["• ", "- ", "* ", "– ", "— "] where line.hasPrefix(marker) {
-            return String(line.dropFirst(marker.count))
-        }
-        guard let dot = line.firstIndex(where: { $0 == "." || $0 == ")" }) else { return nil }
-        let head = line[line.startIndex ..< dot]
-        guard !head.isEmpty, head.count <= 2, head.allSatisfy(\.isNumber) else { return nil }
-        let body = line[line.index(after: dot)...].trimmingCharacters(in: .whitespaces)
-        return body.isEmpty ? nil : body
-    }
-}
-
-private struct SummaryBody: View {
-    let summary: ParsedSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let intro = summary.intro {
-                Text(intro)
-                    .font(.body)
-                    .lineSpacing(5)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !summary.points.isEmpty {
-                VStack(spacing: 8) {
-                    ForEach(Array(summary.points.enumerated()), id: \.offset) { index, text in
-                        pointRow(index: index, text: text)
-                    }
-                }
-            }
-        }
-    }
-
-    /// A numbered chip rather than a bullet character: the points are the
-    /// beats of the lesson in order, and a number says so where a dot does not.
-    private func pointRow(index: Int, text: AttributedString) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(index + 1)")
-                .font(.footnote.weight(.bold).monospacedDigit())
-                .foregroundStyle(Theme.accent)
-                .frame(width: 24, height: 24)
-                .background(Theme.accent.opacity(0.15), in: Circle())
-            Text(text)
-                .font(.callout)
-                .lineSpacing(4)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            Color(.tertiarySystemFill),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
-    }
-}
 
 /// Copies once and says so, then goes back to being a button.
 private struct CopyButton: View {
@@ -568,8 +500,8 @@ private struct TranscriptCard: View {
             Text(timestamp(match.segment.t0))
                 .font(.footnote.monospacedDigit())
                 .foregroundStyle(isActive ? Theme.accent : Theme.accent.opacity(0.75))
-                .frame(width: 58, alignment: .leading)
-                .padding(.leading, 11)
+                .frame(width: 58, alignment: .center)
+                .padding(.leading, 8)
             Text(match.segment.text)
                 .font(.callout)
                 .lineSpacing(4)
