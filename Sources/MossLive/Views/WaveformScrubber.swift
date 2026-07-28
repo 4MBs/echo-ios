@@ -85,6 +85,36 @@ struct WaveformScrubber: View {
     }
 }
 
+/// Skip back / skip forward, bouncing its own glyph when pressed.
+///
+/// A view of its own rather than a method, because the bounce needs a counter
+/// to key off and the effect must fire on the press — keying it to the
+/// playhead would set it off seven times a second while the lesson plays.
+private struct SkipButton: View {
+    let symbol: String
+    let label: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    @State private var presses = 0
+
+    var body: some View {
+        Button {
+            presses += 1
+            action()
+        } label: {
+            Image(systemName: symbol)
+                .symbolEffect(.bounce, value: presses)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
+        .disabled(!isEnabled)
+        .animation(.smooth(duration: 0.2), value: isEnabled)
+        .accessibilityLabel(label)
+    }
+}
+
 /// The lesson's recording as a panel: the waveform across the full width, the
 /// clock under its two ends, and the transport centred below.
 ///
@@ -195,30 +225,33 @@ struct LessonPlayer: View {
                 }
             }
         } label: {
-            if player.isLoading {
-                ProgressView()
-            } else {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-            }
+            // The spinner is laid over the glyph rather than swapped for it.
+            // Swapping made the button resize mid-tap: a ProgressView is wider
+            // than play.fill, and the button takes its size from its label.
+            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                .contentTransition(.symbolEffect(.replace))
+                .opacity(player.isLoading ? 0 : 1)
+                .overlay {
+                    if player.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    }
+                }
         }
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.circle)
         .controlSize(.extraLarge)
+        .animation(.smooth(duration: 0.25), value: player.isPlaying)
+        .animation(.smooth(duration: 0.25), value: player.isLoading)
         .accessibilityLabel(player.isPlaying ? "Pause" : "Abspielen")
     }
 
     private func skipButton(seconds: Double, symbol: String, label: String) -> some View {
-        Button {
+        SkipButton(symbol: symbol, label: label, isEnabled: player.isReady) {
             let target = player.currentTime + seconds
             player.seek(to: min(max(0, target), max(0, player.duration)))
-        } label: {
-            Image(systemName: symbol)
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.circle)
-        .controlSize(.large)
-        .disabled(!player.isReady)
-        .accessibilityLabel(label)
     }
 
     // MARK: - Footer
@@ -231,6 +264,8 @@ struct LessonPlayer: View {
             Text(statusLabel)
                 .font(.footnote)
                 .foregroundStyle(player.errorMessage != nil ? .red : .secondary)
+                .contentTransition(.opacity)
+                .animation(.smooth(duration: 0.25), value: statusLabel)
                 .frame(maxWidth: .infinity)
             HStack {
                 rateMenu

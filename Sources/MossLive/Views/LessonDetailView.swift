@@ -65,8 +65,14 @@ struct LessonDetailView: View {
         .toolbar {
             if let detail {
                 ToolbarItem(placement: .topBarTrailing) {
+                    // A Label, not a bare Image. The toolbar decides how a
+                    // labelled item is drawn and optically centres the glyph
+                    // inside it — `square.and.arrow.up` has an arrow poking out
+                    // of the top, so its bounding box and its optical centre are
+                    // not the same point, and placing the raw image centres the
+                    // box. It also gives the button a name to read out.
                     ShareLink(item: lessonShareText(summary: summaryText, segments: detail.segments)) {
-                        Image(systemName: "square.and.arrow.up")
+                        Label("Teilen", systemImage: "square.and.arrow.up")
                     }
                 }
             }
@@ -98,10 +104,7 @@ struct LessonDetailView: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(spacing: 16) {
                 if info.hasAudio { playerCard }
-                ScrollView {
-                    summaryCard
-                        .padding(.bottom, 24)
-                }
+                summaryCard(ownsScrolling: true)
             }
             .frame(maxWidth: .infinity)
 
@@ -126,7 +129,7 @@ struct LessonDetailView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 16) {
-                    summaryCard
+                    summaryCard(ownsScrolling: false)
                     TranscriptCard(
                         segments: detail.segments,
                         player: player,
@@ -142,7 +145,7 @@ struct LessonDetailView: View {
             // be played is expected to behave.
             .onChange(of: player.activeIndex) { _, index in
                 guard player.isPlaying, let index else { return }
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(.smooth(duration: 0.45)) {
                     proxy.scrollTo(index, anchor: .center)
                 }
             }
@@ -179,9 +182,31 @@ struct LessonDetailView: View {
         .cardSurface(cornerRadius: 20)
     }
 
-    private var summaryCard: some View {
+    /// A summary longer than the column scrolls *inside* the card, not with it.
+    ///
+    /// It used to be a card of its own height inside a scroll view, so a long
+    /// summary ran off the bottom of the screen and its two bottom corners were
+    /// cut square by the scroll view's edge — the card stopped looking like a
+    /// card exactly when there was most of it to look at. Fixed bounds and an
+    /// inner scroll keep all four corners on screen whatever the length.
+    private func summaryCard(ownsScrolling: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             summaryHeader
+            if ownsScrolling {
+                ScrollView { summaryContent }
+            } else {
+                summaryContent
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: ownsScrolling ? CGFloat.infinity : nil, alignment: .top)
+        .cardSurface(cornerRadius: 20)
+    }
+
+    @ViewBuilder
+    private var summaryContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
             if let summary {
                 Text(summary)
                     .font(.body)
@@ -204,9 +229,8 @@ struct LessonDetailView: View {
                     .foregroundStyle(.red)
             }
         }
-        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(cornerRadius: 20)
+        .animation(.smooth(duration: 0.3), value: summarizing)
     }
 
     private var summaryHeader: some View {
@@ -367,6 +391,10 @@ private struct TranscriptCard: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Same reason as the summary: fixed bounds when it owns its scrolling,
+        // so a long transcript scrolls inside the card rather than running off
+        // the bottom of it.
+        .frame(maxHeight: ownsScrolling ? CGFloat.infinity : nil, alignment: .top)
         .cardSurface(cornerRadius: 20)
     }
 
@@ -420,7 +448,7 @@ private struct TranscriptCard: View {
             }
             .onChange(of: player.activeIndex) { _, index in
                 guard player.isPlaying, let index else { return }
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(.smooth(duration: 0.45)) {
                     proxy.scrollTo(index, anchor: .center)
                 }
             }
@@ -441,6 +469,10 @@ private struct TranscriptCard: View {
                 }
             }
         }
+        // Typing in the search field used to make lines vanish a frame at a
+        // time. Keyed to the count rather than the query, so it animates when
+        // the list actually changes and not on every keystroke that does not.
+        .animation(.smooth(duration: 0.22), value: rows.count)
     }
 
     private var noMatches: some View {
@@ -488,6 +520,10 @@ private struct TranscriptCard: View {
             in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
         .contentShape(Rectangle())
+        // The highlight used to snap from line to line. It moves several times
+        // a minute while a lesson plays, right where the eye already is, and a
+        // hard cut there is the single least smooth thing on the page.
+        .animation(.smooth(duration: 0.28), value: isActive)
     }
 
     private func timestamp(_ time: Double) -> String {
