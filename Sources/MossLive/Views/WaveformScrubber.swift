@@ -131,33 +131,7 @@ struct LessonPlayer: View {
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            overflowMenu
         }
-    }
-
-    private var overflowMenu: some View {
-        Menu {
-            Button {
-                Task {
-                    guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
-                    player.playFrom(0)
-                }
-            } label: {
-                Label("Von vorn abspielen", systemImage: "arrow.counterclockwise")
-            }
-            Picker("Geschwindigkeit", selection: rateBinding) {
-                ForEach(LessonAudioPlayer.rates, id: \.self) { rate in
-                    Text(rateLabel(rate)).tag(rate)
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 32, height: 32)
-                .background(Color(.tertiarySystemFill), in: Circle())
-        }
-        .accessibilityLabel("Weitere Wiedergabeoptionen")
     }
 
     // MARK: - Waveform and clock
@@ -205,6 +179,11 @@ struct LessonPlayer: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// A stock `borderedProminent` circle rather than a filled `Circle` with a
+    /// glyph on top. The system styles carry the current design — the tint, the
+    /// pressed state, the shadow, the way all of it shifts under Liquid Glass —
+    /// and a hand-drawn shape carries whatever it was drawn to look like on the
+    /// day it was written.
     private var playButton: some View {
         Button {
             Task {
@@ -216,22 +195,15 @@ struct LessonPlayer: View {
                 }
             }
         } label: {
-            ZStack {
-                Circle().fill(Theme.accent)
-                if player.isLoading {
-                    ProgressView().tint(.white)
-                } else {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.white)
-                        // play reads centred when nudged off centre
-                        .offset(x: player.isPlaying ? 0 : 2)
-                }
+            if player.isLoading {
+                ProgressView()
+            } else {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
             }
-            .frame(width: 64, height: 64)
-            .shadow(color: Theme.accent.opacity(0.35), radius: 12, y: 4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.circle)
+        .controlSize(.extraLarge)
         .accessibilityLabel(player.isPlaying ? "Pause" : "Abspielen")
     }
 
@@ -241,12 +213,10 @@ struct LessonPlayer: View {
             player.seek(to: min(max(0, target), max(0, player.duration)))
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(player.isReady ? Color.primary : Color(.tertiaryLabel))
-                .frame(width: 46, height: 46)
-                .background(Color(.tertiarySystemFill), in: Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
         .disabled(!player.isReady)
         .accessibilityLabel(label)
     }
@@ -269,6 +239,9 @@ struct LessonPlayer: View {
         }
     }
 
+    /// A stock bordered capsule menu. The pill it replaces was the same shape
+    /// drawn by hand, which is one more thing that has to be re-drawn every
+    /// time the system's own capsules change.
     private var rateMenu: some View {
         Menu {
             Picker("Geschwindigkeit", selection: rateBinding) {
@@ -278,12 +251,11 @@ struct LessonPlayer: View {
             }
         } label: {
             Text(rateLabel(player.rate))
-                .font(.footnote.weight(.medium).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 5)
-                .background(Color(.tertiarySystemFill), in: Capsule())
+                .monospacedDigit()
         }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
         .accessibilityLabel("Wiedergabegeschwindigkeit")
     }
 

@@ -56,9 +56,12 @@ struct LessonDetailView: View {
                     .groupedScreen()
             }
         }
-        .navigationTitle(info.subject ?? info.title ?? "Aufnahme")
-        .navigationSubtitle(factsLine)
-        .navigationBarTitleDisplayMode(.large)
+        // No title and no date line: the page is opened from a row that already
+        // said both, and a large title plus a subtitle cost a fifth of the
+        // screen to repeat what the tap just answered. The bar stays for the
+        // back button and the share button.
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let detail {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -151,21 +154,6 @@ struct LessonDetailView: View {
                 }
             }
         }
-    }
-
-    /// When it was, where, and with whom — under the title, where the system
-    /// puts the second line about a thing rather than in a row of its own.
-    private var factsLine: String {
-        let start = info.startedAt
-        let end = start.addingTimeInterval(info.durationSeconds)
-        var parts = [
-            start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                + ", " + start.formatted(date: .omitted, time: .shortened)
-                + "–" + end.formatted(date: .omitted, time: .shortened),
-        ]
-        if let room = info.room, !room.isEmpty { parts.append("Raum \(room)") }
-        if let teacher = info.teacher, !teacher.isEmpty { parts.append(teacher) }
-        return parts.joined(separator: " · ")
     }
 
     private func play(from time: Double) {
@@ -364,7 +352,6 @@ private struct TranscriptCard: View {
     let onPlay: (Double) -> Void
 
     @State private var query = ""
-    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -394,18 +381,6 @@ private struct TranscriptCard: View {
             Text("\(matches.count) Zeilen")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color(.tertiarySystemFill), in: Capsule())
-            Button {
-                searchFocused = true
-            } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Transkript durchsuchen")
         }
     }
 
@@ -417,7 +392,6 @@ private struct TranscriptCard: View {
             TextField("Transkript durchsuchen", text: $query)
                 .textFieldStyle(.plain)
                 .font(.callout)
-                .focused($searchFocused)
                 .submitLabel(.search)
             if !query.isEmpty {
                 Button {
