@@ -17,6 +17,29 @@ final class LessonAudioPlayer {
     private(set) var loadedLessonId: String?
     var errorMessage: String?
 
+    /// Playback speed. A lesson is someone talking, and talking is the one
+    /// thing that survives being sped up — so the control belongs on the
+    /// player rather than in a menu three taps away.
+    private(set) var rate: Double = 1
+
+    /// The offered speeds. Below 1 is missing on purpose: a recording of a
+    /// classroom is already slower than reading it.
+    static let rates: [Double] = [1, 1.25, 1.5, 2]
+
+    /// Which transcript line the playhead is inside.
+    ///
+    /// Kept as its own property rather than worked out from `currentTime` on
+    /// demand, because the two change at wildly different rates: `currentTime`
+    /// moves seven times a second, and a spoken line lasts seconds. A view that
+    /// asked the clock had to be rebuilt on every tick — for the transcript,
+    /// that meant re-laying out several hundred lines to move one highlight.
+    /// Observation is per-property, so reading this instead costs a redraw when
+    /// the line changes and nothing in between.
+    private(set) var activeIndex: Int?
+
+    /// The transcript the playhead is tracked against, set once per lesson.
+    @ObservationIgnored private var segments: [TranscriptSegment] = []
+
     @ObservationIgnored private let log = Logger(subsystem: "com.fourmbs.mosslive", category: "audio-playback")
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -48,6 +71,10 @@ final class LessonAudioPlayer {
                 configuredSession = true
             }
             let player = try AVAudioPlayer(contentsOf: fileURL)
+            // Must be set before prepareToPlay, or the rate is ignored for
+            // the whole life of this player.
+            player.enableRate = true
+            player.rate = Float(rate)
             player.prepareToPlay()
             self.player = player
             duration = player.duration
@@ -67,7 +94,25 @@ final class LessonAudioPlayer {
         player.play()
         isPlaying = true
         currentTime = player.currentTime
+        refreshActiveIndex()
         startTicker()
+    }
+
+    /// Move the playhead without deciding whether to play: scrubbing a paused
+    /// recording should leave it paused, and scrubbing a playing one should not
+    /// interrupt it.
+    func seek(to time: Double) {
+        guard let player else { return }
+        player.currentTime = clamp(time, player)
+        currentTime = player.currentTime
+        refreshActiveIndex()
+    }
+
+    /// Change speed without disturbing playback: AVAudioPlayer applies a new
+    /// rate to a running player, and remembers it for the next `play()`.
+    func setRate(_ value: Double) {
+        rate = value
+        player?.rate = Float(value)
     }
 
     func togglePlayPause() {
@@ -97,10 +142,34 @@ final class LessonAudioPlayer {
         configuredSession = false
     }
 
-    /// Index of the segment covering the playhead, for highlighting.
-    func activeSegmentIndex(in segments: [TranscriptSegment]) -> Int? {
-        guard isPlaying || currentTime > 0 else { return nil }
-        return segments.firstIndex { currentTime >= $0.t0 && currentTime < $0.t1 }
+    /// Hand the player the transcript it is playing, so it can say which line
+    /// is being spoken. Called once, when the lesson's segments arrive.
+    func track(_ segments: [TranscriptSegment]) {
+        self.segments = segments
+        refreshActiveIndex()
+    }
+
+    /// Recompute the spoken line, and publish it only when it actually moved.
+    /// Assigning an equal value would still notify — Observation does not
+    /// compare — and that is exactly the redraw this is here to avoid.
+    private func refreshActiveIndex() {
+        let index = segmentIndex(at: currentTime)
+        if index != activeIndex { activeIndex = index }
+    }
+
+    private func segmentIndex(at time: Double) -> Int? {
+        guard isPlaying || time > 0 else { return nil }
+        // Playback almost always sits in the line it was in, or the next one.
+        // Only a seek needs the full scan.
+        if let active = activeIndex, segments.indices.contains(active) {
+            if time >= segments[active].t0, time < segments[active].t1 { return active }
+            let next = active + 1
+            if segments.indices.contains(next),
+               time >= segments[next].t0, time < segments[next].t1 {
+                return next
+            }
+        }
+        return segments.firstIndex { time >= $0.t0 && time < $0.t1 }
     }
 
     private func clamp(_ time: Double, _ player: AVAudioPlayer) -> Double {
@@ -118,8 +187,10 @@ final class LessonAudioPlayer {
                     // finished (or was paused elsewhere): reset to the start
                     self.isPlaying = false
                     self.currentTime = 0
+                    self.activeIndex = nil
                     return
                 }
+                self.refreshActiveIndex()
             }
         }
     }
