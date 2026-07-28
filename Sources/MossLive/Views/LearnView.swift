@@ -294,10 +294,10 @@ struct LearnView: View {
                 Spacer(minLength: 8)
                 Text(detail)
                     .font(.subheadline)
-                    .foregroundStyle(Self.headerInk.opacity(0.7))
+                    .foregroundStyle(Self.headerInk.opacity(0.78))
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Self.headerInk.opacity(0.5))
+                    .foregroundStyle(Self.headerInk.opacity(0.6))
             }
             .font(.headline)
             .foregroundStyle(Self.headerInk)
@@ -498,11 +498,15 @@ private struct SubjectDeckCard: View {
     }
 
     @State private var route: Route?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var name: String { subject.subject ?? "Ohne Fach" }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        // Read out here rather than inside the transition closure, which is
+        // `@Sendable` and would otherwise be capturing the view itself.
+        let moves = !reduceMotion
+        return ZStack(alignment: .topTrailing) {
             NavigationLink {
                 // Tapping the card does the obvious thing: learn what is due,
                 // or — when nothing is — practise, rather than opening a screen
@@ -543,6 +547,15 @@ private struct SubjectDeckCard: View {
             case .review: reviewDestination
             case .practice: practiceDestination
             }
+        }
+        // Cards settle in as they reach the middle of the scroll view rather
+        // than arriving already there. Kept small on purpose: a card that is
+        // still visibly half-faded at the bottom of the screen reads as a bug
+        // rather than as depth.
+        .scrollTransition { content, phase in
+            content
+                .opacity(phase.isIdentity ? 1 : 0.8)
+                .scaleEffect(phase.isIdentity || !moves ? 1 : 0.97)
         }
     }
 

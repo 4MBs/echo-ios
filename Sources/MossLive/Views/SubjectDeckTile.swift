@@ -33,6 +33,9 @@ struct CardCornerDisc: Shape {
 /// touched — Mathematik stays blue, Biologie stays green — which is the whole
 /// reason this is a transform rather than a second palette to keep in step.
 ///
+/// Under Increase Contrast the cap drops again, which is what Apple asks of a
+/// custom colour that does not clear the ratio on its own.
+///
 /// Grey is left alone: it has no hue worth preserving and no saturation to
 /// raise, and raising it would turn Sonstige red.
 func deckCardColor(_ color: Color, contrast: ColorSchemeContrast = .standard) -> Color {
@@ -43,7 +46,7 @@ func deckCardColor(_ color: Color, contrast: ColorSchemeContrast = .standard) ->
     guard UIColor(color).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
         return color
     }
-    let ceiling: CGFloat = contrast == .increased ? 0.56 : 0.74
+    let ceiling: CGFloat = contrast == .increased ? 0.54 : 0.70
     let minimum: CGFloat = saturation > 0.12 ? 0.52 : 0
     return Color(
         hue: Double(hue),
@@ -92,9 +95,14 @@ struct SubjectDeckTile: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
                 .multilineTextAlignment(.leading)
+            // Bold, and not dimmed much. Apple's contrast table asks 4.5:1 of
+            // text at or below 17pt and only 3:1 of bold text at any size —
+            // and 4.5:1 is not something white on a saturated fill reaches
+            // without taking the fill so dark that the card stops being the
+            // subject's colour.
             Text(statusLabel)
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.82))
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
         }
         // Nothing here needs to clear the ellipsis: the glyph is on the far
@@ -133,10 +141,12 @@ struct DeckCardMenu<Content: View>: View {
             Image(systemName: "ellipsis")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
+                // A glyph is mostly empty space, and empty space is not hit
+                // tested. Without a shape only the three dots themselves would
+                // take a tap; with it the whole 44pt target does.
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityLabel("Weitere Optionen")
     }
