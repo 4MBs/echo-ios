@@ -318,7 +318,13 @@ struct SubjectView: View {
         Group {
             if lessons.isEmpty {
                 ContentUnavailableView {
-                    Label("Noch keine Aufnahmen", systemImage: subjectStyle(for: folder.name).symbol)
+                    Label {
+                        Text("Noch keine Aufnahmen")
+                    } icon: {
+                        Image(subjectStyle(for: folder.name).icon)
+                            .resizable()
+                            .scaledToFit()
+                    }
                 } description: {
                     Text(folder.isOther
                         ? "Aufnahmen außerhalb des Stundenplans landen hier."

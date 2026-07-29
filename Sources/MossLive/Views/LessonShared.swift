@@ -75,9 +75,18 @@ struct SubjectTint {
     }
 }
 
-/// SF Symbol, folder colour and card colour for a school subject.
+/// Icon, folder colour and card colour for a school subject.
 struct SubjectStyle {
-    let symbol: String
+    /// The name of an image set in `Assets.xcassets/Subjects`, drawn from
+    /// Phosphor's bold weight.
+    ///
+    /// Not an SF Symbol any more. Apple's set covers most of a timetable well,
+    /// but it has no justice scales for Ethik and no church for Religion, and
+    /// several of the near-misses it does have read as a smudge at 26pt in
+    /// white — `testtube.2` for Chemie being the one that got noticed. Phosphor
+    /// has all of them, drawn on one grid, and its bold weight is a stroke
+    /// heavy enough to survive white-on-saturated instead of blooming away.
+    let icon: String
     /// What the Stunden folder is washed with. The system palette, as that grid
     /// has always drawn it.
     let color: Color
@@ -85,17 +94,6 @@ struct SubjectStyle {
     /// tints a pale shape behind black text, a card *is* the colour, and one
     /// value cannot be right for both.
     let tint: SubjectTint
-
-    /// The same glyph without its fill.
-    ///
-    /// For the places a symbol is drawn large and in white on the subject's own
-    /// colour: at 26pt a filled glyph is a white blob, and it is the outline
-    /// that reads as an atom or a leaf. Derived rather than listed a second
-    /// time, because every entry below is either already an outline or a `.fill`
-    /// whose base name is itself a symbol.
-    var outlineSymbol: String {
-        symbol.hasSuffix(".fill") ? String(symbol.dropLast(5)) : symbol
-    }
 }
 
 /// The catch-all folder: everything recorded while no lesson was running — the
@@ -142,10 +140,10 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
     // unrecognised subject should not arrive looking like the timetable's most
     // recognisable one.
     let fallback = SubjectStyle(
-        symbol: "graduationcap.fill", color: .blue, tint: .init(0x00_B8_D4)
+        icon: "ph.graduation-cap", color: .blue, tint: .init(0x00_B8_D4)
     )
     let catchAll = SubjectStyle(
-        symbol: "tray.full.fill", color: .gray, tint: .init(0x54_6E_7A)
+        icon: "ph.tray", color: .gray, tint: .init(0x54_6E_7A)
     )
     guard let subject = subject?.lowercased(), !subject.isEmpty else {
         return catchAll
@@ -154,49 +152,49 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
         ("sonstige", catchAll),
         // compounds first — each of these contains a keyword further down
         ("wirtschaft", .init(
-            symbol: "chart.line.uptrend.xyaxis", color: .subjectAmber, tint: .init(0x00_BF_A5)
+            icon: "ph.chart-line-up", color: .subjectAmber, tint: .init(0x00_BF_A5)
         )),
-        ("mint", .init(symbol: "gearshape.2.fill", color: .cyan, tint: .init(0x76_FF_03))),
-        ("förderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0xAE_EA_00))),
-        ("forderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0xAE_EA_00))),
-        ("hospitation", .init(symbol: "eye.fill", color: .subjectSteel, tint: .init(0x6D_4C_41))),
-        ("mathe", .init(symbol: "x.squareroot", color: .blue, tint: .init(0x29_79_FF))),
-        ("math", .init(symbol: "x.squareroot", color: .blue, tint: .init(0x29_79_FF))),
-        ("physik", .init(symbol: "atom", color: .indigo, tint: .init(0x67_3A_B7))),
-        ("chemie", .init(symbol: "testtube.2", color: .purple, tint: .init(0xF5_00_57))),
-        ("bio", .init(symbol: "leaf.fill", color: .green, tint: .init(0x64_DD_17))),
+        ("mint", .init(icon: "ph.gear", color: .cyan, tint: .init(0x76_FF_03))),
+        ("förderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAE_EA_00))),
+        ("forderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAE_EA_00))),
+        ("hospitation", .init(icon: "ph.eye", color: .subjectSteel, tint: .init(0x6D_4C_41))),
+        ("mathe", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x29_79_FF))),
+        ("math", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x29_79_FF))),
+        ("physik", .init(icon: "ph.atom", color: .indigo, tint: .init(0x67_3A_B7))),
+        ("chemie", .init(icon: "ph.flask", color: .purple, tint: .init(0xF5_00_57))),
+        ("bio", .init(icon: "ph.plant", color: .green, tint: .init(0x64_DD_17))),
         ("informatik", .init(
-            symbol: "desktopcomputer", color: .subjectSteel, tint: .init(0x1D_E9_B6)
+            icon: "ph.code", color: .subjectSteel, tint: .init(0x1D_E9_B6)
         )),
         ("deutsch", .init(
-            symbol: "text.book.closed.fill", color: .red, tint: .init(0xFF_17_44)
+            icon: "ph.book-open-text", color: .red, tint: .init(0xFF_17_44)
         )),
         ("englisch", .init(
-            symbol: "character.book.closed.fill", color: .orange, tint: .init(0xFF_D6_00)
+            icon: "ph.translate", color: .orange, tint: .init(0xFF_D6_00)
         )),
         ("franz", .init(
-            symbol: "character.book.closed.fill", color: .subjectPlum, tint: .init(0xFF_AB_00)
+            icon: "ph.chat-teardrop-text", color: .subjectPlum, tint: .init(0xFF_AB_00)
         )),
         ("latein", .init(
-            symbol: "building.columns.fill", color: .subjectTerracotta, tint: .init(0xAA_00_FF)
+            icon: "ph.scroll", color: .subjectTerracotta, tint: .init(0xAA_00_FF)
         )),
         ("spanisch", .init(
-            symbol: "character.book.closed.fill", color: .yellow, tint: .init(0xFF_3D_00)
+            icon: "ph.chats-circle", color: .yellow, tint: .init(0xFF_3D_00)
         )),
-        ("geschichte", .init(symbol: "hourglass", color: .brown, tint: .init(0xFF_6D_00))),
+        ("geschichte", .init(icon: "ph.hourglass", color: .brown, tint: .init(0xFF_6D_00))),
         ("erdkunde", .init(
-            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0xDD_2C_00)
+            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD_2C_00)
         )),
         ("geo", .init(
-            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0xDD_2C_00)
+            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD_2C_00)
         )),
-        ("musik", .init(symbol: "music.note", color: .subjectPlum, tint: .init(0x62_00_EA))),
-        ("kunst", .init(symbol: "paintpalette.fill", color: .pink, tint: .init(0xD5_00_F9))),
-        ("sport", .init(symbol: "figure.run", color: .mint, tint: .init(0x00_C8_53))),
-        ("religion", .init(symbol: "book.closed.fill", color: .indigo, tint: .init(0x3F_51_B5))),
-        ("ethik", .init(symbol: "person.2.fill", color: .subjectSteel, tint: .init(0x30_4F_FE))),
+        ("musik", .init(icon: "ph.music-notes", color: .subjectPlum, tint: .init(0x62_00_EA))),
+        ("kunst", .init(icon: "ph.palette", color: .pink, tint: .init(0xD5_00_F9))),
+        ("sport", .init(icon: "ph.person-simple-run", color: .mint, tint: .init(0x00_C8_53))),
+        ("religion", .init(icon: "ph.church", color: .indigo, tint: .init(0x3F_51_B5))),
+        ("ethik", .init(icon: "ph.scales", color: .subjectSteel, tint: .init(0x30_4F_FE))),
         ("politik", .init(
-            symbol: "building.columns.fill", color: .subjectAmber, tint: .init(0x00_91_EA)
+            icon: "ph.bank", color: .subjectAmber, tint: .init(0x00_91_EA)
         )),
     ]
     for (keyword, style) in map where subject.contains(keyword) {

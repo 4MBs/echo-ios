@@ -74,6 +74,8 @@ struct SubjectFolderTile: View {
     let count: Int
     let style: SubjectStyle
 
+    @ScaledMetric(relativeTo: .headline) private var iconSize: CGFloat = 24
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             FolderShape()
@@ -98,8 +100,10 @@ struct SubjectFolderTile: View {
 
     private var label: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Image(systemName: style.symbol)
-                .font(.system(size: 24, weight: .semibold))
+            Image(style.icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: iconSize, height: iconSize)
                 .foregroundStyle(style.color)
                 .frame(height: 28, alignment: .leading)
             Spacer(minLength: 10)
