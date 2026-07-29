@@ -347,16 +347,22 @@ struct SubjectView: View {
     }
 
     private var list: some View {
-        List {
-            ForEach(ordered) { lesson in
+        let rows = ordered
+        let first = rows.first?.id
+        let last = rows.last?.id
+        return List {
+            ForEach(rows) { lesson in
                 NavigationLink {
                     LessonDetailView(api: api, info: lesson)
                 } label: {
                     LessonRow(info: lesson)
                 }
+                .listRowBackground(
+                    rowBackground(isFirst: lesson.id == first, isLast: lesson.id == last)
+                )
             }
             .onDelete { offsets in
-                let targets = offsets.map { ordered[$0] }
+                let targets = offsets.map { rows[$0] }
                 Task {
                     for lesson in targets {
                         await delete(lesson)
@@ -367,15 +373,56 @@ struct SubjectView: View {
         .listStyle(.insetGrouped)
     }
 
+    /// The row's rounded background, drawn here rather than left to the list.
+    ///
+    /// An inset-grouped list does not round the row — it rounds a background
+    /// *behind* the row, and which of its corners get rounded depends on where
+    /// the row sits in its section. While a swipe is in flight the swipe
+    /// container re-lays that background out without re-resolving the position,
+    /// so the corners go square for the length of the drag and come back when it
+    /// settles. That is the squared-off box; it is a SwiftUI bug, still open on
+    /// iOS 26, and reported as a regression from iOS 18.
+    ///
+    /// A `listRowBackground` occupies the same anchored slot but belongs to us,
+    /// so it keeps its corners for the whole gesture. What it gives up is the
+    /// iOS 26 flourish where Mail rounds a row *further* to match the swipe
+    /// buttons — which is the very thing that is broken here, so there is not
+    /// much to give up.
+    private func rowBackground(isFirst: Bool, isLast: Bool) -> some View {
+        let radius: CGFloat = 12
+        return UnevenRoundedRectangle(
+            topLeadingRadius: isFirst ? radius : 0,
+            bottomLeadingRadius: isLast ? radius : 0,
+            bottomTrailingRadius: isLast ? radius : 0,
+            topTrailingRadius: isFirst ? radius : 0,
+            style: .continuous
+        )
+        // The colour an inset-grouped row actually is, so this is the same
+        // surface in both appearances rather than a white that goes wrong at
+        // night.
+        .fill(Color(.secondarySystemGroupedBackground))
+    }
+
+    /// Gone from the list first, restored if the server refuses.
+    ///
+    /// The row used to wait for a round trip before it moved, so letting go of a
+    /// swipe was followed by a pause with the row sitting half open — over
+    /// Tailscale, a long one. No animation can be made to feel smooth with a
+    /// network request in front of it.
+    ///
+    /// The removal itself is not animated here, and not because nobody tried:
+    /// `List` manages its own insert and delete animations and ignores
+    /// `withAnimation`, `.animation(_:value:)` and `.transition` alike. The
+    /// `withAnimation` that used to wrap this line did nothing at all.
     private func delete(_ lesson: BackendAPI.LessonInfo) async {
+        let previous = lessons
+        lessons.removeAll { $0.id == lesson.id }
         do {
             try await api.deleteLesson(id: lesson.id)
             BackendAPI.purgeCachedAudio(id: lesson.id)
-            withAnimation(.snappy) {
-                lessons.removeAll { $0.id == lesson.id }
-            }
             await onChanged()
         } catch {
+            lessons = previous
             actionError = error.localizedDescription
         }
     }

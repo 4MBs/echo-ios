@@ -42,10 +42,23 @@ struct SubjectDeckTile: View {
     private var isEmpty: Bool { lessonCount == 0 }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            style.tint.cardFill(contrast: contrast)
+        let shade = style.tint.scrim(contrast: contrast)
+        return ZStack(alignment: .topLeading) {
+            style.tint.color
             CardCornerDisc()
-                .fill(.black.opacity(0.24))
+                .fill(.black.opacity(0.20))
+            // Only where the type is. For most of the wheel both ends are nought
+            // and this gradient is not there at all.
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(shade.top), location: 0),
+                    .init(color: .clear, location: 0.34),
+                    .init(color: .clear, location: 0.52),
+                    .init(color: .black.opacity(shade.bottom), location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
             label
         }
         // Saturation, not opacity: a card faded against the page background

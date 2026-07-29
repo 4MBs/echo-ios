@@ -91,10 +91,6 @@ struct SubjectFolderTile: View {
                 )
             label
         }
-        // Nothing in it, and it says so before it is tapped. Saturation rather
-        // than opacity, so the name stays as readable as its neighbours' — this
-        // folder is not less important, it is only empty.
-        .saturation(count == 0 ? 0.16 : 1)
         .aspectRatio(1.04, contentMode: .fit)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(name), \(countLabel)")
@@ -104,7 +100,7 @@ struct SubjectFolderTile: View {
         VStack(alignment: .leading, spacing: 0) {
             Image(systemName: style.symbol)
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(style.tint.ink)
+                .foregroundStyle(style.color)
                 .frame(height: 28, alignment: .leading)
             Spacer(minLength: 10)
             Text(name)
