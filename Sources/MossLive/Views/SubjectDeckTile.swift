@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// The disc cut into a deck card's top-right corner.
 ///
@@ -23,38 +22,6 @@ struct CardCornerDisc: Shape {
     }
 }
 
-/// The subject's colour, taken into the band white type can sit on.
-///
-/// `subjectStyle` picks its colours for a 29pt icon tile, where the colour is a
-/// marker beside black text and full brightness is exactly right. Filling a
-/// whole card with the same value and putting white on top is a different job:
-/// white on system yellow is about 1.4:1, which nobody can read. So every card
-/// fill is capped in brightness and floored in saturation. The hue is never
-/// touched — Mathematik stays blue, Biologie stays green — which is the whole
-/// reason this is a transform rather than a second palette to keep in step.
-///
-/// Under Increase Contrast the cap drops again, which is what Apple asks of a
-/// custom colour that does not clear the ratio on its own.
-///
-/// Grey is left alone: it has no hue worth preserving and no saturation to
-/// raise, and raising it would turn Sonstige red.
-func deckCardColor(_ color: Color, contrast: ColorSchemeContrast = .standard) -> Color {
-    var hue: CGFloat = 0
-    var saturation: CGFloat = 0
-    var brightness: CGFloat = 0
-    var alpha: CGFloat = 0
-    guard UIColor(color).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
-        return color
-    }
-    let ceiling: CGFloat = contrast == .increased ? 0.54 : 0.70
-    let minimum: CGFloat = saturation > 0.12 ? 0.52 : 0
-    return Color(
-        hue: Double(hue),
-        saturation: Double(max(saturation, minimum)),
-        brightness: Double(min(brightness, ceiling))
-    )
-}
-
 /// One subject's deck as a card: its colour, its glyph, its name, and how much
 /// of it is waiting.
 ///
@@ -76,9 +43,9 @@ struct SubjectDeckTile: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            deckCardColor(style.color, contrast: contrast)
+            style.tint.cardFill(contrast: contrast)
             CardCornerDisc()
-                .fill(.black.opacity(0.22))
+                .fill(.black.opacity(0.24))
             label
         }
         // Saturation, not opacity: a card faded against the page background
@@ -160,18 +127,6 @@ struct DeckCardMenu<Content: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Weitere Optionen")
-    }
-}
-
-/// A card that answers the finger: it dips a little while held, and comes back.
-///
-/// `.plain` leaves a card with no press state at all, which on a tile this size
-/// reads as a tap that did not register.
-struct DeckCardButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.smooth(duration: 0.22), value: configuration.isPressed)
     }
 }
 

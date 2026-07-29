@@ -19,6 +19,8 @@ struct LessonsView: View {
     @State private var loadError: Error?
     @State private var sort: FolderSort = .name
     @State private var searchText = ""
+    /// The subject whose folder was tapped while it had nothing in it.
+    @State private var emptySubject: String?
 
     private var api: BackendAPI { model.api }
 
@@ -31,6 +33,10 @@ struct LessonsView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         sortMenu
                     }
+                }
+                .emptySubjectNotice($emptySubject) { subject in
+                    "In \(subject) ist noch nichts aufgenommen. "
+                        + "Nimm eine Stunde in diesem Fach auf, dann erscheint sie hier."
                 }
         }
         .task { await load() }
@@ -129,16 +135,7 @@ struct LessonsView: View {
                 spacing: 22
             ) {
                 ForEach(folders) { folder in
-                    NavigationLink {
-                        SubjectView(api: api, folder: folder) { await load() }
-                    } label: {
-                        SubjectFolderTile(
-                            name: folder.name,
-                            count: folder.lessons.count,
-                            style: subjectStyle(for: folder.name)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    folderCard(folder)
                 }
             }
             .padding(.horizontal, 24)
@@ -147,6 +144,38 @@ struct LessonsView: View {
         }
         .groupedScreen()
         .refreshable { await load() }
+    }
+
+    /// A link when the folder has something in it, a button that says so when it
+    /// does not — the same bargain the Lernen grid makes, and for the same
+    /// reason: an empty folder is drawn because the subject exists, but opening
+    /// it would land on a screen with one sentence on it.
+    @ViewBuilder
+    private func folderCard(_ folder: SubjectFolder) -> some View {
+        if folder.lessons.isEmpty {
+            Button {
+                emptySubject = folder.name
+            } label: {
+                tile(folder)
+            }
+            .buttonStyle(PressableCardStyle())
+            .accessibilityHint("Noch keine Aufnahmen")
+        } else {
+            NavigationLink {
+                SubjectView(api: api, folder: folder) { await load() }
+            } label: {
+                tile(folder)
+            }
+            .buttonStyle(PressableCardStyle())
+        }
+    }
+
+    private func tile(_ folder: SubjectFolder) -> some View {
+        SubjectFolderTile(
+            name: folder.name,
+            count: folder.lessons.count,
+            style: subjectStyle(for: folder.name)
+        )
     }
 
     private var sortMenu: some View {

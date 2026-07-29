@@ -71,20 +71,10 @@ struct LearnView: View {
                 .navigationDestination(item: $deckRoute) { route in
                     deckDestination(route)
                 }
-                .alert(
-                    "Noch keine Aufnahmen",
-                    isPresented: Binding(
-                        get: { emptySubject != nil },
-                        set: { if !$0 { emptySubject = nil } }
-                    ),
-                    presenting: emptySubject
-                ) { _ in
-                    Button("OK", role: .cancel) {}
-                } message: { subject in
-                    Text("In \(subject) ist noch nichts aufgenommen. "
-                        + "Nimm eine Stunde in diesem Fach auf, dann entstehen hier Karten.")
+                .emptySubjectNotice($emptySubject) { subject in
+                    "In \(subject) ist noch nichts aufgenommen. "
+                        + "Nimm eine Stunde in diesem Fach auf, dann entstehen hier Karten."
                 }
-                .sensoryFeedback(.warning, trigger: emptySubject)
         }
     }
 
@@ -408,7 +398,7 @@ struct LearnView: View {
             .background(.white, in: Capsule())
             .contentShape(Capsule())
         }
-        .buttonStyle(DeckCardButtonStyle())
+        .buttonStyle(PressableCardStyle())
     }
 
     // MARK: - Fächer
@@ -597,7 +587,7 @@ private struct SubjectDeckCard: View {
     private var opener: some View {
         if folder.isEmpty {
             Button(action: onBlocked) { tile }
-                .buttonStyle(DeckCardButtonStyle())
+                .buttonStyle(PressableCardStyle())
                 .accessibilityHint("Noch keine Aufnahmen")
         } else {
             NavigationLink {
@@ -611,7 +601,7 @@ private struct SubjectDeckCard: View {
             } label: {
                 tile
             }
-            .buttonStyle(DeckCardButtonStyle())
+            .buttonStyle(PressableCardStyle())
         }
     }
 
