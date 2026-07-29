@@ -38,6 +38,9 @@ struct SubjectDeckTile: View {
     let style: SubjectStyle
 
     @Environment(\.colorSchemeContrast) private var contrast
+    /// Asset images do not scale with Dynamic Type on their own, and an SF
+    /// Symbol sized by `.font` did.
+    @ScaledMetric(relativeTo: .title3) private var iconSize: CGFloat = 26
 
     private var isEmpty: Bool { lessonCount == 0 }
 
@@ -73,8 +76,12 @@ struct SubjectDeckTile: View {
 
     private var label: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Image(systemName: style.outlineSymbol)
-                .font(.system(size: 26, weight: .regular))
+            // An asset, not a symbol, so it takes its size from a frame rather
+            // than from a font — and it is not resizable until asked.
+            Image(style.icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: iconSize, height: iconSize)
                 .foregroundStyle(.white)
                 .frame(height: 30, alignment: .leading)
             Spacer(minLength: 12)
