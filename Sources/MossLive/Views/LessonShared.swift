@@ -332,13 +332,17 @@ struct EmptyState: View {
     }
 }
 
-/// One lesson as a row inside its subject's folder.
+/// One lesson as a row in the Lernen tab's subject list, where it sits beside
+/// the count of what is due and has to stay the height of one.
 ///
-/// The date leads, because inside a folder that already says "Mathematik" the
+/// The date leads, because inside a list that already says "Mathematik" the
 /// date is the only thing that tells one recording from the next — everything
 /// the old row led with (the subject tile, the subject name, the room) was the
 /// same on every row down the page. What follows it is the opening of the
 /// summary, so the list can be read for what was taught rather than for when.
+///
+/// Stunden draws its own row (`SubjectView.swift`): that screen is nothing but
+/// lessons, so it can afford to lead with the topic and let the date follow.
 struct LessonRow: View {
     let info: BackendAPI.LessonInfo
 
