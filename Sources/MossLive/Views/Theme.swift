@@ -54,6 +54,19 @@ enum RecordTint: String, CaseIterable, Identifiable {
     }
 }
 
+/// A tile that answers the finger: it dips a little while held, and comes back.
+///
+/// `.plain` leaves a card that size with no press state at all, which reads as a
+/// tap that did not register. Shared by both grids, so a folder in Stunden and a
+/// subject in Lernen behave the same under the same finger.
+struct PressableCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.smooth(duration: 0.22), value: configuration.isPressed)
+    }
+}
+
 extension View {
     /// Standard grouped screen background (the Settings-style canvas).
     func groupedScreen() -> some View {
