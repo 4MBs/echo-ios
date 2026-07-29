@@ -10,8 +10,14 @@ import SwiftUI
 /// apart by. The lesson's topic leads now, in the size a heading is, and the
 /// date moves down to the line that carries the length with it.
 ///
-/// Two things follow from that. The rows are tall enough that one column of
-/// them wastes an iPad, so past `twoColumnWidth` the list is cut in half and set
+/// The heading is one line and never two. It is the topic the summarizer
+/// writes, three or four words, so a column of rows is a column of short
+/// headings with air between them — not the page of wrapped bold type it was
+/// when the heading was the first *sentence* of a summary, which is what this
+/// looked like the first time and why it did not look like anything.
+///
+/// Two more things follow. The rows are tall enough that one column of them
+/// wastes an iPad, so past `twoColumnWidth` the list is cut in half and set
 /// side by side — still read top to bottom, left column first, newest first.
 /// And a `List` is gone, which takes swipe-to-delete and the edit button with
 /// it: deleting a lesson is a long press on its row now, and it asks first,
@@ -61,7 +67,11 @@ struct SubjectView: View {
                 board
             }
         }
-        .navigationTitle(folder.name)
+        // No title. The page is opened by tapping a folder that says the
+        // subject's name, so a glass capsule repeating it sits between the
+        // header and the top of the screen saying nothing — the same reason the
+        // lesson page has no title either. The bar stays for the back button.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "Stunde löschen?",
@@ -98,8 +108,8 @@ struct SubjectView: View {
                     SubjectHoursHeader(total: totalSeconds, week: weekSeconds)
                     columns(width: geo.size.width)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
                 .padding(.bottom, 36)
                 // A deletion re-cuts the columns, so rows move between the two
                 // cards. `List` animated that itself; here it has to be asked.
@@ -113,7 +123,7 @@ struct SubjectView: View {
         let rows = ordered
         let wide = width >= Self.twoColumnWidth && rows.count >= Self.twoColumnMinimumRows
         let split = splitIntoColumns(rows, count: wide ? 2 : 1)
-        return HStack(alignment: .top, spacing: 20) {
+        return HStack(alignment: .top, spacing: 24) {
             ForEach(Array(split.enumerated()), id: \.offset) { _, column in
                 SubjectLessonCard(api: api, lessons: column) { pendingDelete = $0 }
                     .frame(maxWidth: .infinity)
@@ -250,7 +260,7 @@ private struct SubjectLessonCard: View {
     let lessons: [BackendAPI.LessonInfo]
     let onDelete: (BackendAPI.LessonInfo) -> Void
 
-    private static let corner: CGFloat = 22
+    private static let corner: CGFloat = 20
 
     var body: some View {
         VStack(spacing: 0) {
@@ -269,7 +279,9 @@ private struct SubjectLessonCard: View {
                     }
                 }
                 if index < lessons.count - 1 {
-                    Divider().padding(.horizontal, 24)
+                    // Inset to the rows' own text margin, so the rule starts
+                    // where the type does rather than at the card's edge.
+                    Divider().padding(.horizontal, 28)
                 }
             }
         }
@@ -297,32 +309,60 @@ private struct RowPressStyle: ButtonStyle {
 
 /// One recording, led by what was taught in it.
 ///
-/// Three lines: the topic, then when it was and how long it ran, then the rest
-/// of what the summary opened with. The topic is lifted out of the summary the
-/// server already sends with the list — nothing else in a lesson knows what it
-/// was about, and `title` is the timetable's label ("Physik · Raum 117"), which
-/// is the same on every row in the folder.
+/// Three lines: the topic, then when it was and how long it ran, then the
+/// opening of the summary. `title` cannot head it — that is the timetable's
+/// label, `Physik · Raum 117`, identical on every row in the folder — so the
+/// heading is the topic the summarizer writes as the summary's first line.
 ///
-/// A lesson whose summary has not been written yet leads with its date instead,
-/// spelled out, and the meta line drops the date it would otherwise repeat and
-/// carries the time of day.
+/// **The heading is one line, always.** It is the whole reason the page reads
+/// as a list rather than as a page of bold text: three or four words at the
+/// top of each row, the same shape every time. A lesson summarized before the
+/// server asked for a topic has none, and falls back to the opening sentence
+/// of its summary — prose in a heading's place, which is exactly what
+/// `scripts/backfill_topics.py` exists to fix. A lesson with no summary at all
+/// heads itself with its date, spelled out, and its meta line carries the time
+/// of day rather than repeating that date.
 private struct SubjectLessonRow: View {
     let info: BackendAPI.LessonInfo
 
+    /// What the three lines say. The topic and the excerpt are two fields when
+    /// the server wrote a topic and one field cut in two when it did not, so
+    /// the row asks once and lays out the answer rather than branching twice.
+    private struct Lines {
+        let headline: String
+        let detail: String?
+        /// The heading is the date, because there was nothing else to head it
+        /// with — which is what moves the date out of the meta line.
+        let dated: Bool
+    }
+
+    private var lines: Lines {
+        if let topic = info.topic?.trimmingCharacters(in: .whitespaces), !topic.isEmpty {
+            return Lines(headline: topic, detail: info.summaryExcerpt, dated: false)
+        }
+        if let derived = lessonTopic(from: info.summaryExcerpt) {
+            return Lines(headline: derived.headline, detail: derived.detail, dated: false)
+        }
+        return Lines(headline: dateHeadline, detail: nil, dated: true)
+    }
+
     var body: some View {
-        let topic = lessonTopic(from: info.summaryExcerpt)
-        return VStack(alignment: .leading, spacing: 7) {
-            Text(topic?.headline ?? dateHeadline)
+        let lines = self.lines
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(lines.headline)
                 .font(.title3.weight(.bold))
                 .foregroundStyle(.primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            meta(datedHeadline: topic == nil)
-            detail(topic)
+                .lineLimit(1)
+                // A long topic gives up a little size rather than its tail: the
+                // last words of "Ursachen der Französischen Revolution" are the
+                // ones that say which lesson this is.
+                .minimumScaleFactor(0.85)
+            meta(datedHeadline: lines.dated)
+            detail(lines)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 18)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 26)
         // The row is tappable across its whole width, not only where its text
         // happens to reach.
         .contentShape(Rectangle())
@@ -349,17 +389,17 @@ private struct SubjectLessonRow: View {
         .lineLimit(1)
     }
 
-    /// What the summary said after its opening sentence — or an honest word
-    /// about there being no summary, which is a state worth seeing at a glance
-    /// rather than a row that ends early for no visible reason.
+    /// The opening of the summary — or an honest word about there being none,
+    /// which is a state worth seeing at a glance rather than a row that ends
+    /// early for no visible reason.
     @ViewBuilder
-    private func detail(_ topic: LessonTopic?) -> some View {
-        if let line = topic?.detail {
+    private func detail(_ lines: Lines) -> some View {
+        if let line = lines.detail, !line.isEmpty {
             Text(line)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-        } else if topic == nil {
+        } else if lines.dated {
             Text(info.segmentCount > 0 ? "Noch keine Zusammenfassung" : "Kein Transkript")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
