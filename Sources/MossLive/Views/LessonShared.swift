@@ -1,14 +1,23 @@
 import Foundation
 import SwiftUI
 
-/// A subject's colour, kept as the numbers it was chosen as.
+/// The four folder colours the system palette has no entry for. Same character
+/// as the system ones — saturated, mid-brightness — so a folder built from one
+/// sits beside a folder built from `.blue` without looking imported.
+private extension Color {
+    static let subjectTerracotta = Color(hue: 0.045, saturation: 0.60, brightness: 0.82)
+    static let subjectAmber = Color(hue: 0.108, saturation: 0.82, brightness: 0.86)
+    static let subjectSteel = Color(hue: 0.575, saturation: 0.32, brightness: 0.62)
+    static let subjectPlum = Color(hue: 0.885, saturation: 0.48, brightness: 0.68)
+}
+
+/// A subject's card colour, kept as the numbers it was chosen as.
 ///
-/// Not a `Color`. Every screen that draws a subject needs a *variant* of its
-/// colour — a card gradient, a deeper ink for a glyph sitting on a pale wash of
-/// the same hue — and the only way back out of a `Color` is
-/// `UIColor(color).getHue(...)`, which resolves against whatever trait
-/// collection happens to be current. Keeping the three numbers makes all of it
-/// arithmetic instead of a round trip.
+/// Not a `Color`. A card is filled edge to edge with this and then written on in
+/// white, so the screen needs to know how bright it actually is — and the only
+/// way back out of a `Color` is `UIColor(color).getHue(...)`, which resolves
+/// against whatever trait collection happens to be current. Keeping the three
+/// numbers makes it arithmetic instead of a round trip.
 struct SubjectTint {
     let hue: Double
     let saturation: Double
@@ -23,99 +32,51 @@ struct SubjectTint {
     var color: Color {
         Color(hue: hue, saturation: saturation, brightness: brightness)
     }
-}
 
-/// SF Symbol + colour for a school subject's folder and card.
-struct SubjectStyle {
-    let symbol: String
-    let tint: SubjectTint
-
-    var color: Color { tint.color }
-
-    /// The same glyph without its fill.
+    /// How much black the card needs behind its type, at the foot and at the
+    /// head, for white to stay readable.
     ///
-    /// For the places a symbol is drawn large and in white on the subject's own
-    /// colour: at 26pt a filled glyph is a white blob, and it is the outline
-    /// that reads as an atom or a leaf. Derived rather than listed a second
-    /// time, because every entry below is either already an outline or a `.fill`
-    /// whose base name is itself a symbol.
-    var outlineSymbol: String {
-        symbol.hasSuffix(".fill") ? String(symbol.dropLast(5)) : symbol
-    }
-}
-
-extension SubjectTint {
-    /// The subject as a card: its own value at the top, a deeper cut of the same
-    /// hue at the bottom.
+    /// Nought across most of the wheel — a saturated blue or a purple is already
+    /// dark enough to write white on, and those cards are drawn as flat colour
+    /// and nothing else. It is the yellows and the greens that need help: white
+    /// on Spanisch is 1.2:1. They get it only where the type is, so the middle
+    /// of every card is the colour itself at full strength either way.
     ///
-    /// The first version of this flattened every subject to a single value
-    /// capped at 0.70 brightness, because white text on a saturated fill needs
-    /// somewhere dark to sit. It bought that legibility with the colour itself —
-    /// a wheel of muted slabs, half of which read as the same slab.
-    ///
-    /// A gradient buys both. The top is the palette's own value, untouched:
-    /// that is where the eye lands, and it is what makes a grid findable. The
-    /// bottom is what gets capped, and the bottom is exactly where the name and
-    /// the count are.
-    func cardFill(contrast: ColorSchemeContrast = .standard) -> LinearGradient {
-        let increased = contrast == .increased
-        let top = increased ? min(brightness, 0.78) : brightness
-        let deeper = min(1, saturation + 0.08)
-        let bottom = Self.legibleBottom(
-            hue: hue,
-            saturation: deeper,
-            start: min(top - 0.24, 0.72),
-            target: increased ? 4.6 : 3.2
-        )
-        return LinearGradient(
-            colors: [
-                Color(hue: hue, saturation: saturation, brightness: top),
-                Color(hue: hue, saturation: deeper, brightness: bottom),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+    /// This replaces a gradient that darkened the whole lower half of every
+    /// card to a fixed ceiling. That was legible and it was dead — it spent the
+    /// colour of twenty-four subjects to fix the six that needed fixing.
+    func scrim(contrast: ColorSchemeContrast = .standard) -> (top: Double, bottom: Double) {
+        let target = contrast == .increased ? 4.5 : 3.1
+        var alpha = 0.0
+        while alpha < 0.55 {
+            if Self.contrastWithWhite(hue: hue, saturation: saturation, brightness: brightness, over: alpha)
+                >= target {
+                break
+            }
+            alpha += 0.05
+        }
+        // The glyph is a thick stroke and forgives what 13pt type does not, so
+        // the head of the card is shaded about half as hard as the foot.
+        return (top: alpha * 0.45, bottom: alpha)
     }
 
-    /// The colour taken down far enough to be read as a mark on a pale wash of
-    /// itself. The folder tiles draw the glyph in the subject's colour over that
-    /// same colour at a third opacity; at 0.96 brightness the two are the same
-    /// value and the glyph vanishes into the card.
-    var ink: Color {
-        Color(hue: hue, saturation: min(1, saturation + 0.10), brightness: min(brightness, 0.58))
-    }
-
-    /// How light the bottom of a card may be: walk the brightness down until
-    /// white bold type clears `target`, rather than stopping at one number
-    /// picked for the average hue.
-    ///
-    /// It has to be luminance and not brightness, and the difference is the
-    /// whole reason this exists. A gold at 0.68 brightness is nearly twice as
-    /// luminous as a blue at the same number, so the flat cap this replaces let
-    /// every yellow through at 2.8:1 while taking the blues far darker than they
-    /// ever needed to go.
-    private static func legibleBottom(
+    /// White against this colour with `over` of black composited on top of it.
+    /// Black over a colour is the colour scaled, which is why this is a
+    /// multiply rather than a blend.
+    private static func contrastWithWhite(
         hue: Double,
         saturation: Double,
-        start: Double,
-        target: Double
+        brightness: Double,
+        over alpha: Double
     ) -> Double {
-        var brightness = start
-        while brightness > 0.24 {
-            let ratio = 1.05 / (luminance(hue: hue, saturation: saturation, brightness: brightness) + 0.05)
-            if ratio >= target { return brightness }
-            brightness -= 0.02
-        }
-        return 0.24
-    }
-
-    /// WCAG relative luminance of an HSB triple.
-    private static func luminance(hue: Double, saturation: Double, brightness: Double) -> Double {
         let (red, green, blue) = rgb(hue: hue, saturation: saturation, brightness: brightness)
+        let scale = 1 - alpha
         func channel(_ value: Double) -> Double {
-            value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            let scaled = value * scale
+            return scaled <= 0.03928 ? scaled / 12.92 : pow((scaled + 0.055) / 1.055, 2.4)
         }
-        return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+        let luminance = 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+        return 1.05 / (luminance + 0.05)
     }
 
     /// The standard HSB-to-RGB conversion, written out so these numbers stay
@@ -142,11 +103,34 @@ extension SubjectTint {
     }
 }
 
+/// SF Symbol, folder colour and card colour for a school subject.
+struct SubjectStyle {
+    let symbol: String
+    /// What the Stunden folder is washed with. The system palette, as that grid
+    /// has always drawn it.
+    let color: Color
+    /// What a Lernen card is filled with. A separate, brighter set: a folder
+    /// tints a pale shape behind black text, a card *is* the colour, and one
+    /// value cannot be right for both.
+    let tint: SubjectTint
+
+    /// The same glyph without its fill.
+    ///
+    /// For the places a symbol is drawn large and in white on the subject's own
+    /// colour: at 26pt a filled glyph is a white blob, and it is the outline
+    /// that reads as an atom or a leaf. Derived rather than listed a second
+    /// time, because every entry below is either already an outline or a `.fill`
+    /// whose base name is itself a symbol.
+    var outlineSymbol: String {
+        symbol.hasSuffix(".fill") ? String(symbol.dropLast(5)) : symbol
+    }
+}
+
 /// The catch-all folder: everything recorded while no lesson was running — the
 /// holidays, an evening, a free period.
 let otherSubjectName = "Sonstige"
 
-/// Best-effort keyword match from a subject name to its icon and colour.
+/// Best-effort keyword match from a subject name to its icon and colours.
 ///
 /// Matched against the name the backend labels a recording with, which is
 /// WebUntis' long name where it has one (`Mathematik`, `Wirtschaft/Politik`,
@@ -154,53 +138,77 @@ let otherSubjectName = "Sonstige"
 /// tried in order, so a compound name lands on the more specific entry:
 /// `Wirtschaft/Politik` is its own subject rather than either half.
 ///
-/// The colours used to be the system palette plus four of our own. The system
-/// set has thirteen distinct entries and the timetable needs twenty-two, so six
-/// subjects shared a colour outright — Informatik, Ethik and Hospitation were
-/// all the same grey-blue, Musik and Französisch the same plum — and several
-/// more were a nudge apart at tile size: `.cyan`, `.teal` and `.mint` read as
-/// one colour, and so did `.blue` and `.indigo`.
+/// Two colours per subject, because they do two different jobs. `color` is the
+/// system palette the Stunden folders have always used, washed out to a pastel
+/// behind black text. `tint` fills a Lernen card edge to edge and gets written
+/// on in white, so it has to be both brighter and further from its neighbours —
+/// the system set has thirteen distinct entries and the timetable needs
+/// twenty-two, which left Informatik, Ethik and Hospitation sharing one
+/// grey-blue and Musik sharing a plum with Französisch.
 ///
-/// These were placed by measuring instead. No two are closer than 21 units of
-/// CIE76 — roughly the distance at which two tiles stop being the same tile —
-/// and every one of them clears 3:1 against white bold type at the foot of its
-/// card, which is the ratio Apple's contrast table asks for.
+/// The card colours were placed by measurement: no two are closer than 27 units
+/// of CIE76, roughly where two tiles stop being the same tile, and they average
+/// 0.90 brightness at 0.79 saturation.
 func subjectStyle(for subject: String?) -> SubjectStyle {
-    // A subject nobody wrote a rule for: a pale blue-grey, so it reads as "not
-    // one of the known ones" rather than as Mathematik.
-    let fallback = SubjectStyle(symbol: "graduationcap.fill", tint: .init(0.630, 0.26, 0.88))
-    let catchAll = SubjectStyle(symbol: "tray.full.fill", tint: .init(0.600, 0.05, 0.62))
+    // A subject nobody wrote a rule for: a blue with the life turned down, so it
+    // reads as "not one of the known ones" rather than as Mathematik.
+    let fallback = SubjectStyle(
+        symbol: "graduationcap.fill", color: .blue, tint: .init(0.630, 0.30, 0.90)
+    )
+    let catchAll = SubjectStyle(
+        symbol: "tray.full.fill", color: .gray, tint: .init(0.600, 0.05, 0.64)
+    )
     guard let subject = subject?.lowercased(), !subject.isEmpty else {
         return catchAll
     }
     let map: [(String, SubjectStyle)] = [
         ("sonstige", catchAll),
         // compounds first — each of these contains a keyword further down
-        ("wirtschaft", .init(symbol: "chart.line.uptrend.xyaxis", tint: .init(0.112, 0.95, 0.90))),
-        ("mint", .init(symbol: "gearshape.2.fill", tint: .init(0.410, 0.88, 0.84))),
-        ("förderband", .init(symbol: "sparkles", tint: .init(0.205, 0.90, 0.88))),
-        ("forderband", .init(symbol: "sparkles", tint: .init(0.205, 0.90, 0.88))),
-        ("hospitation", .init(symbol: "eye.fill", tint: .init(0.585, 0.45, 0.50))),
-        ("mathe", .init(symbol: "x.squareroot", tint: .init(0.618, 0.90, 0.96))),
-        ("math", .init(symbol: "x.squareroot", tint: .init(0.618, 0.90, 0.96))),
-        ("physik", .init(symbol: "atom", tint: .init(0.710, 0.80, 0.90))),
-        ("chemie", .init(symbol: "testtube.2", tint: .init(0.805, 0.82, 0.82))),
-        ("bio", .init(symbol: "leaf.fill", tint: .init(0.365, 0.95, 0.64))),
-        ("informatik", .init(symbol: "desktopcomputer", tint: .init(0.510, 0.90, 0.88))),
-        ("deutsch", .init(symbol: "text.book.closed.fill", tint: .init(0.995, 0.84, 0.94))),
-        ("englisch", .init(symbol: "character.book.closed.fill", tint: .init(0.072, 0.92, 0.97))),
-        ("franz", .init(symbol: "character.book.closed.fill", tint: .init(0.870, 0.72, 0.90))),
-        ("latein", .init(symbol: "building.columns.fill", tint: .init(0.038, 0.80, 0.78))),
-        ("spanisch", .init(symbol: "character.book.closed.fill", tint: .init(0.148, 0.95, 0.94))),
-        ("geschichte", .init(symbol: "hourglass", tint: .init(0.088, 0.70, 0.58))),
-        ("erdkunde", .init(symbol: "globe.europe.africa.fill", tint: .init(0.462, 0.88, 0.72))),
-        ("geo", .init(symbol: "globe.europe.africa.fill", tint: .init(0.462, 0.88, 0.72))),
-        ("musik", .init(symbol: "music.note", tint: .init(0.755, 0.42, 0.99))),
-        ("kunst", .init(symbol: "paintpalette.fill", tint: .init(0.935, 0.62, 0.98))),
-        ("sport", .init(symbol: "figure.run", tint: .init(0.300, 0.68, 0.96))),
-        ("religion", .init(symbol: "book.closed.fill", tint: .init(0.665, 0.55, 0.84))),
-        ("ethik", .init(symbol: "person.2.fill", tint: .init(0.545, 0.62, 0.72))),
-        ("politik", .init(symbol: "building.columns.fill", tint: .init(0.115, 0.92, 0.66))),
+        ("wirtschaft", .init(
+            symbol: "chart.line.uptrend.xyaxis", color: .subjectAmber, tint: .init(0.125, 0.95, 0.92)
+        )),
+        ("mint", .init(symbol: "gearshape.2.fill", color: .cyan, tint: .init(0.431, 0.87, 0.93))),
+        ("förderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0.206, 0.89, 0.99))),
+        ("forderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0.206, 0.89, 0.99))),
+        ("hospitation", .init(symbol: "eye.fill", color: .subjectSteel, tint: .init(0.608, 0.62, 0.82))),
+        ("mathe", .init(symbol: "x.squareroot", color: .blue, tint: .init(0.623, 0.96, 0.86))),
+        ("math", .init(symbol: "x.squareroot", color: .blue, tint: .init(0.623, 0.96, 0.86))),
+        ("physik", .init(symbol: "atom", color: .indigo, tint: .init(0.697, 0.87, 0.96))),
+        ("chemie", .init(symbol: "testtube.2", color: .purple, tint: .init(0.805, 0.85, 0.88))),
+        ("bio", .init(symbol: "leaf.fill", color: .green, tint: .init(0.375, 0.95, 0.80))),
+        ("informatik", .init(
+            symbol: "desktopcomputer", color: .subjectSteel, tint: .init(0.512, 0.95, 0.89)
+        )),
+        ("deutsch", .init(
+            symbol: "text.book.closed.fill", color: .red, tint: .init(0.973, 0.87, 0.95)
+        )),
+        ("englisch", .init(
+            symbol: "character.book.closed.fill", color: .orange, tint: .init(0.077, 0.98, 0.99)
+        )),
+        ("franz", .init(
+            symbol: "character.book.closed.fill", color: .subjectPlum, tint: .init(0.872, 0.78, 0.92)
+        )),
+        ("latein", .init(
+            symbol: "building.columns.fill", color: .subjectTerracotta, tint: .init(0.032, 0.98, 0.97)
+        )),
+        ("spanisch", .init(
+            symbol: "character.book.closed.fill", color: .yellow, tint: .init(0.157, 0.98, 0.98)
+        )),
+        ("geschichte", .init(symbol: "hourglass", color: .brown, tint: .init(0.088, 0.80, 0.80))),
+        ("erdkunde", .init(
+            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0.467, 0.88, 0.80)
+        )),
+        ("geo", .init(
+            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0.467, 0.88, 0.80)
+        )),
+        ("musik", .init(symbol: "music.note", color: .subjectPlum, tint: .init(0.762, 0.55, 0.98))),
+        ("kunst", .init(symbol: "paintpalette.fill", color: .pink, tint: .init(0.938, 0.68, 0.98))),
+        ("sport", .init(symbol: "figure.run", color: .mint, tint: .init(0.272, 0.88, 0.99))),
+        ("religion", .init(symbol: "book.closed.fill", color: .indigo, tint: .init(0.641, 0.62, 0.99))),
+        ("ethik", .init(symbol: "person.2.fill", color: .subjectSteel, tint: .init(0.540, 0.94, 0.80))),
+        ("politik", .init(
+            symbol: "building.columns.fill", color: .subjectAmber, tint: .init(0.190, 0.71, 0.80)
+        )),
     ]
     for (keyword, style) in map where subject.contains(keyword) {
         return style
