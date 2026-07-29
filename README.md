@@ -65,11 +65,12 @@ free period — and is the one folder the timetable cannot supply.
 
 Open a folder and the subject's recordings are there, headed by the two figures
 a subject adds up to — how long it has been recorded for in total, and how much
-of that was this week. Every row leads with what the lesson was about, read out
-of the opening of its summary, then the date and how long it ran, then the rest
-of that opening; so the list reads for what was taught rather than for when.
-On a wide window the list is cut in half and set in two columns, still read top
-to bottom, newest first. A long press on a row deletes the lesson.
+of that was this week. Every row leads with **what the lesson was about**: three
+or four words, written by the AI as the first line of the summary, on one line
+and never two. Under it the date and how long it ran, then the opening of the
+summary — so the list reads for what was taught rather than for when. On a wide
+window the list is cut in half and set in two columns, still read top to bottom,
+newest first. A long press on a row deletes the lesson.
 
 A lesson is three cards: what it was about, the recording, and what was said.
 The summary writes itself when the recording ends — the archive is a dozen
