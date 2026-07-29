@@ -11,48 +11,50 @@ private extension Color {
     static let subjectPlum = Color(hue: 0.885, saturation: 0.48, brightness: 0.68)
 }
 
-/// A subject's card colour, kept as the numbers it was chosen as.
+/// A subject's card colour, as the hex it was taken from.
 ///
-/// Not a `Color`. A card is filled edge to edge with this and then written on in
-/// white, so the screen needs to know how bright it actually is — and the only
-/// way back out of a `Color` is `UIColor(color).getHue(...)`, which resolves
-/// against whatever trait collection happens to be current. Keeping the three
-/// numbers makes it arithmetic instead of a round trip.
+/// Hex, because these are lifted from published palettes rather than derived —
+/// the last set was computed by an optimiser balancing separation against
+/// contrast, and it produced exactly the muted wheel that gets described as
+/// matt. A card colour should be a value somebody already decided looks good.
+///
+/// Kept as components rather than as a `Color` because the card is filled edge
+/// to edge with this and then written on in white, so the screen has to know how
+/// bright it actually is. The only way back out of a `Color` is
+/// `UIColor(color).getHue(...)`, which resolves against whatever trait
+/// collection happens to be current.
 struct SubjectTint {
-    let hue: Double
-    let saturation: Double
-    let brightness: Double
+    let red: Double
+    let green: Double
+    let blue: Double
 
-    init(_ hue: Double, _ saturation: Double, _ brightness: Double) {
-        self.hue = hue
-        self.saturation = saturation
-        self.brightness = brightness
+    init(_ hex: UInt32) {
+        red = Double((hex >> 16) & 0xFF) / 255
+        green = Double((hex >> 8) & 0xFF) / 255
+        blue = Double(hex & 0xFF) / 255
     }
 
     var color: Color {
-        Color(hue: hue, saturation: saturation, brightness: brightness)
+        Color(red: red, green: green, blue: blue)
     }
 
     /// How much black the card needs behind its type, at the foot and at the
     /// head, for white to stay readable.
     ///
-    /// Nought across most of the wheel — a saturated blue or a purple is already
+    /// Nought across most of the wheel — a saturated blue or a red is already
     /// dark enough to write white on, and those cards are drawn as flat colour
-    /// and nothing else. It is the yellows and the greens that need help: white
-    /// on Spanisch is 1.2:1. They get it only where the type is, so the middle
-    /// of every card is the colour itself at full strength either way.
+    /// and nothing else. It is the yellows and the light greens that need help:
+    /// white on a vivid yellow is about 1.2:1. They get it only where the type
+    /// is, so the middle of every card is the colour itself at full strength
+    /// either way.
     ///
-    /// This replaces a gradient that darkened the whole lower half of every
-    /// card to a fixed ceiling. That was legible and it was dead — it spent the
-    /// colour of twenty-four subjects to fix the six that needed fixing.
+    /// This replaces a gradient that darkened the whole lower half of every card
+    /// to a fixed ceiling. That was legible and it was dead: it spent the colour
+    /// of twenty-four subjects to fix the handful that needed fixing.
     func scrim(contrast: ColorSchemeContrast = .standard) -> (top: Double, bottom: Double) {
         let target = contrast == .increased ? 4.5 : 3.1
         var alpha = 0.0
-        while alpha < 0.55 {
-            if Self.contrastWithWhite(hue: hue, saturation: saturation, brightness: brightness, over: alpha)
-                >= target {
-                break
-            }
+        while alpha < 0.55, contrastWithWhite(over: alpha) < target {
             alpha += 0.05
         }
         // The glyph is a thick stroke and forgives what 13pt type does not, so
@@ -60,16 +62,9 @@ struct SubjectTint {
         return (top: alpha * 0.45, bottom: alpha)
     }
 
-    /// White against this colour with `over` of black composited on top of it.
-    /// Black over a colour is the colour scaled, which is why this is a
-    /// multiply rather than a blend.
-    private static func contrastWithWhite(
-        hue: Double,
-        saturation: Double,
-        brightness: Double,
-        over alpha: Double
-    ) -> Double {
-        let (red, green, blue) = rgb(hue: hue, saturation: saturation, brightness: brightness)
+    /// White against this colour with `alpha` of black composited over it.
+    /// Black over a colour is the colour scaled, so this is a multiply.
+    private func contrastWithWhite(over alpha: Double) -> Double {
         let scale = 1 - alpha
         func channel(_ value: Double) -> Double {
             let scaled = value * scale
@@ -77,29 +72,6 @@ struct SubjectTint {
         }
         let luminance = 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
         return 1.05 / (luminance + 0.05)
-    }
-
-    /// The standard HSB-to-RGB conversion, written out so these numbers stay
-    /// fixed rather than depending on how a `UIColor` resolves itself.
-    private static func rgb(
-        hue: Double,
-        saturation: Double,
-        brightness: Double
-    ) -> (Double, Double, Double) {
-        guard saturation > 0 else { return (brightness, brightness, brightness) }
-        let sector = (hue - hue.rounded(.down)) * 6
-        let fraction = sector - sector.rounded(.down)
-        let low = brightness * (1 - saturation)
-        let falling = brightness * (1 - saturation * fraction)
-        let rising = brightness * (1 - saturation * (1 - fraction))
-        switch Int(sector) {
-        case 0: return (brightness, rising, low)
-        case 1: return (falling, brightness, low)
-        case 2: return (low, brightness, rising)
-        case 3: return (low, falling, brightness)
-        case 4: return (rising, low, brightness)
-        default: return (brightness, low, falling)
-        }
     }
 }
 
@@ -141,22 +113,39 @@ let otherSubjectName = "Sonstige"
 /// Two colours per subject, because they do two different jobs. `color` is the
 /// system palette the Stunden folders have always used, washed out to a pastel
 /// behind black text. `tint` fills a Lernen card edge to edge and gets written
-/// on in white, so it has to be both brighter and further from its neighbours —
-/// the system set has thirteen distinct entries and the timetable needs
-/// twenty-two, which left Informatik, Ethik and Hospitation sharing one
-/// grey-blue and Musik sharing a plum with Französisch.
+/// on in white.
 ///
-/// The card colours were placed by measurement: no two are closer than 27 units
-/// of CIE76, roughly where two tiles stop being the same tile, and they average
-/// 0.90 brightness at 0.79 saturation.
+/// **Where the card colours come from.** German schools do colour-code subjects
+/// — it is the Heftumschlag and Schnellhefter convention, the one on the
+/// Materialliste that comes home in September — and for the core it is
+/// consistent enough to be worth honouring: **Deutsch rot, Mathematik blau,
+/// Sachkunde/Biologie grün, Englisch gelb**, with Geschichte orange and Erdkunde
+/// braun recurring independently across schools. It is not codified anywhere
+/// (no KMK ruling, no stationer publishes a chart) and beyond those it collapses
+/// — every secondary school issues its own list, and WebUntis ships no default
+/// palette at all. So the convention is followed where it exists and the rest
+/// are placed for separation.
+///
+/// The values are **Material Design A400/A700**, taken as published rather than
+/// computed. Three palettes preceded this one, each derived by an optimiser
+/// trading saturation away for contrast, and each landed somewhere between muted
+/// and matt. Legibility is not the fill's job here — that is what the scrim is
+/// for — so the fill can simply be the most saturated published value that fits.
+/// They average 0.89 saturation at 0.88 value, and no two are closer than 12
+/// units of CIE76.
+///
+/// Erdkunde is the one place the convention is bent: *braun* has no vibrant
+/// value anywhere in Material, so it gets Deep Orange A700 — a burnt earth
+/// rather than a mud. Latein has no convention at all and takes Purpur.
 func subjectStyle(for subject: String?) -> SubjectStyle {
-    // A subject nobody wrote a rule for: a blue with the life turned down, so it
-    // reads as "not one of the known ones" rather than as Mathematik.
+    // A subject nobody wrote a rule for. Not a blue: blue is Mathematik, and an
+    // unrecognised subject should not arrive looking like the timetable's most
+    // recognisable one.
     let fallback = SubjectStyle(
-        symbol: "graduationcap.fill", color: .blue, tint: .init(0.630, 0.30, 0.90)
+        symbol: "graduationcap.fill", color: .blue, tint: .init(0x00_B8_D4)
     )
     let catchAll = SubjectStyle(
-        symbol: "tray.full.fill", color: .gray, tint: .init(0.600, 0.05, 0.64)
+        symbol: "tray.full.fill", color: .gray, tint: .init(0x54_6E_7A)
     )
     guard let subject = subject?.lowercased(), !subject.isEmpty else {
         return catchAll
@@ -165,49 +154,49 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
         ("sonstige", catchAll),
         // compounds first — each of these contains a keyword further down
         ("wirtschaft", .init(
-            symbol: "chart.line.uptrend.xyaxis", color: .subjectAmber, tint: .init(0.125, 0.95, 0.92)
+            symbol: "chart.line.uptrend.xyaxis", color: .subjectAmber, tint: .init(0x00_BF_A5)
         )),
-        ("mint", .init(symbol: "gearshape.2.fill", color: .cyan, tint: .init(0.431, 0.87, 0.93))),
-        ("förderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0.206, 0.89, 0.99))),
-        ("forderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0.206, 0.89, 0.99))),
-        ("hospitation", .init(symbol: "eye.fill", color: .subjectSteel, tint: .init(0.608, 0.62, 0.82))),
-        ("mathe", .init(symbol: "x.squareroot", color: .blue, tint: .init(0.623, 0.96, 0.86))),
-        ("math", .init(symbol: "x.squareroot", color: .blue, tint: .init(0.623, 0.96, 0.86))),
-        ("physik", .init(symbol: "atom", color: .indigo, tint: .init(0.697, 0.87, 0.96))),
-        ("chemie", .init(symbol: "testtube.2", color: .purple, tint: .init(0.805, 0.85, 0.88))),
-        ("bio", .init(symbol: "leaf.fill", color: .green, tint: .init(0.375, 0.95, 0.80))),
+        ("mint", .init(symbol: "gearshape.2.fill", color: .cyan, tint: .init(0x76_FF_03))),
+        ("förderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0xAE_EA_00))),
+        ("forderband", .init(symbol: "sparkles", color: .yellow, tint: .init(0xAE_EA_00))),
+        ("hospitation", .init(symbol: "eye.fill", color: .subjectSteel, tint: .init(0x6D_4C_41))),
+        ("mathe", .init(symbol: "x.squareroot", color: .blue, tint: .init(0x29_79_FF))),
+        ("math", .init(symbol: "x.squareroot", color: .blue, tint: .init(0x29_79_FF))),
+        ("physik", .init(symbol: "atom", color: .indigo, tint: .init(0x67_3A_B7))),
+        ("chemie", .init(symbol: "testtube.2", color: .purple, tint: .init(0xF5_00_57))),
+        ("bio", .init(symbol: "leaf.fill", color: .green, tint: .init(0x64_DD_17))),
         ("informatik", .init(
-            symbol: "desktopcomputer", color: .subjectSteel, tint: .init(0.512, 0.95, 0.89)
+            symbol: "desktopcomputer", color: .subjectSteel, tint: .init(0x1D_E9_B6)
         )),
         ("deutsch", .init(
-            symbol: "text.book.closed.fill", color: .red, tint: .init(0.973, 0.87, 0.95)
+            symbol: "text.book.closed.fill", color: .red, tint: .init(0xFF_17_44)
         )),
         ("englisch", .init(
-            symbol: "character.book.closed.fill", color: .orange, tint: .init(0.077, 0.98, 0.99)
+            symbol: "character.book.closed.fill", color: .orange, tint: .init(0xFF_D6_00)
         )),
         ("franz", .init(
-            symbol: "character.book.closed.fill", color: .subjectPlum, tint: .init(0.872, 0.78, 0.92)
+            symbol: "character.book.closed.fill", color: .subjectPlum, tint: .init(0xFF_AB_00)
         )),
         ("latein", .init(
-            symbol: "building.columns.fill", color: .subjectTerracotta, tint: .init(0.032, 0.98, 0.97)
+            symbol: "building.columns.fill", color: .subjectTerracotta, tint: .init(0xAA_00_FF)
         )),
         ("spanisch", .init(
-            symbol: "character.book.closed.fill", color: .yellow, tint: .init(0.157, 0.98, 0.98)
+            symbol: "character.book.closed.fill", color: .yellow, tint: .init(0xFF_3D_00)
         )),
-        ("geschichte", .init(symbol: "hourglass", color: .brown, tint: .init(0.088, 0.80, 0.80))),
+        ("geschichte", .init(symbol: "hourglass", color: .brown, tint: .init(0xFF_6D_00))),
         ("erdkunde", .init(
-            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0.467, 0.88, 0.80)
+            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0xDD_2C_00)
         )),
         ("geo", .init(
-            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0.467, 0.88, 0.80)
+            symbol: "globe.europe.africa.fill", color: .teal, tint: .init(0xDD_2C_00)
         )),
-        ("musik", .init(symbol: "music.note", color: .subjectPlum, tint: .init(0.762, 0.55, 0.98))),
-        ("kunst", .init(symbol: "paintpalette.fill", color: .pink, tint: .init(0.938, 0.68, 0.98))),
-        ("sport", .init(symbol: "figure.run", color: .mint, tint: .init(0.272, 0.88, 0.99))),
-        ("religion", .init(symbol: "book.closed.fill", color: .indigo, tint: .init(0.641, 0.62, 0.99))),
-        ("ethik", .init(symbol: "person.2.fill", color: .subjectSteel, tint: .init(0.540, 0.94, 0.80))),
+        ("musik", .init(symbol: "music.note", color: .subjectPlum, tint: .init(0x62_00_EA))),
+        ("kunst", .init(symbol: "paintpalette.fill", color: .pink, tint: .init(0xD5_00_F9))),
+        ("sport", .init(symbol: "figure.run", color: .mint, tint: .init(0x00_C8_53))),
+        ("religion", .init(symbol: "book.closed.fill", color: .indigo, tint: .init(0x3F_51_B5))),
+        ("ethik", .init(symbol: "person.2.fill", color: .subjectSteel, tint: .init(0x30_4F_FE))),
         ("politik", .init(
-            symbol: "building.columns.fill", color: .subjectAmber, tint: .init(0.190, 0.71, 0.80)
+            symbol: "building.columns.fill", color: .subjectAmber, tint: .init(0x00_91_EA)
         )),
     ]
     for (keyword, style) in map where subject.contains(keyword) {
