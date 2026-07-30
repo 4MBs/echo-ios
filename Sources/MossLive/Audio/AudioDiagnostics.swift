@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 
 /// A low-frequency snapshot for the UI. The audio queue may update this often;
