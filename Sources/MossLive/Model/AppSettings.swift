@@ -59,6 +59,26 @@ final class AppSettings {
         didSet { defaults.set(quickSwitchURL, forKey: "quickSwitchURL") }
     }
 
+    /// The name the Lernen dashboard says hello to.
+    ///
+    /// Not an account and not a login — the app has neither. It is a name to be
+    /// called by, so the screen opens with a sentence addressed to someone
+    /// instead of a heading addressed to nobody. Blank falls back rather than
+    /// greeting an empty space, which is why every reader goes through
+    /// `greetingName`.
+    var displayName: String {
+        didSet { defaults.set(displayName, forKey: "displayName") }
+    }
+
+    /// What to actually put after "Hallo," — the typed name, or the default
+    /// when the field has been emptied.
+    var greetingName: String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultDisplayName : trimmed
+    }
+
+    static let defaultDisplayName = "Bot"
+
     /// Daily "Zeit zum Lernen" reminder for due spaced-repetition cards.
     var learnReminderEnabled: Bool {
         didSet { defaults.set(learnReminderEnabled, forKey: "learnReminderEnabled") }
@@ -95,6 +115,7 @@ final class AppSettings {
         contextSeconds = ctx == 0 ? 30 : ctx
         let rate = defaults.integer(forKey: "bitrate")
         bitrate = rate == 0 ? 24000 : rate
+        displayName = defaults.string(forKey: "displayName") ?? Self.defaultDisplayName
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
         timetableConnected = defaults.bool(forKey: "timetableConnected")

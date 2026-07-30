@@ -61,9 +61,16 @@ own icon. The folders come from WebUntis rather than from what happens to have
 been recorded, so every subject you take has its place from the first launch and
 an empty archive still looks like your own timetable. **Sonstige** collects
 whatever was recorded while no lesson was running — the holidays, an evening, a
-free period — and is the one folder the timetable cannot supply. Open a folder
-and the subject's recordings are there, each row leading with its date and the
-opening of its summary, so the list reads for what was taught rather than when.
+free period — and is the one folder the timetable cannot supply.
+
+Open a folder and the subject's recordings are there, headed by the two figures
+a subject adds up to — how long it has been recorded for in total, and how much
+of that was this week. Every row leads with **what the lesson was about**: three
+or four words, written by the AI as the first line of the summary, on one line
+and never two. Under it the date and how long it ran, then the opening of the
+summary — so the list reads for what was taught rather than for when. On a wide
+window the list is cut in half and set in two columns, still read top to bottom,
+newest first. A long press on a row deletes the lesson.
 
 A lesson is three cards: what it was about, the recording, and what was said.
 The summary writes itself when the recording ends — the archive is a dozen
@@ -79,6 +86,10 @@ along.
 Each lesson becomes a quiz deck, scheduled on a Leitner ladder. A card you get
 wrong returns tomorrow; a card you get right returns after 1, 3, 7, 14 and 30
 days. Only exam-relevant material becomes cards.
+
+The tab opens as a dashboard: a greeting, the one tap that starts what is due
+today, and under it a card per subject in the subject's own colour. The name it
+greets is set in Einstellungen → Lernen.
 
 ### Chat and the answer note
 
