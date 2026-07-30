@@ -121,7 +121,7 @@ final class SpeechGatedGain {
         var out = [Int16](repeating: 0, count: count)
         for index in 0 ..< count {
             let factor = pow(10, (startDb + step * Double(index)) / 20)
-            out[index] = Self.clamp(Self.limited(Double(samples[index]) / 32768 * factor))
+            out[index] = Self.clamp(limited(Double(samples[index]) / 32768 * factor))
         }
         return out
     }
