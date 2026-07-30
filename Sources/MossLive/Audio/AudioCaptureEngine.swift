@@ -48,9 +48,14 @@ final class AudioCaptureEngine {
     private let log = Logger(subsystem: "com.fourmbs.mosslive", category: "audio")
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
+    private var archiveConverter: AVAudioConverter?
     private var encoder: OpusStreamEncoder?
+    private var recordingWriter: LocalRecordingWriter?
     private let processingQueue = DispatchQueue(label: "com.fourmbs.mosslive.audio", qos: .userInitiated)
     private(set) var running = false
+    private var signalAnalyzer = AudioSignalAnalyzer()
+    private var diagnostics = AudioDiagnosticsSnapshot()
+    private var interruptionStartedAt: Date?
 
     /// Called for every encoded packet (already framed for the wire by the caller).
     var onPacket: (@Sendable (OpusStreamEncoder.Packet) -> Void)?
@@ -62,12 +67,26 @@ final class AudioCaptureEngine {
     var onInterruption: (@Sendable (String) -> Void)?
     /// Called when audio capture recovers unattended after an interruption.
     var onResumed: (@Sendable () -> Void)?
+    /// Low-frequency audio health snapshot for the diagnostics screen.
+    var onDiagnostics: (@Sendable (AudioDiagnosticsSnapshot) -> Void)?
+    /// Route, interruption, recovery and transport events, newest first in UI.
+    var onEvent: (@Sendable (AudioDiagnosticEvent) -> Void)?
 
     private lazy var targetFormat: AVAudioFormat = .init(
         commonFormat: .pcmFormatInt16,
         sampleRate: Double(AudioPipelineConstants.sampleRate),
         channels: 1,
         interleaved: true
+    )!
+
+    /// Constant on-disk format. Hardware may change from 48 kHz to a Bluetooth
+    /// rate mid-recording; every tap is converted into this stable archive while
+    /// the ASR path independently converts to 16 kHz Int16.
+    private lazy var archiveFormat: AVAudioFormat = .init(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 48_000,
+        channels: 1,
+        interleaved: false
     )!
 
     static func requestPermission() async -> Bool {
@@ -94,6 +113,13 @@ final class AudioCaptureEngine {
             throw Self.activationError(error)
         }
         encoder = try OpusStreamEncoder(bitrate: bitrate)
+        let recordingsRoot = try LocalRecordingStorage.defaultRoot()
+        let writer = try LocalRecordingWriter(root: recordingsRoot, format: archiveFormat)
+        processingQueue.sync {
+            recordingWriter = writer
+            signalAnalyzer = AudioSignalAnalyzer()
+            diagnostics = AudioDiagnosticsSnapshot()
+        }
 
         installObservers()
         do {
@@ -103,7 +129,10 @@ final class AudioCaptureEngine {
             engine.inputNode.removeTap(onBus: 0)
             processingQueue.sync {
                 converter = nil
+                archiveConverter = nil
                 encoder = nil
+                recordingWriter?.fail(error.localizedDescription)
+                recordingWriter = nil
             }
             NotificationCenter.default.removeObserver(self)
             releaseAudioSession()
@@ -112,20 +141,26 @@ final class AudioCaptureEngine {
         running = true
     }
 
-    func stop() {
-        guard running else { return }
+    @discardableResult
+    func stop() -> URL? {
+        guard running else { return nil }
         running = false
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         // Tear down on the processing queue: tap callbacks already enqueued
         // still read converter/encoder, so nil-ing them from here would race.
-        processingQueue.sync {
+        let manifestURL: URL? = processingQueue.sync {
             converter = nil
+            archiveConverter = nil
             encoder = nil
+            let url = recordingWriter?.finish()
+            recordingWriter = nil
+            return url
         }
         NotificationCenter.default.removeObserver(self)
         releaseAudioSession()
         log.info("capture stopped")
+        return manifestURL
     }
 
     /// Return the shared session to ordinary media playback after recording.
@@ -153,6 +188,14 @@ final class AudioCaptureEngine {
         }
     }
 
+    /// Transport failures are part of the same recording history as microphone
+    /// interruptions, even though they originate in WebSocketClient.
+    func recordExternalEvent(_ event: AudioDiagnosticEvent) {
+        processingQueue.async { [weak self] in
+            self?.record(event)
+        }
+    }
+
     /// (Re)builds the converter for the current hardware format, installs the
     /// tap, and starts the engine. Called at start and after route changes,
     /// where the hardware format may have changed (e.g. Bluetooth mic).
@@ -177,15 +220,35 @@ final class AudioCaptureEngine {
         guard let converter = AVAudioConverter(from: hardwareFormat, to: targetFormat) else {
             throw CaptureError.microphoneDenied
         }
+        guard let archiveConverter = AVAudioConverter(from: hardwareFormat, to: archiveFormat) else {
+            throw CaptureError.microphoneDenied
+        }
         converter.sampleRateConverterQuality = .max
+        archiveConverter.sampleRateConverterQuality = .max
         // Swap on the processing queue — handleTap reads this property there.
-        processingQueue.sync { self.converter = converter }
+        processingQueue.sync {
+            self.converter = converter
+            self.archiveConverter = archiveConverter
+            diagnostics.hardwareSampleRate = hardwareFormat.sampleRate
+            diagnostics.hardwareChannels = Int(hardwareFormat.channelCount)
+            diagnostics.route = Self.currentRouteDescription()
+            diagnostics.voiceProcessing = input.isVoiceProcessingEnabled
+            diagnostics.automaticGainControl = input.isVoiceProcessingAGCEnabled
+        }
 
         // ~20 ms of hardware audio per tap callback keeps latency minimal.
         let tapFrames = AVAudioFrameCount(hardwareFormat.sampleRate * 0.02)
         input.installTap(onBus: 0, bufferSize: tapFrames, format: hardwareFormat) { [weak self] buffer, _ in
+            // AVAudioEngine owns `buffer` and may recycle it immediately after
+            // this callback. Copy before crossing the callback boundary.
+            guard let ownedBuffer = buffer.deepCopy() else {
+                self?.processingQueue.async {
+                    self?.recordLostBuffer("Audiobuffer konnte nicht kopiert werden")
+                }
+                return
+            }
             self?.processingQueue.async {
-                self?.handleTap(buffer: buffer)
+                self?.handleTap(buffer: ownedBuffer)
             }
         }
         engine.prepare()
@@ -197,7 +260,23 @@ final class AudioCaptureEngine {
     // MARK: - Conversion
 
     private func handleTap(buffer: AVAudioPCMBuffer) {
-        guard let converter, let encoder else { return }
+        guard let converter, let archiveConverter, let encoder else { return }
+
+        if let archiveBuffer = convert(buffer, using: archiveConverter, to: archiveFormat) {
+            do {
+                try recordingWriter?.write(archiveBuffer)
+            } catch {
+                record(
+                    AudioDiagnosticEvent(
+                        kind: .lostAudio,
+                        message: "Lokale Sicherheitsaufnahme konnte nicht geschrieben werden: \(error.localizedDescription)"
+                    )
+                )
+            }
+        } else {
+            recordLostBuffer("48-kHz-Sicherheitskopie konnte nicht konvertiert werden")
+        }
+
         let ratio = targetFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
         guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
@@ -221,7 +300,7 @@ final class AudioCaptureEngine {
         }
 
         let samples = Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
-        publishLevel(samples)
+        publishDiagnostics(samples)
         let nowMs = UInt64(Date().timeIntervalSince1970 * 1000)
         do {
             for packet in try encoder.feed(samples, captureTsMs: nowMs) {
@@ -232,21 +311,44 @@ final class AudioCaptureEngine {
         }
     }
 
-    /// RMS of the buffer mapped to 0...1 with a speech-friendly curve, every
-    /// third ~20 ms buffer (so the UI gets ~16 values/second).
-    private func publishLevel(_ samples: [Int16]) {
-        levelThrottle += 1
-        guard levelThrottle % 3 == 0, let onLevel, !samples.isEmpty else { return }
-        var sum: Double = 0
-        for sample in samples {
-            let value = Double(sample) / 32768
-            sum += value * value
+    private func convert(
+        _ input: AVAudioPCMBuffer,
+        using converter: AVAudioConverter,
+        to format: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
+        let ratio = format.sampleRate / input.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 32
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
+        var fed = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, outStatus in
+            if fed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            fed = true
+            outStatus.pointee = .haveData
+            return input
         }
-        let rms = (sum / Double(samples.count)).squareRoot()
-        // Map ~[-50 dB, -8 dB] onto 0...1 so normal speech uses the range.
-        let db = 20 * log10(max(rms, 1e-6))
-        let level = Float(min(max((db + 50) / 42, 0), 1))
-        onLevel(level)
+        if let error {
+            log.error("archive convert failed: \(error.localizedDescription)")
+        }
+        return status == .error || output.frameLength == 0 ? nil : output
+    }
+
+    /// Signal health and UI level, throttled to every third ~20 ms buffer.
+    private func publishDiagnostics(_ samples: [Int16]) {
+        let measurement = signalAnalyzer.consume(samples)
+        levelThrottle += 1
+        guard levelThrottle % 3 == 0 else { return }
+        diagnostics.level = measurement.level
+        diagnostics.rmsDBFS = measurement.rmsDBFS
+        diagnostics.peakDBFS = measurement.peakDBFS
+        diagnostics.noiseFloorDBFS = measurement.noiseFloorDBFS
+        diagnostics.clippedSamplePercent = measurement.clippedSamplePercent
+        diagnostics.capturedSeconds = recordingWriter?.manifest.durationSeconds ?? 0
+        onLevel?(measurement.level)
+        onDiagnostics?(diagnostics)
     }
 
     // MARK: - Interruptions / route changes
@@ -275,6 +377,18 @@ final class AudioCaptureEngine {
         switch type {
         case .began:
             log.warning("audio interruption began (call/Siri)")
+            let now = Date()
+            processingQueue.async { [weak self] in
+                self?.interruptionStartedAt = now
+                self?.diagnostics.interruptions += 1
+                self?.record(
+                    AudioDiagnosticEvent(
+                        kind: .interruptionBegan,
+                        message: "Audio-Unterbrechung begann (Anruf, Siri oder andere App)",
+                        date: now
+                    )
+                )
+            }
             // iOS sometimes never delivers .ended (e.g. declined call while
             // locked) — the retry loop below recovers regardless.
             scheduleResumeRetries()
@@ -290,11 +404,29 @@ final class AudioCaptureEngine {
 
     @objc private func handleRouteChange(_ note: Notification) {
         guard running else { return }
+        let reason = Self.routeChangeReason(note)
+        let route = Self.currentRouteDescription()
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            diagnostics.routeChanges += 1
+            record(
+                AudioDiagnosticEvent(
+                    kind: .routeChanged,
+                    message: "Audio-Route geändert (\(reason)): \(route)"
+                )
+            )
+        }
         restartEngine(reason: "audio route changed")
     }
 
     @objc private func handleMediaReset(_ note: Notification) {
         guard running else { return }
+        recordExternalEvent(
+            AudioDiagnosticEvent(
+                kind: .mediaServicesReset,
+                message: "iOS-Audiodienste wurden zurückgesetzt"
+            )
+        )
         // Apple: after a media-services reset everything must be rebuilt,
         // including the session configuration.
         attemptResume(reason: "media services reset")
@@ -327,6 +459,21 @@ final class AudioCaptureEngine {
             try session.setActive(true, options: [])
             try installTapAndStart()
             log.info("audio resumed")
+            let now = Date()
+            processingQueue.async { [weak self] in
+                guard let self else { return }
+                let gap = interruptionStartedAt.map { now.timeIntervalSince($0) }
+                interruptionStartedAt = nil
+                record(
+                    AudioDiagnosticEvent(
+                        kind: .interruptionEnded,
+                        message: gap.map { String(format: "Audio nach %.1f Sekunden fortgesetzt", $0) }
+                            ?? "Audio fortgesetzt",
+                        gapSeconds: gap,
+                        date: now
+                    )
+                )
+            }
             onResumed?()
         } catch {
             log.warning("audio resume failed (\(error.localizedDescription)); retrying")
@@ -342,6 +489,39 @@ final class AudioCaptureEngine {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, self.running, !self.engine.isRunning else { return }
             self.attemptResume(reason: "retry")
+        }
+    }
+
+    private func recordLostBuffer(_ message: String) {
+        diagnostics.lostBuffers += 1
+        record(AudioDiagnosticEvent(kind: .lostAudio, message: message))
+    }
+
+    private func record(_ event: AudioDiagnosticEvent) {
+        recordingWriter?.append(event)
+        onEvent?(event)
+    }
+
+    private static func currentRouteDescription() -> String {
+        let route = AVAudioSession.sharedInstance().currentRoute
+        let inputs = route.inputs.map { "\($0.portName) [\($0.portType.rawValue)]" }
+        return inputs.isEmpty ? "Kein Eingang" : inputs.joined(separator: ", ")
+    }
+
+    private static func routeChangeReason(_ note: Notification) -> String {
+        guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: raw)
+        else { return "unbekannt" }
+        switch reason {
+        case .newDeviceAvailable: "neues Gerät"
+        case .oldDeviceUnavailable: "Gerät getrennt"
+        case .categoryChange: "Audio-Kategorie"
+        case .override: "manuelle Route"
+        case .wakeFromSleep: "Gerät aufgeweckt"
+        case .noSuitableRouteForCategory: "keine geeignete Route"
+        case .routeConfigurationChange: "Konfiguration"
+        case .unknown: "unbekannt"
+        @unknown default: "unbekannt"
         }
     }
 }

@@ -78,6 +78,11 @@ struct RecordingSettingsView: View {
                     Text("32 kbit/s").tag(32000)
                 }
                 .pickerStyle(.navigationLink)
+                NavigationLink {
+                    RecordingDiagnosticsView()
+                } label: {
+                    Label("Aufnahmediagnose", systemImage: "waveform.badge.magnifyingglass")
+                }
             } header: {
                 Text("Audio")
             } footer: {
