@@ -353,10 +353,12 @@ private struct SubjectLessonRow: View {
                 .font(.title3.weight(.bold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                // A long topic gives up a little size rather than its tail: the
-                // last words of "Ursachen der Französischen Revolution" are the
-                // ones that say which lesson this is.
-                .minimumScaleFactor(0.85)
+                // A long topic gives up size rather than its tail: the last
+                // words of "Ursachen der Französischen Revolution" are the ones
+                // that say which lesson this is. A quarter is enough to carry
+                // six German words across an iPhone's single column, which is
+                // the narrowest the board ever gets.
+                .minimumScaleFactor(0.75)
             meta(datedHeadline: lines.dated)
             detail(lines)
         }
@@ -379,12 +381,16 @@ private struct SubjectLessonRow: View {
             Text(lessonDurationText(info.durationSeconds))
             if info.hasAudio {
                 Image(systemName: "waveform")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .accessibilityLabel("Mit Aufnahme")
             }
         }
-        .font(.subheadline)
+        // A step below the body size the rest of the app uses. The heading is
+        // what the row is for, and at `.subheadline` the three lines were close
+        // enough in size that none of them led — the design this comes from
+        // sets its heading about half again its body text.
+        .font(.footnote)
         .foregroundStyle(.secondary)
         .lineLimit(1)
     }
@@ -396,12 +402,12 @@ private struct SubjectLessonRow: View {
     private func detail(_ lines: Lines) -> some View {
         if let line = lines.detail, !line.isEmpty {
             Text(line)
-                .font(.subheadline)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         } else if lines.dated {
             Text(info.segmentCount > 0 ? "Noch keine Zusammenfassung" : "Kein Transkript")
-                .font(.subheadline)
+                .font(.footnote)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
@@ -437,9 +443,26 @@ struct LessonTopic {
 /// likely to be a label ("Thema:") or an abbreviation nobody listed than the
 /// end of a sentence.
 private let headlineMinimum = 24
-/// And at most this many. Past it, a first sentence is a paragraph and makes a
-/// worse heading than its own opening does.
-private let headlineMaximum = 96
+
+/// How far into the excerpt a sentence end is still worth looking for. Past
+/// this the first sentence is a paragraph, and the row is better off heading
+/// itself with the opening of it.
+///
+/// This is deliberately larger than what a heading is allowed to *be*: the text
+/// after the break is what fills the row's third line, so giving up the search
+/// early would cost the line as well as shorten the heading.
+private let sentenceSearchLimit = 96
+
+/// And how long a heading may actually be.
+///
+/// It is set on one line, so this is a width budget, not a taste: at
+/// `.title3` bold, fifty-odd characters is about what a column of the board
+/// holds on an iPad in portrait, and the scale factor covers an iPhone. A
+/// topic written by the summarizer — three to six words — comes in well under
+/// it and this never bites; it exists for the derived fallback, which is a
+/// sentence and will otherwise run to the search limit and be cut mid-word by
+/// the truncation instead of on a word here.
+private let headlineLimit = 52
 
 /// Full stops that do not end a sentence. Single letters cover the spaced
 /// abbreviations German writes ("z. B.", "u. a.", "d. h.") without needing an
@@ -481,17 +504,17 @@ func lessonTopic(from excerpt: String?) -> LessonTopic? {
         guard index >= headlineMinimum else { continue }
         // Past the ceiling there is no point looking further: this sentence is
         // already too long to head a row, and the next one is longer still.
-        guard index <= headlineMaximum else { break }
+        guard index <= sentenceSearchLimit else { break }
         if character == ".", endsAnAbbreviation(String(characters[wordStart ..< index])) { continue }
         let rest = String(characters[(index + 1)...]).trimmingCharacters(in: .whitespaces)
         return LessonTopic(
-            headline: String(characters[0 ..< index]),
+            headline: shortened(String(characters[0 ..< index]), to: headlineLimit),
             detail: rest.isEmpty ? nil : rest
         )
     }
     // One long sentence, or no sentence end in reach: the opening of it heads
     // the row on its own, and there is nothing left to put underneath.
-    return LessonTopic(headline: withoutTrailingStop(shortened(flat, to: headlineMaximum)), detail: nil)
+    return LessonTopic(headline: withoutTrailingStop(shortened(flat, to: headlineLimit)), detail: nil)
 }
 
 /// A heading does not end in a full stop. Only a stop and a colon are dropped:
