@@ -197,6 +197,15 @@ final class AudioCaptureEngine {
         }
     }
 
+    /// Persist the server id in the local manifest as soon as the WebSocket
+    /// handshake assigns it. This is what lets a later, explicitly requested
+    /// high-quality upload find the correct safety recording.
+    func attachServerSession(_ sessionId: String) {
+        processingQueue.async { [weak self] in
+            self?.recordingWriter?.setServerSessionId(sessionId)
+        }
+    }
+
     /// Transport failures are part of the same recording history as microphone
     /// interruptions, even though they originate in WebSocketClient.
     func recordExternalEvent(_ event: AudioDiagnosticEvent) {

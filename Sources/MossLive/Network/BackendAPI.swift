@@ -68,27 +68,36 @@ struct BackendAPI {
     struct LessonDetail: Codable, Sendable {
         let id: String
         let startedAtMs: Int64
+        let endedAtMs: Int64?
         /// Filled in later by "Zusammenfassung erstellen", which is why the
         /// stored copy has to be updatable in place.
         var summary: String?
+        var transcriptRevision: Int
+        var hasManualEdits: Bool
         let hasAudio: Bool
         let title: String?
         let subject: String?
         let teacher: String?
         let room: String?
-        let segments: [TranscriptSegment]
+        var segments: [TranscriptSegment]
 
         enum CodingKeys: String, CodingKey {
             case id, summary, segments, title, subject, teacher, room
             case startedAtMs = "started_at_ms"
+            case endedAtMs = "ended_at_ms"
             case hasAudio = "has_audio"
+            case transcriptRevision = "transcript_revision"
+            case hasManualEdits = "has_manual_edits"
         }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
             startedAtMs = try c.decode(Int64.self, forKey: .startedAtMs)
+            endedAtMs = try c.decodeIfPresent(Int64.self, forKey: .endedAtMs)
             summary = try c.decodeIfPresent(String.self, forKey: .summary)
+            transcriptRevision = try c.decodeIfPresent(Int.self, forKey: .transcriptRevision) ?? 0
+            hasManualEdits = try c.decodeIfPresent(Bool.self, forKey: .hasManualEdits) ?? false
             hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
             title = try c.decodeIfPresent(String.self, forKey: .title)
             subject = try c.decodeIfPresent(String.self, forKey: .subject)
