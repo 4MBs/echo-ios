@@ -29,20 +29,6 @@ final class AudioCaptureEngine {
         }
     }
 
-    /// Which session mode the capture runs in.
-    ///
-    /// `.measurement` is the one Apple documents as minimising input signal
-    /// processing — no AGC, no shaping — which is exactly what a recording of a
-    /// room wants and exactly what `SpeechGatedGain` then levels. `.default`
-    /// leaves Apple's processing in charge and is what this app used to do.
-    ///
-    /// The category stays `.playAndRecord` either way. `.record` would be the
-    /// stricter choice, but it silences other audio outright, and playing
-    /// something in another app while recording is how this gets tested.
-    private static func mode(cleanCapture: Bool) -> AVAudioSession.Mode {
-        cleanCapture ? .measurement : .default
-    }
-
     /// A failed `setActive` often means another app (a Discord/FaceTime/phone
     /// call) owns the audio session; translate those OSStatus codes into a
     /// clear message instead of surfacing a cryptic activation error.
@@ -62,15 +48,6 @@ final class AudioCaptureEngine {
     private var encoder: OpusStreamEncoder?
     private let processingQueue = DispatchQueue(label: "com.fourmbs.mosslive.audio", qos: .userInitiated)
     private(set) var running = false
-    /// Which gain does the levelling: ours, or the one built into iOS.
-    ///
-    /// Measured against Voice Memos on the same iPad in the same room, iOS's
-    /// costs 16 dB between speech and the room. Kept as a switch rather than a
-    /// straight replacement because the AGC is also what lifts a teacher eight
-    /// metres away, and no measurement here can settle what that does to a real
-    /// lesson — one lesson each way can.
-    private var cleanCapture = true
-    private var gain: SpeechGatedGain?
 
     /// Called for every encoded packet (already framed for the wire by the caller).
     var onPacket: (@Sendable (OpusStreamEncoder.Packet) -> Void)?
@@ -94,19 +71,17 @@ final class AudioCaptureEngine {
         await AVAudioApplication.requestRecordPermission()
     }
 
-    func start(bitrate: Int, cleanCapture: Bool = true, maxGainDb: Double = 24) throws {
+    func start(bitrate: Int) throws {
         guard !running else { return }
         guard AVAudioApplication.shared.recordPermission == .granted else {
             throw CaptureError.microphoneDenied
         }
-        self.cleanCapture = cleanCapture
-        var settings = SpeechGatedGain.Settings()
-        settings.maxGainDb = maxGainDb
-        let stage = cleanCapture ? SpeechGatedGain(settings: settings) : nil
-        processingQueue.sync { self.gain = stage }
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: Self.mode(cleanCapture: cleanCapture),
+        // .default keeps iOS input processing ON — most importantly automatic
+        // gain control. .measurement disabled it and classroom recordings
+        // peaked ~30 dB too low (inaudible playback, degraded transcription).
+        try session.setCategory(.playAndRecord, mode: .default,
                                 options: [.allowBluetooth, .duckOthers])
         try? session.setPreferredSampleRate(48000)
         try? session.setPreferredIOBufferDuration(0.02)
@@ -115,9 +90,6 @@ final class AudioCaptureEngine {
         } catch {
             throw Self.activationError(error)
         }
-        // Only where the route actually has a settable gain — most built-in
-        // ones do not, and asking anyway is how you end up believing a line
-        // that never ran.
         if session.isInputGainSettable {
             try? session.setInputGain(1.0)
         }
@@ -139,7 +111,6 @@ final class AudioCaptureEngine {
         processingQueue.sync {
             converter = nil
             encoder = nil
-            gain = nil
         }
         NotificationCenter.default.removeObserver(self)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -205,10 +176,7 @@ final class AudioCaptureEngine {
             return
         }
 
-        let captured = Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
-        // Levelled before anything else sees it, so the stream, the recording
-        // and the meter all agree on what was heard.
-        let samples = gain?.process(captured, sampleRate: AudioPipelineConstants.sampleRate) ?? captured
+        let samples = Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
         publishLevel(samples)
         let nowMs = UInt64(Date().timeIntervalSince1970 * 1000)
         do {
@@ -307,9 +275,9 @@ final class AudioCaptureEngine {
         engine.stop()
         do {
             let session = AVAudioSession.sharedInstance()
-            // Must match start(), or a recording resumed after a phone call
-            // comes back levelled by a different stage than it began with.
-            try session.setCategory(.playAndRecord, mode: Self.mode(cleanCapture: cleanCapture),
+            // .default, not .measurement: must match start(), or a resumed
+            // recording loses AGC and goes back to being far too quiet.
+            try session.setCategory(.playAndRecord, mode: .default,
                                     options: [.allowBluetooth, .duckOthers])
             try session.setActive(true, options: [])
             try installTapAndStart()

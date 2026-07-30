@@ -182,11 +182,7 @@ final class AppModel {
             return
         }
         do {
-            try audio.start(
-                bitrate: settings.bitrate,
-                cleanCapture: settings.cleanCapture,
-                maxGainDb: Double(settings.captureGainDb)
-            )
+            try audio.start(bitrate: settings.bitrate)
         } catch {
             phase = .error(error.localizedDescription)
             return

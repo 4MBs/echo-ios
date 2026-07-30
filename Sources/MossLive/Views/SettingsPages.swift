@@ -83,36 +83,9 @@ struct RecordingSettingsView: View {
             } footer: {
                 Text("24 kbit/s ist empfohlen und entspricht etwa 11 MiB pro Stunde.")
             }
-
-            Section {
-                Toggle("Eigene Aussteuerung", isOn: $settings.cleanCapture)
-                if settings.cleanCapture {
-                    Picker("Maximale Verstärkung", selection: $settings.captureGainDb) {
-                        ForEach([12, 18, 24, 30], id: \.self) { Text("\($0) dB").tag($0) }
-                    }
-                    .pickerStyle(.navigationLink)
-                }
-            } header: {
-                Text("Aussteuerung")
-            } footer: {
-                Text(settings.cleanCapture ? Self.ownGainHelp : Self.systemGainHelp)
-            }
         }
         .navigationTitle("Aufnahme")
     }
-
-    private static let ownGainHelp = """
-    Nachgeregelt wird nur, während jemand spricht — in Pausen bleibt der Raum so leise, wie er ist. \
-    Gemessen bringt das rund 16 dB weniger Rauschen gegenüber der Automatik von iOS.
-
-    Ausschalten, falls eine weit entfernte Lehrerstimme zu leise ankommt: dann regelt wieder iOS \
-    nach, lauter, aber auch rauschiger.
-    """
-
-    private static let systemGainHelp = """
-    iOS regelt die Lautstärke selbst. Das hebt leise Stimmen aus der Entfernung an — in \
-    Sprechpausen aber auch das Rauschen im Raum.
-    """
 }
 
 /// A row of colours for the record control, the way a list picks its colour in

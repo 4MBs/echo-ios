@@ -43,20 +43,7 @@ final class OpusStreamEncoder {
     private var seq: UInt32 = 0
     private var outBuffer = [UInt8](repeating: 0, count: 1500)
 
-    /// - Parameters:
-    ///   - complexity: 10 rather than 5. At 24 kbps the encoder is working at
-    ///     the edge of what the bitrate allows, which is exactly where the
-    ///     extra search pays for itself; the cost is CPU on a device that is
-    ///     otherwise idle while recording.
-    ///   - expectedLossPercent: nought, and in-band FEC off with it. FEC stores
-    ///     recovery data for the *previous* packet inside the next one, so it
-    ///     only ever helps a decoder that is actually missing packets. This
-    ///     stream runs over a WebSocket, which is TCP: a packet cannot go
-    ///     missing, only arrive late, and a dropped connection is handled by
-    ///     replaying the buffered backlog instead. Every measured session so far
-    ///     reports `frames_lost: 0`. The reservation was buying nothing and
-    ///     spending real bitrate for it.
-    init(bitrate: Int = 24000, complexity: Int = 10, expectedLossPercent: Int = 0) throws {
+    init(bitrate: Int = 24000, complexity: Int = 5, expectedLossPercent: Int = 10) throws {
         var error: Int32 = 0
         guard let handle = moss_opus_encoder_create(
             Int32(AudioPipelineConstants.sampleRate), 1, &error
@@ -65,8 +52,7 @@ final class OpusStreamEncoder {
         }
         self.handle = handle
         let rc = moss_opus_encoder_configure(
-            handle, Int32(bitrate), Int32(complexity),
-            expectedLossPercent > 0 ? 1 : 0, Int32(expectedLossPercent)
+            handle, Int32(bitrate), Int32(complexity), 1, Int32(expectedLossPercent)
         )
         guard rc == 0 else {
             moss_opus_encoder_destroy(handle)
