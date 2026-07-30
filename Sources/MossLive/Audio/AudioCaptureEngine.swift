@@ -106,7 +106,7 @@ final class AudioCaptureEngine {
                 encoder = nil
             }
             NotificationCenter.default.removeObserver(self)
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            releaseAudioSession()
             throw error
         }
         running = true
@@ -124,8 +124,26 @@ final class AudioCaptureEngine {
             encoder = nil
         }
         NotificationCenter.default.removeObserver(self)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        releaseAudioSession()
         log.info("capture stopped")
+    }
+
+    /// Return the shared session to ordinary media playback after recording.
+    ///
+    /// AVAudioSession keeps its category and mode after deactivation. Leaving
+    /// `.playAndRecord/.videoChat` behind made LessonAudioPlayer believe capture
+    /// still owned the session, so it skipped its `.playback` setup and played
+    /// an already well-normalized recording through the quieter communication
+    /// path. Voice processing must be disabled while the engine is stopped
+    /// before changing to an output-only category.
+    private func releaseAudioSession() {
+        let input = engine.inputNode
+        if input.isVoiceProcessingEnabled {
+            try? input.setVoiceProcessingEnabled(false)
+        }
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        try? session.setCategory(.playback, mode: .default)
     }
 
     /// New (non-resumed) server session: packets restart at seq 0.
