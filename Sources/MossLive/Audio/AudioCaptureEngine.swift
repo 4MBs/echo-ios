@@ -112,13 +112,22 @@ final class AudioCaptureEngine {
         } catch {
             throw Self.activationError(error)
         }
-        encoder = try OpusStreamEncoder(bitrate: bitrate)
-        let recordingsRoot = try LocalRecordingStorage.defaultRoot()
-        let writer = try LocalRecordingWriter(root: recordingsRoot, format: archiveFormat)
-        processingQueue.sync {
-            recordingWriter = writer
-            signalAnalyzer = AudioSignalAnalyzer()
-            diagnostics = AudioDiagnosticsSnapshot()
+        do {
+            encoder = try OpusStreamEncoder(bitrate: bitrate)
+            let recordingsRoot = try LocalRecordingStorage.defaultRoot()
+            let writer = try LocalRecordingWriter(root: recordingsRoot, format: archiveFormat)
+            processingQueue.sync {
+                recordingWriter = writer
+                signalAnalyzer = AudioSignalAnalyzer()
+                diagnostics = AudioDiagnosticsSnapshot()
+            }
+        } catch {
+            processingQueue.sync {
+                encoder = nil
+                recordingWriter = nil
+            }
+            releaseAudioSession()
+            throw error
         }
 
         installObservers()
