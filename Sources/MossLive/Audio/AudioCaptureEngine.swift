@@ -9,14 +9,15 @@ import os
 /// (called on the audio conversion queue — the consumer must be fast and
 /// non-blocking; WebSocketClient.sendAudioFrame is).
 ///
-/// Session config: `.default` mode keeps iOS input processing (AGC!) enabled
-/// so distant classroom speech is captured at a usable level;
+/// Session config: `.videoChat` + AVAudioEngine voice processing applies
+/// Apple's device-tuned noise suppression and automatic gain control;
 /// `.playAndRecord` + background mode `audio` keeps capture alive when the
 /// app is backgrounded (within iOS limits).
 final class AudioCaptureEngine {
     enum CaptureError: LocalizedError {
         case microphoneDenied
         case audioSessionBusy
+        case voiceProcessingUnavailable(String)
 
         var errorDescription: String? {
             switch self {
@@ -25,6 +26,8 @@ final class AudioCaptureEngine {
             case .audioSessionBusy:
                 "Mikrofon wird von einer anderen App belegt (z. B. ein Discord- oder Telefon-Anruf). "
                     + "Bitte diese App schließen oder den Anruf beenden und erneut starten."
+            case .voiceProcessingUnavailable(let reason):
+                "Die iOS-Rauschunterdrückung konnte nicht gestartet werden: \(reason)"
             }
         }
     }
@@ -78,10 +81,10 @@ final class AudioCaptureEngine {
         }
 
         let session = AVAudioSession.sharedInstance()
-        // .default keeps iOS input processing ON — most importantly automatic
-        // gain control. .measurement disabled it and classroom recordings
-        // peaked ~30 dB too low (inaudible playback, degraded transcription).
-        try session.setCategory(.playAndRecord, mode: .default,
+        // The session mode selects voice-appropriate routing and EQ. The actual
+        // noise suppression and AGC are enabled explicitly on the input node in
+        // installTapAndStart(); selecting a mode alone does not turn them on.
+        try session.setCategory(.playAndRecord, mode: .videoChat,
                                 options: [.allowBluetooth, .duckOthers])
         try? session.setPreferredSampleRate(48000)
         try? session.setPreferredIOBufferDuration(0.02)
@@ -90,14 +93,22 @@ final class AudioCaptureEngine {
         } catch {
             throw Self.activationError(error)
         }
-        if session.isInputGainSettable {
-            try? session.setInputGain(1.0)
-        }
-
         encoder = try OpusStreamEncoder(bitrate: bitrate)
 
         installObservers()
-        try installTapAndStart()
+        do {
+            try installTapAndStart()
+        } catch {
+            engine.stop()
+            engine.inputNode.removeTap(onBus: 0)
+            processingQueue.sync {
+                converter = nil
+                encoder = nil
+            }
+            NotificationCenter.default.removeObserver(self)
+            releaseAudioSession()
+            throw error
+        }
         running = true
     }
 
@@ -113,8 +124,26 @@ final class AudioCaptureEngine {
             encoder = nil
         }
         NotificationCenter.default.removeObserver(self)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        releaseAudioSession()
         log.info("capture stopped")
+    }
+
+    /// Return the shared session to ordinary media playback after recording.
+    ///
+    /// AVAudioSession keeps its category and mode after deactivation. Leaving
+    /// `.playAndRecord/.videoChat` behind made LessonAudioPlayer believe capture
+    /// still owned the session, so it skipped its `.playback` setup and played
+    /// an already well-normalized recording through the quieter communication
+    /// path. Voice processing must be disabled while the engine is stopped
+    /// before changing to an output-only category.
+    private func releaseAudioSession() {
+        let input = engine.inputNode
+        if input.isVoiceProcessingEnabled {
+            try? input.setVoiceProcessingEnabled(false)
+        }
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        try? session.setCategory(.playback, mode: .default)
     }
 
     /// New (non-resumed) server session: packets restart at seq 0.
@@ -130,6 +159,20 @@ final class AudioCaptureEngine {
     private func installTapAndStart() throws {
         let input = engine.inputNode
         input.removeTap(onBus: 0)
+        // A plain input-node tap receives the largely unprocessed microphone
+        // signal. Voice processing switches the I/O unit to Apple's
+        // device-specific speech pipeline: noise suppression, AGC and echo
+        // cancellation. This is the missing piece that `.default` mode alone
+        // never enabled.
+        do {
+            if !input.isVoiceProcessingEnabled {
+                try input.setVoiceProcessingEnabled(true)
+            }
+        } catch {
+            throw CaptureError.voiceProcessingUnavailable(error.localizedDescription)
+        }
+        input.isVoiceProcessingBypassed = false
+        input.isVoiceProcessingAGCEnabled = true
         let hardwareFormat = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: hardwareFormat, to: targetFormat) else {
             throw CaptureError.microphoneDenied
@@ -148,6 +191,7 @@ final class AudioCaptureEngine {
         engine.prepare()
         try engine.start()
         log.info("capture running: hw=\(hardwareFormat.sampleRate)Hz ch=\(hardwareFormat.channelCount)")
+        log.info("capture processing: voice=\(input.isVoiceProcessingEnabled) agc=\(input.isVoiceProcessingAGCEnabled)")
     }
 
     // MARK: - Conversion
@@ -275,9 +319,10 @@ final class AudioCaptureEngine {
         engine.stop()
         do {
             let session = AVAudioSession.sharedInstance()
-            // .default, not .measurement: must match start(), or a resumed
-            // recording loses AGC and goes back to being far too quiet.
-            try session.setCategory(.playAndRecord, mode: .default,
+            // Must match start(): route changes and media-service resets can
+            // rebuild the I/O unit, and installTapAndStart() then re-enables
+            // voice processing before capture resumes.
+            try session.setCategory(.playAndRecord, mode: .videoChat,
                                     options: [.allowBluetooth, .duckOthers])
             try session.setActive(true, options: [])
             try installTapAndStart()
