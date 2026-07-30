@@ -84,7 +84,7 @@ final class AudioCaptureEngine {
     /// the ASR path independently converts to 16 kHz Int16.
     private lazy var archiveFormat: AVAudioFormat = .init(
         commonFormat: .pcmFormatFloat32,
-        sampleRate: 48_000,
+        sampleRate: 48000,
         channels: 1,
         interleaved: false
     )!
