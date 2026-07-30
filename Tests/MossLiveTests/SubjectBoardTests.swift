@@ -6,33 +6,46 @@ import XCTest
 /// place the screen can be wrong without looking wrong.
 final class LessonTopicTests: XCTestCase {
     func testFirstSentenceBecomesTheHeadline() {
-        let topic = lessonTopic(
+        let topic = lessonTopic(from: "Ableitung von Polynomfunktionen. Danach wurde die Kettenregel geübt.")
+        XCTAssertEqual(topic?.headline, "Ableitung von Polynomfunktionen")
+        XCTAssertEqual(topic?.detail, "Danach wurde die Kettenregel geübt.")
+    }
+
+    /// The heading is set on one line, so a first sentence longer than a line
+    /// is cut on a word — but what came after it still fills the third line.
+    /// Giving up the sentence search that early would cost the line as well.
+    func testALongFirstSentenceIsCutButKeepsWhatFollowedIt() throws {
+        let topic = try XCTUnwrap(lessonTopic(
             from: "In dieser Stunde ging es um die Ableitung von Polynomfunktionen. "
                 + "Danach wurde die Kettenregel geübt."
-        )
-        XCTAssertEqual(topic?.headline, "In dieser Stunde ging es um die Ableitung von Polynomfunktionen")
-        XCTAssertEqual(topic?.detail, "Danach wurde die Kettenregel geübt.")
+        ))
+        XCTAssertTrue(topic.headline.hasSuffix("…"), "a cut heading says that it was cut")
+        XCTAssertLessThanOrEqual(topic.headline.count, 53)
+        XCTAssertFalse(topic.headline.dropLast().hasSuffix(" "), "never a dangling space before the cut")
+        XCTAssertEqual(topic.detail, "Danach wurde die Kettenregel geübt.")
     }
 
     /// "z. B." is a full stop, a space and a capital letter — every signal a
     /// naive split looks for, in a phrase German summaries are full of.
-    func testASpacedAbbreviationIsNotASentenceEnd() {
-        let topic = lessonTopic(
+    ///
+    /// Where the split landed is what `detail` proves: breaking at `z.` would
+    /// have left `B. Mitochondrien besprochen. Danach…` underneath.
+    func testASpacedAbbreviationIsNotASentenceEnd() throws {
+        let topic = try XCTUnwrap(lessonTopic(
             from: "Wir haben Zellorganellen wie z. B. Mitochondrien besprochen. Danach kam die Atmung."
-        )
-        XCTAssertEqual(topic?.headline, "Wir haben Zellorganellen wie z. B. Mitochondrien besprochen")
-        XCTAssertEqual(topic?.detail, "Danach kam die Atmung.")
+        ))
+        XCTAssertEqual(topic.detail, "Danach kam die Atmung.")
+        XCTAssertTrue(topic.headline.hasPrefix("Wir haben Zellorganellen wie z. B."))
     }
 
     /// "den 1. Weltkrieg" — an ordinal, and the most common way a history
     /// summary would otherwise lose its heading halfway through.
-    func testAnOrdinalIsNotASentenceEnd() {
-        let topic = lessonTopic(
+    func testAnOrdinalIsNotASentenceEnd() throws {
+        let topic = try XCTUnwrap(lessonTopic(
             from: "Im Geschichtsunterricht ging es um den 1. Weltkrieg und seine Ursachen. Danach Weimar."
-        )
-        XCTAssertEqual(
-            topic?.headline, "Im Geschichtsunterricht ging es um den 1. Weltkrieg und seine Ursachen"
-        )
+        ))
+        XCTAssertEqual(topic.detail, "Danach Weimar.")
+        XCTAssertTrue(topic.headline.hasPrefix("Im Geschichtsunterricht ging es um den 1. Weltkrieg"))
     }
 
     /// A colon two words in is a label, not the end of a thought.
@@ -45,9 +58,9 @@ final class LessonTopicTests: XCTestCase {
     /// The excerpt is 200 characters of a longer summary, so it usually ends
     /// mid-thought with the server's ellipsis. That is not a sentence break.
     func testTheServersEllipsisDoesNotSplit() {
-        let text = "Die Stunde behandelte die Grundlagen der Wahrscheinlichkeitsrechnung…"
+        let text = "Grundlagen der Wahrscheinlichkeitsrechnung…"
         let topic = lessonTopic(from: text)
-        XCTAssertEqual(topic?.headline, text)
+        XCTAssertEqual(topic?.headline, text, "the server's cut mark is not a sentence end")
         XCTAssertNil(topic?.detail)
     }
 
@@ -59,8 +72,28 @@ final class LessonTopicTests: XCTestCase {
             + "und anschließend verglichen."
         let topic = try XCTUnwrap(lessonTopic(from: text))
         XCTAssertTrue(topic.headline.hasSuffix("…"), "a cut headline says that it was cut")
-        XCTAssertLessThanOrEqual(topic.headline.count, 97)
+        XCTAssertLessThanOrEqual(topic.headline.count, 53)
         XCTAssertNil(topic.detail, "nothing goes under a headline that is already cut short")
+    }
+
+    /// The one invariant the row's layout depends on: the heading is drawn on
+    /// a single line, so nothing may come back long enough to need two. A
+    /// heading that overflowed was the whole reason the board looked wrong.
+    func testNoHeadlineEverExceedsOneLinesWorth() {
+        let summaries = [
+            "Ableitung von Polynomfunktionen. Danach wurde die Kettenregel geübt.",
+            "In dieser Doppelstunde ging es um die Ursachen der Französischen Revolution "
+                + "und um die Rolle des dritten Standes im Vorfeld der Generalstände.",
+            "Wir haben Zellorganellen wie z. B. Mitochondrien besprochen. Danach kam die Atmung.",
+            "Im Geschichtsunterricht ging es um den 1. Weltkrieg und seine Ursachen. Danach Weimar.",
+            String(repeating: "a", count: 400),
+            String(repeating: "Wort ", count: 60),
+        ]
+        for summary in summaries {
+            let headline = lessonTopic(from: summary)?.headline ?? ""
+            XCTAssertLessThanOrEqual(headline.count, 53, "too long to set on one line: \(headline)")
+            XCTAssertFalse(headline.contains("\n"), "a heading is one line: \(headline)")
+        }
     }
 
     /// A heading does not end in a full stop, even when the whole excerpt is
