@@ -15,7 +15,6 @@ workflows:
         - push
       branch_patterns:
         - pattern: main
-        - pattern: codex/audio-p0-reliability
       cancel_previous_builds: true
     scripts:
       - name: Versions
