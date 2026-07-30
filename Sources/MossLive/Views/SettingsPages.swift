@@ -133,7 +133,25 @@ struct LearnSettingsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        @Bindable var settings = model.settings
         Form {
+            Section {
+                LabeledContent("Name") {
+                    TextField(
+                        "Name",
+                        text: $settings.displayName,
+                        prompt: Text(AppSettings.defaultDisplayName)
+                    )
+                    .multilineTextAlignment(.trailing)
+                    .textContentType(.givenName)
+                    .submitLabel(.done)
+                }
+            } header: {
+                Text("Begrüßung")
+            } footer: {
+                Text("Steht oben im Lernen-Tab: „Hallo, \(model.settings.greetingName)“.")
+            }
+
             Section {
                 Toggle("Tägliche Erinnerung", isOn: enabledBinding)
                 if model.settings.learnReminderEnabled {

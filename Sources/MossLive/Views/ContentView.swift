@@ -26,11 +26,14 @@ struct LiveView: View {
         }
     }
 
+    /// Only things that are wrong, or that the recording is doing something
+    /// about. What the timetable thinks is on right now used to ride along here
+    /// too; it is on the timetable's own screen, it does not change what the
+    /// microphone is doing, and it took a banner's worth of the page to say so.
     private var hasNotices: Bool {
         if case .error = model.phase { return true }
         if model.bannerMessage != nil { return true }
-        if model.phase == .reconnecting, model.bufferedSeconds >= 1 { return true }
-        return model.timetable.enabled && model.phase == .recording
+        return model.phase == .reconnecting && model.bufferedSeconds >= 1
     }
 
     @ViewBuilder
@@ -54,11 +57,6 @@ struct LiveView: View {
                         tint: .orange
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                // The page is left blank at rest, so this only rides along once
-                // the recording has started and it says what is being recorded.
-                if model.timetable.enabled, model.phase == .recording {
-                    CurrentLessonBanner()
                 }
             }
             .padding(.horizontal, 20)
@@ -150,10 +148,6 @@ struct RecordButton: View {
     private static let deep = (hue: 0.0046, saturation: 0.955, brightness: 0.604)
     private static let pale = (hue: 0.0145, saturation: 0.336, brightness: 0.957)
 
-    /// Everything here is slow, and the microphone reports sixteen times a
-    /// second, so thirty frames carries all of it.
-    private static let frameRate = 30.0
-
     /// How far the glow is allowed past the control's own bounds. It only has
     /// to be generous enough for the longest reach — the shadow's, downwards —
     /// and it costs one larger texture, not one more drawing pass.
@@ -182,11 +176,24 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            ZStack {
-                TimelineView(.animation(minimumInterval: 1.0 / Self.frameRate)) { context in
-                    content(at: context.date.timeIntervalSinceReferenceDate)
+            // One timeline for everything that moves, at sixty frames rather
+            // than the thirty this was pinned to. Thirty was justified by the
+            // microphone reporting sixteen times a second, but the phase is a
+            // continuous drift and not a sampled signal, and thirty steps of it
+            // are visible.
+            //
+            // Not the display's full rate: each frame costs a blur, a shadow
+            // and a rasterisation, and everything driven from this clock is
+            // slow — a seven-second turn, a one-second sway. The one fast thing
+            // on the control is the height of the bars, and that is interpolated
+            // by the render server at whatever the display runs at, timeline or
+            // no timeline.
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+                let time = context.date.timeIntervalSinceReferenceDate
+                ZStack {
+                    blob(at: time)
+                    Waveform(color: tint(Self.deep).opacity(0.85), time: time)
                 }
-                Waveform(color: tint(Self.deep).opacity(0.85))
             }
             .frame(width: 108, height: 108)
             .contentShape(Circle())
@@ -196,10 +203,10 @@ struct RecordButton: View {
         .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
     }
 
-    private func content(at time: TimeInterval) -> some View {
+    private func blob(at time: TimeInterval) -> some View {
         // one slow turn of the phase, forever — the blob never settles
         let phase = time * 2 * .pi / 7
-        let heard = level(lag: 0, window: 3)
+        let heard = glowLevel
 
         return ZStack {
             halo(phase: phase, level: heard)
@@ -213,12 +220,12 @@ struct RecordButton: View {
                     )
                 )
                 .frame(width: 78, height: 78)
-                .shadow(color: tint(Self.vivid).opacity(0.45), radius: 16, y: 6)
+                .shadow(color: tint(Self.vivid).opacity(0.30 + 0.25 * heard), radius: 16, y: 6)
         }
         // Room for what is painted outside the layout: the rasterisation below
         // is the size of these bounds, and the bounds are the halo's 102pt —
         // while the shadow reaches about 55pt to the sides and 61pt down from
-        // the middle, and the halo's own blur another 3pt past its edge.
+        // the middle, and the halo's own blur another few points past its edge.
         // Without the padding the texture ends before the glow does, which is
         // the flat edge that appears wherever the blob happens to swell.
         .padding(Self.bleed)
@@ -230,55 +237,75 @@ struct RecordButton: View {
 
     /// Two paler blobs, larger and slower, turning the wrong way — the halo in
     /// the shot, and the only thing moving on the screen at rest.
+    ///
+    /// It breathes with the room now: louder swells it and softens its edge,
+    /// which is what makes it read as a glow rather than as two pale shapes
+    /// changing opacity. The swelling is a transform and not a frame, so it
+    /// costs no layout, and both blobs share one blur instead of taking a pass
+    /// each — at the display's rate that is the difference between the glow
+    /// keeping up and not.
     private func halo(phase: Double, level heard: Double) -> some View {
         ZStack {
             Blob(phase: -phase * 0.8 + 1.4, wobble: 0.07)
-                .fill(tint(Self.pale).opacity(0.22 + 0.12 * heard))
+                .fill(tint(Self.pale).opacity(0.26 + 0.26 * heard))
                 .frame(width: 102, height: 102)
-                .blur(radius: 3)
             Blob(phase: phase * 0.55 + 3.1, wobble: 0.08)
-                .fill(tint(Self.pale).opacity(0.16 + 0.10 * heard))
+                .fill(tint(Self.pale).opacity(0.18 + 0.20 * heard))
                 .frame(width: 92, height: 92)
-                .blur(radius: 2)
         }
+        .scaleEffect(1 + 0.09 * heard)
+        .blur(radius: 4 + 4 * heard)
     }
 
-    /// The room's loudness `lag` samples ago, averaged over `window` of them.
-    /// Averaging is the smoothing, and a different window per bar is why they
-    /// settle raggedly instead of together. Levels arrive about sixteen times a
-    /// second, so six samples is a bit over a third of a second behind.
-    private func level(lag: Int, window: Int) -> Double {
+    /// The room's loudness as the glow uses it: quick to rise, slow to fall.
+    ///
+    /// A mean of the last three samples, which is what this was, moves as
+    /// raggedly as the microphone does — and the glow is the largest thing on
+    /// the screen, so its jitter was the most visible jitter on it. A follower
+    /// with a slow release makes it breathe: it catches a syllable and then
+    /// comes down over about a second, so consecutive frames are always close
+    /// together even though the samples underneath are not.
+    private var glowLevel: Double {
         guard model.phase == .recording else { return 0 }
         let levels = model.micLevels
-        let end = levels.count - lag
-        let start = max(0, end - window)
-        guard end > start else { return 0 }
-        let slice = levels[start ..< end]
-        return min(1, Double(slice.reduce(0, +)) / Double(slice.count) * 1.7)
+        let start = max(0, levels.count - 20)
+        guard levels.count > start else { return 0 }
+        var value = 0.0
+        for sample in levels[start...] {
+            let target = min(1, Double(sample) * 1.7)
+            value += (target - value) * (target > value ? 0.5 : 0.08)
+        }
+        return value
     }
 }
 
 /// The waveform in the middle of the control.
 ///
-/// It is not drawn frame by frame. Recomputing a height on every tick of a
-/// timeline caps the motion at that timeline's rate, and the microphone only
-/// reports sixteen times a second, so the bars could only ever step — which is
-/// what made them look slower than everything around them.
+/// Each bar declares where it is going and lets the render server get it there,
+/// so the motion is interpolated at the display's own rate rather than stepping
+/// at the sixteen-times-a-second the microphone reports.
 ///
-/// Instead each bar declares where it is going and lets the system get it there:
-/// the idle sway is a repeating animation, and the level sets a target that is
-/// eased towards. Both are interpolated on the render server at the display's
-/// own rate, so the bars run at 120Hz on a ProMotion iPad while costing nothing
-/// per frame.
+/// Two things about *how* it is animated were the stutter. The animation used to
+/// change shape halfway through — a fast `easeOut` while a bar climbed and a slow
+/// one while it fell — and swapping curves sixteen times a second is visible
+/// exactly when there is most to see, which is while somebody is talking loudly.
+/// And `easeOut` restarts from rest every time it is retargeted, so a bar that
+/// was moving stopped dead on every new sample. One `interpolatingSpring` fixes
+/// both: it is the spring that carries its velocity into a new target instead of
+/// starting again, and the rise-fast-fall-slow asymmetry lives in the follower
+/// below, where it belongs — in the level, not in the curve.
 struct Waveform: View {
     @Environment(AppModel.self) private var model
 
     let color: Color
+    /// The clock the idle sway is drawn from, handed down from the control's own
+    /// timeline so the bars and the blob move off the same one.
+    let time: TimeInterval
 
     /// One bar. Every field differs between the five, so nothing about them can
     /// move in step: their resting height, how tall they may ever grow, how far
-    /// and how fast they sway, when the sway starts, how far back they listen,
-    /// how hard they react, and how slowly they come back down.
+    /// and how fast they sway, where in that sway they start, how far back they
+    /// listen, how hard they react, and how slowly they come back down.
     private struct Bar: Identifiable {
         let id: Int
         let base: CGFloat
@@ -314,33 +341,30 @@ struct Waveform: View {
     /// by which point where it started no longer shows in the result.
     private static let trail = 24
 
-    @State private var swaying = false
-
     var body: some View {
         HStack(alignment: .center, spacing: 4) {
             ForEach(Self.bars) { bar in
-                let heard = envelope(of: bar)
-                let height = height(of: bar, level: heard.level)
+                let height = height(of: bar, level: envelope(of: bar))
                 Capsule()
                     .fill(color)
                     .frame(width: 5, height: height)
-                    // Climbing is allowed to be quick. Falling is not: a bar
-                    // that empties the instant a word ends reads as a fault,
-                    // which is why no level meter ever built is symmetric.
-                    .animation(.easeOut(duration: heard.rising ? 0.09 : 0.34), value: height)
-                    // The sway is a scale, so it never touches layout, and it
-                    // reverses rather than restarting — nothing to jump at.
-                    .scaleEffect(y: swaying ? bar.sway : 1 / bar.sway, anchor: .center)
-                    .animation(
-                        .easeInOut(duration: bar.period)
-                            .repeatForever(autoreverses: true)
-                            .delay(bar.delay),
-                        value: swaying
-                    )
+                    .animation(.interpolatingSpring(duration: 0.18, bounce: 0.1), value: height)
+                    // Outside that animation's scope on purpose. The sway is a
+                    // pure function of the clock, already continuous at the
+                    // display's rate, and it must not be animated on top of —
+                    // it is also no longer a `repeatForever`, which on a view
+                    // rebuilt sixteen times a second was an animation that had
+                    // to survive the rebuild to keep going.
+                    .scaleEffect(y: sway(of: bar), anchor: .center)
             }
         }
-        .onAppear { swaying = true }
         .accessibilityHidden(true)
+    }
+
+    /// Where the bar is in its own slow breath, read off the clock.
+    private func sway(of bar: Bar) -> CGFloat {
+        let turn = (time / bar.period + bar.delay) * 2 * .pi
+        return 1 + (bar.sway - 1) * CGFloat(sin(turn))
     }
 
     /// Somewhere between the bar's resting height and its own ceiling, and never
@@ -352,28 +376,25 @@ struct Waveform: View {
         return bar.base + (ceiling - bar.base) * CGFloat(level)
     }
 
-    /// A peak follower over the recent samples, and whether it is still
-    /// climbing. It rises nearly as fast as the room does and comes down slowly,
-    /// each bar at its own rate — which is what settles them raggedly rather
-    /// than together, and what turns a jagged microphone reading into motion.
-    /// Averaging a handful of samples, as this used to, only makes the spikes
-    /// shorter; it leaves every one of their edges in place.
-    private func envelope(of bar: Bar) -> (level: Double, rising: Bool) {
-        guard model.phase == .recording else { return (0, false) }
+    /// A peak follower over the recent samples. It rises nearly as fast as the
+    /// room does and comes down slowly, each bar at its own rate — which is what
+    /// settles them raggedly rather than together, and what turns a jagged
+    /// microphone reading into motion. Averaging a handful of samples, as this
+    /// once did, only makes the spikes shorter; it leaves every edge in place.
+    private func envelope(of bar: Bar) -> Double {
+        guard model.phase == .recording else { return 0 }
         let levels = model.micLevels
         let end = max(0, levels.count - bar.lag)
         let start = max(0, end - Self.trail)
-        guard end > start else { return (0, false) }
+        guard end > start else { return 0 }
         var value = 0.0
-        var rising = false
         for sample in levels[start ..< end] {
             let target = min(1, Double(sample) * 1.7 * bar.gain)
-            rising = target > value
-            value += (target - value) * (rising ? Self.attack : bar.release)
+            value += (target - value) * (target > value ? Self.attack : bar.release)
         }
         // A gentle curve, so ordinary speech uses the height it has been given
         // instead of living down near the resting mark.
-        return (pow(value, 0.85), rising)
+        return pow(value, 0.85)
     }
 }
 
@@ -464,66 +485,6 @@ struct NoticeBanner: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(tint.opacity(0.28), lineWidth: 0.5)
         }
-    }
-}
-
-/// The lesson happening now, or the next one, from the timetable.
-struct CurrentLessonBanner: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.title3)
-                .foregroundStyle(Theme.accent)
-            content
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if let current = model.timetable.current {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(current.title).font(.subheadline.weight(.semibold))
-                    if current.cancelled {
-                        statusTag("entfällt", .red)
-                    } else if current.substitution {
-                        statusTag("Vertretung", .orange)
-                    }
-                }
-                Text(subtitle(current)).font(.caption).foregroundStyle(.secondary)
-            }
-        } else if let next = model.timetable.next {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Gerade kein Unterricht").font(.subheadline.weight(.semibold))
-                Text("Als Nächstes: \(next.title) · \(next.start)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        } else {
-            Text("Kein Unterricht heute").font(.subheadline).foregroundStyle(.secondary)
-        }
-    }
-
-    private func subtitle(_ lesson: BackendAPI.Lesson) -> String {
-        var parts = ["\(lesson.start)-\(lesson.end)"]
-        if !lesson.room.isEmpty { parts.append("Raum \(lesson.room)") }
-        if !lesson.teacher.isEmpty { parts.append(lesson.teacher) }
-        return parts.joined(separator: " · ")
-    }
-
-    private func statusTag(_ text: String, _ color: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
     }
 }
 

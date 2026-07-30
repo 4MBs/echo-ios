@@ -8,8 +8,8 @@ import SwiftUI
 /// everything recorded while no lesson was running — the holidays, an evening,
 /// a free period — which is the one folder that cannot come from WebUntis.
 ///
-/// A folder opens the subject's recordings by day; a lesson opens
-/// Zusammenfassung/Transkript. Abfragen lives in the Lernen tab.
+/// A folder opens the subject's board of recordings (`SubjectView`); a lesson
+/// opens Zusammenfassung/Transkript. Abfragen lives in the Lernen tab.
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
 
@@ -19,6 +19,8 @@ struct LessonsView: View {
     @State private var loadError: Error?
     @State private var sort: FolderSort = .name
     @State private var searchText = ""
+    /// The subject whose folder was tapped while it had nothing in it.
+    @State private var emptySubject: String?
 
     private var api: BackendAPI { model.api }
 
@@ -31,6 +33,10 @@ struct LessonsView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         sortMenu
                     }
+                }
+                .emptySubjectNotice($emptySubject) { subject in
+                    "In \(subject) ist noch nichts aufgenommen. "
+                        + "Nimm eine Stunde in diesem Fach auf, dann erscheint sie hier."
                 }
         }
         .task { await load() }
@@ -129,16 +135,7 @@ struct LessonsView: View {
                 spacing: 22
             ) {
                 ForEach(folders) { folder in
-                    NavigationLink {
-                        SubjectView(api: api, folder: folder) { await load() }
-                    } label: {
-                        SubjectFolderTile(
-                            name: folder.name,
-                            count: folder.lessons.count,
-                            style: subjectStyle(for: folder.name)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    folderCard(folder)
                 }
             }
             .padding(.horizontal, 24)
@@ -147,6 +144,38 @@ struct LessonsView: View {
         }
         .groupedScreen()
         .refreshable { await load() }
+    }
+
+    /// A link when the folder has something in it, a button that says so when it
+    /// does not — the same bargain the Lernen grid makes, and for the same
+    /// reason: an empty folder is drawn because the subject exists, but opening
+    /// it would land on a screen with one sentence on it.
+    @ViewBuilder
+    private func folderCard(_ folder: SubjectFolder) -> some View {
+        if folder.lessons.isEmpty {
+            Button {
+                emptySubject = folder.name
+            } label: {
+                tile(folder)
+            }
+            .buttonStyle(PressableCardStyle())
+            .accessibilityHint("Noch keine Aufnahmen")
+        } else {
+            NavigationLink {
+                SubjectView(api: api, folder: folder) { await load() }
+            } label: {
+                tile(folder)
+            }
+            .buttonStyle(PressableCardStyle())
+        }
+    }
+
+    private func tile(_ folder: SubjectFolder) -> some View {
+        SubjectFolderTile(
+            name: folder.name,
+            count: folder.lessons.count,
+            style: subjectStyle(for: folder.name)
+        )
     }
 
     private var sortMenu: some View {
@@ -259,95 +288,5 @@ extension [BackendAPI.LessonInfo] {
     }
 }
 
-// MARK: - Inside a folder
-
-/// One subject: its recordings, newest first, each row leading with its date
-/// and the opening of its summary.
-struct SubjectView: View {
-    let api: BackendAPI
-    let folder: SubjectFolder
-    let onChanged: () async -> Void
-
-    @State private var lessons: [BackendAPI.LessonInfo]
-    @State private var actionError: String?
-
-    init(api: BackendAPI, folder: SubjectFolder, onChanged: @escaping () async -> Void) {
-        self.api = api
-        self.folder = folder
-        self.onChanged = onChanged
-        _lessons = State(initialValue: folder.lessons)
-    }
-
-    /// Newest first, and flat: every row now leads with its own date, so a
-    /// header above it saying the same date again is one line of chrome per
-    /// lesson in a list where most days hold exactly one.
-    private var ordered: [BackendAPI.LessonInfo] {
-        lessons.sortedNewestFirst
-    }
-
-    var body: some View {
-        Group {
-            if lessons.isEmpty {
-                ContentUnavailableView {
-                    Label("Noch keine Aufnahmen", systemImage: subjectStyle(for: folder.name).symbol)
-                } description: {
-                    Text(folder.isOther
-                        ? "Aufnahmen außerhalb des Stundenplans landen hier."
-                        : "Nimm eine Stunde in \(folder.name) auf, dann erscheint sie hier.")
-                }
-                .groupedScreen()
-            } else {
-                list
-            }
-        }
-        .navigationTitle(folder.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if !lessons.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) { EditButton() }
-            }
-        }
-        .alert(
-            "Stunde konnte nicht gelöscht werden",
-            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(actionError ?? "")
-        }
-    }
-
-    private var list: some View {
-        List {
-            ForEach(ordered) { lesson in
-                NavigationLink {
-                    LessonDetailView(api: api, info: lesson)
-                } label: {
-                    LessonRow(info: lesson)
-                }
-            }
-            .onDelete { offsets in
-                let targets = offsets.map { ordered[$0] }
-                Task {
-                    for lesson in targets {
-                        await delete(lesson)
-                    }
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-    }
-
-    private func delete(_ lesson: BackendAPI.LessonInfo) async {
-        do {
-            try await api.deleteLesson(id: lesson.id)
-            BackendAPI.purgeCachedAudio(id: lesson.id)
-            withAnimation(.snappy) {
-                lessons.removeAll { $0.id == lesson.id }
-            }
-            await onChanged()
-        } catch {
-            actionError = error.localizedDescription
-        }
-    }
-}
+// The subject a folder opens — the board of its recordings — lives in
+// SubjectView.swift.

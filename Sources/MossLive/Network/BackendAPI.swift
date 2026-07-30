@@ -11,6 +11,15 @@ struct BackendAPI {
         let speechSeconds: Double
         let durationSeconds: Double
         let hasSummary: Bool
+        /// What the lesson was about, in three to six words. The summarizer
+        /// writes it as the summary's first line and the server splits it off,
+        /// because a folder of a dozen lessons of one subject has nothing else
+        /// to tell them apart by — and a heading has to be a heading, not the
+        /// first sentence of a paragraph.
+        ///
+        /// Absent on lessons summarized before it was asked for, and on a
+        /// server too old to send it.
+        let topic: String?
         /// The opening of the summary, so the lesson list can say what the
         /// lesson was about instead of only when it was.
         let summaryExcerpt: String?
@@ -21,7 +30,7 @@ struct BackendAPI {
         let room: String?
 
         enum CodingKeys: String, CodingKey {
-            case id, title, subject, teacher, room
+            case id, title, subject, teacher, room, topic
             case startedAtMs = "started_at_ms"
             case endedAtMs = "ended_at_ms"
             case segmentCount = "segment_count"
@@ -41,6 +50,8 @@ struct BackendAPI {
             speechSeconds = try c.decode(Double.self, forKey: .speechSeconds)
             durationSeconds = try c.decode(Double.self, forKey: .durationSeconds)
             hasSummary = try c.decodeIfPresent(Bool.self, forKey: .hasSummary) ?? false
+            // tolerate a server that predates the summarizer writing a topic
+            topic = try c.decodeIfPresent(String.self, forKey: .topic)
             // tolerate a server that predates the lesson list showing previews
             summaryExcerpt = try c.decodeIfPresent(String.self, forKey: .summaryExcerpt)
             // tolerate a not-yet-updated server (field added alongside audio recording)
