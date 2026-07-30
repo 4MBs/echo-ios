@@ -29,6 +29,7 @@ final class DiskAudioSpool: @unchecked Sendable {
     private var readOffset: UInt64 = 0
     private var writeOffset: UInt64 = 0
     private var pendingFrames = 0
+    private var framesSinceSync = 0
 
     init(root: URL? = nil) {
         if let root {
@@ -60,7 +61,7 @@ final class DiskAudioSpool: @unchecked Sendable {
             try? FileManager.default.removeItem(at: stale)
         }
         let url = root.appendingPathComponent("\(id.uuidString).spool")
-        FileManager.default.createFile(atPath: url.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: url.path, contents: nil)
         fileURL = url
         writeHandle = try FileHandle(forWritingTo: url)
         readHandle = try FileHandle(forReadingFrom: url)
@@ -75,12 +76,18 @@ final class DiskAudioSpool: @unchecked Sendable {
         defer { lock.unlock() }
         guard let writeHandle else { throw SpoolError.notStarted }
         var length = UInt32(frame.count).bigEndian
-        let header = withUnsafeBytes(of: &length) { Data($0) }
+        var record = Data(capacity: 4 + frame.count)
+        withUnsafeBytes(of: &length) { record.append(contentsOf: $0) }
+        record.append(frame)
         try writeHandle.seek(toOffset: writeOffset)
-        try writeHandle.write(contentsOf: header)
-        try writeHandle.write(contentsOf: frame)
-        writeOffset += UInt64(header.count + frame.count)
+        try writeHandle.write(contentsOf: record)
+        writeOffset += UInt64(record.count)
         pendingFrames += 1
+        framesSinceSync += 1
+        if framesSinceSync >= 50 {
+            try writeHandle.synchronize()
+            framesSinceSync = 0
+        }
     }
 
     /// Returns the oldest frame without consuming it.
@@ -149,6 +156,7 @@ final class DiskAudioSpool: @unchecked Sendable {
         readOffset = 0
         writeOffset = 0
         pendingFrames = 0
+        framesSinceSync = 0
         fileURL = nil
     }
 

@@ -132,6 +132,43 @@ final class AudioRegressionTests: XCTestCase {
         )
     }
 
+    func testInterruptedPCMRecordingRecoversAsM4A() async throws {
+        let root = temporaryDirectory().appendingPathComponent("recovery")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let format = try XCTUnwrap(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: 48_000,
+                channels: 1,
+                interleaved: false
+            )
+        )
+        let startedAt = Date()
+        var writer: LocalRecordingWriter? = try LocalRecordingWriter(
+            root: root,
+            format: format,
+            now: startedAt
+        )
+        let manifestURL = try XCTUnwrap(writer?.manifestURL)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800))
+        buffer.frameLength = 4_800
+        try writer?.write(buffer, now: startedAt.addingTimeInterval(2))
+        writer = nil // simulate process termination without finish()
+
+        let recovered = await LocalRecordingRecovery.recoverPending(root: root)
+        let manifest = try LocalRecordingStorage.load(from: manifestURL)
+
+        XCTAssertEqual(recovered.count, 1)
+        XCTAssertEqual(manifest.state, .recovered)
+        XCTAssertEqual(manifest.durationSeconds, 0.1, accuracy: 0.001)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: manifestURL.deletingLastPathComponent()
+                    .appendingPathComponent(LocalRecordingStorage.m4aName).path
+            )
+        )
+    }
+
     private func samples(_ base64: String) throws -> [Int16] {
         let compact = base64.filter { !$0.isWhitespace }
         let data = try XCTUnwrap(Data(base64Encoded: compact))

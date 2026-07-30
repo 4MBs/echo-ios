@@ -186,6 +186,7 @@ final class LocalRecordingWriter {
 
     func finish(now: Date = .now) -> URL {
         append(AudioDiagnosticEvent(kind: .stopped, message: "Aufnahme regulär beendet", date: now))
+        file?.close()
         file = nil
         manifest.state = .finalizing
         manifest.endedAt = now
@@ -195,6 +196,7 @@ final class LocalRecordingWriter {
     }
 
     func fail(_ message: String, now: Date = .now) {
+        file?.close()
         file = nil
         manifest.state = .failed
         manifest.error = message
@@ -226,6 +228,20 @@ enum LocalRecordingRecovery {
         let pcmURL = directory.appendingPathComponent(manifest.pcmFilename)
         let m4aURL = directory.appendingPathComponent(LocalRecordingStorage.m4aName)
         guard FileManager.default.fileExists(atPath: pcmURL.path) else {
+            if FileManager.default.fileExists(atPath: m4aURL.path) {
+                manifest.state = .recovered
+                manifest.m4aFilename = LocalRecordingStorage.m4aName
+                manifest.error = nil
+                manifest.updatedAt = .now
+                manifest.events.append(
+                    AudioDiagnosticEvent(
+                        kind: .recovered,
+                        message: "Bereits konvertierte M4A nach einem App-Abbruch wiedergefunden"
+                    )
+                )
+                try? LocalRecordingStorage.save(manifest, to: manifestURL)
+                return summary(manifest: manifest, directory: directory)
+            }
             manifest.state = .failed
             manifest.error = "PCM-Sicherheitsaufnahme fehlt"
             manifest.updatedAt = .now
@@ -236,6 +252,9 @@ enum LocalRecordingRecovery {
         manifest.state = .finalizing
         manifest.error = nil
         manifest.updatedAt = .now
+        if let source = try? AVAudioFile(forReading: pcmURL) {
+            manifest.framesWritten = max(manifest.framesWritten, source.length)
+        }
         try? LocalRecordingStorage.save(manifest, to: manifestURL)
         try? FileManager.default.removeItem(at: m4aURL)
 
@@ -248,7 +267,6 @@ enum LocalRecordingRecovery {
                 throw ExportError.unavailable
             }
             try await exporter.export(to: m4aURL, as: .m4a)
-            try? FileManager.default.removeItem(at: pcmURL)
             manifest.state = recovered ? .recovered : .completed
             manifest.m4aFilename = LocalRecordingStorage.m4aName
             manifest.error = nil
@@ -262,6 +280,10 @@ enum LocalRecordingRecovery {
                 )
             }
             try LocalRecordingStorage.save(manifest, to: manifestURL)
+            // The manifest points at a complete M4A before the source is
+            // removed. A crash between these operations therefore leaves two
+            // valid files, never a manifest whose only valid source is gone.
+            try? FileManager.default.removeItem(at: pcmURL)
             return summary(manifest: manifest, directory: directory)
         } catch {
             manifest.state = .failed
