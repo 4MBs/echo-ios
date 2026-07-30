@@ -48,6 +48,18 @@ unless you press something that asks an AI a question.
 The transcript fills the page as it arrives. Everything else — the sidebar, the
 record control, the answer note — sits at the edges.
 
+After class, a lesson's transcript menu can explicitly start a higher-quality
+second pass from the local 48-kHz safety recording. The upload resumes after a
+connection failure and never starts automatically. The live transcript stays
+visible until the backend has completed the replacement; if it was manually
+edited in the meantime, the new result is saved only as another restorable
+version.
+
+The same menu opens the timestamp-preserving transcript editor and a per-subject
+vocabulary. Vocabulary can be maintained by hand or, on request, populated from
+corrections, timetable names, earlier lessons and matching books in the Echo
+library.
+
 ### It knows your timetable
 
 Connect WebUntis and recordings name themselves: subject, teacher, room. Record

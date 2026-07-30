@@ -250,6 +250,7 @@ final class AppModel {
             applyConnectionState(state)
         case .helloAck(let ack):
             sessionId = ack.sessionId
+            audio.attachServerSession(ack.sessionId)
             if !ack.resumed {
                 audio.resetSequence()
                 segments = []
@@ -275,6 +276,9 @@ final class AppModel {
             if err.code == "session_limit" {
                 bannerMessage = "Maximale Sitzungslänge erreicht. Die Aufnahme wurde gestoppt."
                 stopRecording()
+            } else if err.code == "server_busy" {
+                bannerMessage =
+                    "Die manuelle 48-kHz-Neutranskription läuft noch. Audio wird lokal gepuffert."
             }
         case .roundTrip(let ms):
             lastRoundTripMs = ms

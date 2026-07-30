@@ -15,6 +15,7 @@ struct LocalRecordingManifest: Codable, Equatable, Identifiable, Sendable {
 
     let version: Int
     let id: UUID
+    var serverSessionId: String?
     var state: LocalRecordingState
     let startedAt: Date
     var updatedAt: Date
@@ -39,6 +40,8 @@ struct LocalRecordingSummary: Identifiable, Equatable, Sendable {
     let startedAt: Date
     let durationSeconds: Double
     let url: URL
+    let manifestURL: URL
+    let serverSessionId: String?
     let events: [AudioDiagnosticEvent]
     let error: String?
 }
@@ -120,9 +123,32 @@ enum LocalRecordingStorage {
                 startedAt: manifest.startedAt,
                 durationSeconds: manifest.durationSeconds,
                 url: audioURL,
+                manifestURL: manifestURL,
+                serverSessionId: manifest.serverSessionId,
                 events: manifest.events,
                 error: manifest.error
             )
+        }
+    }
+
+    /// Find the safety recording that contains this server-side lesson. A
+    /// double period is split into child lessons on the server, while the iPad
+    /// intentionally keeps one continuous safety file, so wall-clock matching
+    /// is the fallback after an exact session-id match.
+    static func matchingRecording(
+        root: URL,
+        sessionId: String,
+        lessonStartedAt: Date
+    ) -> LocalRecordingSummary? {
+        let recordings = summaries(root: root)
+        if let exact = recordings.first(where: { $0.serverSessionId == sessionId }) {
+            return exact
+        }
+        let tolerance: TimeInterval = 5
+        return recordings.first { recording in
+            let end = recording.startedAt.addingTimeInterval(recording.durationSeconds)
+            return lessonStartedAt >= recording.startedAt.addingTimeInterval(-tolerance)
+                && lessonStartedAt <= end.addingTimeInterval(tolerance)
         }
     }
 }
@@ -149,6 +175,7 @@ final class LocalRecordingWriter {
         manifest = LocalRecordingManifest(
             version: LocalRecordingManifest.currentVersion,
             id: id,
+            serverSessionId: nil,
             state: .recording,
             startedAt: now,
             updatedAt: now,
@@ -182,6 +209,12 @@ final class LocalRecordingWriter {
             manifest.events.removeFirst(manifest.events.count - 300)
         }
         try? checkpoint(force: true, now: event.date)
+    }
+
+    func setServerSessionId(_ sessionId: String) {
+        guard manifest.serverSessionId != sessionId else { return }
+        manifest.serverSessionId = sessionId
+        try? checkpoint(force: true, now: .now)
     }
 
     func finish(now: Date = .now) -> URL {
@@ -319,6 +352,8 @@ enum LocalRecordingRecovery {
             startedAt: manifest.startedAt,
             durationSeconds: manifest.durationSeconds,
             url: directory.appendingPathComponent(filename),
+            manifestURL: directory.appendingPathComponent(LocalRecordingStorage.manifestName),
+            serverSessionId: manifest.serverSessionId,
             events: manifest.events,
             error: manifest.error
         )

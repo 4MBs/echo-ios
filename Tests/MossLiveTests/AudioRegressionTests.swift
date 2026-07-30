@@ -118,10 +118,12 @@ final class AudioRegressionTests: XCTestCase {
         for _ in 0 ..< 10 {
             try writer.write(buffer)
         }
+        writer.setServerSessionId("lesson-48khz")
 
         let manifestURL = writer.finish()
         let manifest = try LocalRecordingStorage.load(from: manifestURL)
         XCTAssertEqual(manifest.state, .finalizing)
+        XCTAssertEqual(manifest.serverSessionId, "lesson-48khz")
         XCTAssertEqual(manifest.framesWritten, 4800)
         XCTAssertEqual(manifest.durationSeconds, 0.1, accuracy: 0.001)
         XCTAssertTrue(
@@ -130,6 +132,21 @@ final class AudioRegressionTests: XCTestCase {
                     .appendingPathComponent(LocalRecordingStorage.pcmName).path
             )
         )
+
+        let matched = LocalRecordingStorage.matchingRecording(
+            root: root,
+            sessionId: "lesson-48khz",
+            lessonStartedAt: manifest.startedAt
+        )
+        XCTAssertEqual(matched?.id, manifest.id)
+        XCTAssertEqual(matched?.manifestURL, manifestURL)
+
+        let splitLessonMatch = LocalRecordingStorage.matchingRecording(
+            root: root,
+            sessionId: "server-created-child-id",
+            lessonStartedAt: manifest.startedAt.addingTimeInterval(0.05)
+        )
+        XCTAssertEqual(splitLessonMatch?.id, manifest.id)
     }
 
     func testInterruptedPCMRecordingRecoversAsM4A() async throws {
