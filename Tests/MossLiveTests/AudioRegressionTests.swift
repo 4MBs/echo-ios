@@ -33,7 +33,7 @@ final class AudioRegressionTests: XCTestCase {
 
     func testFixedQuietRecordingKeepsExpectedLevel() throws {
         var analyzer = AudioSignalAnalyzer()
-        let measurement = analyzer.consume(try samples(Self.quietFixture))
+        let measurement = try analyzer.consume(samples(Self.quietFixture))
 
         XCTAssertEqual(measurement.rmsDBFS, -23.8, accuracy: 1.0)
         XCTAssertLessThan(measurement.clippedSamplePercent, 0.01)
@@ -42,15 +42,15 @@ final class AudioRegressionTests: XCTestCase {
 
     func testFixedClippedRecordingIsDetected() throws {
         var analyzer = AudioSignalAnalyzer()
-        let measurement = analyzer.consume(try samples(Self.clippedFixture))
+        let measurement = try analyzer.consume(samples(Self.clippedFixture))
 
         XCTAssertGreaterThan(measurement.clippedSamplePercent, 35)
         XCTAssertGreaterThan(measurement.peakDBFS, -0.2)
     }
 
     func testFixedRecordingProducesExactlyOneOpusFrame() throws {
-        let encoder = try OpusStreamEncoder(bitrate: 24_000)
-        let packets = try encoder.feed(try samples(Self.quietFixture), captureTsMs: 123)
+        let encoder = try OpusStreamEncoder(bitrate: 24000)
+        let packets = try encoder.feed(samples(Self.quietFixture), captureTsMs: 123)
 
         XCTAssertEqual(packets.count, 1)
         XCTAssertEqual(packets[0].seq, 0)
@@ -62,7 +62,7 @@ final class AudioRegressionTests: XCTestCase {
         let format = try XCTUnwrap(
             AVAudioFormat(
                 commonFormat: .pcmFormatInt16,
-                sampleRate: 16_000,
+                sampleRate: 16000,
                 channels: 1,
                 interleaved: true
             )
@@ -107,7 +107,7 @@ final class AudioRegressionTests: XCTestCase {
         let format = try XCTUnwrap(
             AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
-                sampleRate: 48_000,
+                sampleRate: 48000,
                 channels: 1,
                 interleaved: false
             )
@@ -122,7 +122,7 @@ final class AudioRegressionTests: XCTestCase {
         let manifestURL = writer.finish()
         let manifest = try LocalRecordingStorage.load(from: manifestURL)
         XCTAssertEqual(manifest.state, .finalizing)
-        XCTAssertEqual(manifest.framesWritten, 4_800)
+        XCTAssertEqual(manifest.framesWritten, 4800)
         XCTAssertEqual(manifest.durationSeconds, 0.1, accuracy: 0.001)
         XCTAssertTrue(
             FileManager.default.fileExists(
@@ -138,7 +138,7 @@ final class AudioRegressionTests: XCTestCase {
         let format = try XCTUnwrap(
             AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
-                sampleRate: 48_000,
+                sampleRate: 48000,
                 channels: 1,
                 interleaved: false
             )
@@ -150,8 +150,8 @@ final class AudioRegressionTests: XCTestCase {
             now: startedAt
         )
         let manifestURL = try XCTUnwrap(writer?.manifestURL)
-        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800))
-        buffer.frameLength = 4_800
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4800))
+        buffer.frameLength = 4800
         try writer?.write(buffer, now: startedAt.addingTimeInterval(2))
         writer = nil // simulate process termination without finish()
 

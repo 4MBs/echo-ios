@@ -74,8 +74,8 @@ struct AudioSignalAnalyzer {
         for sample in samples {
             let magnitude = abs(Int(sample))
             peak = max(peak, magnitude)
-            if magnitude >= 32_440 { clipped += 1 } // approximately -0.09 dBFS
-            let value = Double(sample) / 32_768
+            if magnitude >= 32440 { clipped += 1 } // approximately -0.09 dBFS
+            let value = Double(sample) / 32768
             sum += value * value
         }
 
@@ -83,7 +83,7 @@ struct AudioSignalAnalyzer {
         clippedSamples += Int64(clipped)
         let rms = (sum / Double(samples.count)).squareRoot()
         let rmsDBFS = Self.decibels(rms)
-        let peakDBFS = Self.decibels(Double(peak) / 32_768)
+        let peakDBFS = Self.decibels(Double(peak) / 32768)
         recentRMSDBFS.append(rmsDBFS)
         if recentRMSDBFS.count > 240 {
             recentRMSDBFS.removeFirst(recentRMSDBFS.count - 240)
