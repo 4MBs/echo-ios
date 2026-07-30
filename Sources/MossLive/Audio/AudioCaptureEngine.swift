@@ -522,15 +522,15 @@ final class AudioCaptureEngine {
               let reason = AVAudioSession.RouteChangeReason(rawValue: raw)
         else { return "unbekannt" }
         switch reason {
-        case .newDeviceAvailable: "neues Gerät"
-        case .oldDeviceUnavailable: "Gerät getrennt"
-        case .categoryChange: "Audio-Kategorie"
-        case .override: "manuelle Route"
-        case .wakeFromSleep: "Gerät aufgeweckt"
-        case .noSuitableRouteForCategory: "keine geeignete Route"
-        case .routeConfigurationChange: "Konfiguration"
-        case .unknown: "unbekannt"
-        @unknown default: "unbekannt"
+        case .newDeviceAvailable: return "neues Gerät"
+        case .oldDeviceUnavailable: return "Gerät getrennt"
+        case .categoryChange: return "Audio-Kategorie"
+        case .override: return "manuelle Route"
+        case .wakeFromSleep: return "Gerät aufgeweckt"
+        case .noSuitableRouteForCategory: return "keine geeignete Route"
+        case .routeConfigurationChange: return "Konfiguration"
+        case .unknown: return "unbekannt"
+        @unknown default: return "unbekannt"
         }
     }
 }
