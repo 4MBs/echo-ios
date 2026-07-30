@@ -37,6 +37,26 @@ final class AppSettings {
         didSet { defaults.set(bitrate, forKey: "bitrate") }
     }
 
+    /// Level the recording ourselves instead of leaving it to iOS.
+    ///
+    /// iOS's automatic gain control winds the gain up in every pause and lifts
+    /// the room with it — measured against Voice Memos on the same iPad in the
+    /// same room, that costs 16 dB between speech and the noise floor. Ours only
+    /// adapts while somebody is speaking.
+    ///
+    /// A switch rather than a straight replacement, because the AGC is also what
+    /// lifts a teacher eight metres away. One lesson each way settles that; no
+    /// measurement on this side can.
+    var cleanCapture: Bool {
+        didSet { defaults.set(cleanCapture, forKey: "cleanCapture") }
+    }
+
+    /// How far that levelling may push, in dB. The room decides the right
+    /// value, so it is a setting rather than a constant.
+    var captureGainDb: Int {
+        didSet { defaults.set(captureGainDb, forKey: "captureGainDb") }
+    }
+
     /// Tier 4: notify at the start of each lesson so recording is one tap away.
     var lessonNotifications: Bool {
         didSet { defaults.set(lessonNotifications, forKey: "lessonNotifications") }
@@ -115,6 +135,11 @@ final class AppSettings {
         contextSeconds = ctx == 0 ? 30 : ctx
         let rate = defaults.integer(forKey: "bitrate")
         bitrate = rate == 0 ? 24000 : rate
+        // on until switched off: it is the measured-better setting, and the
+        // switch exists to disprove that on a real lesson, not to opt into it
+        cleanCapture = defaults.object(forKey: "cleanCapture") as? Bool ?? true
+        let gain = defaults.integer(forKey: "captureGainDb")
+        captureGainDb = gain == 0 ? 24 : gain
         displayName = defaults.string(forKey: "displayName") ?? Self.defaultDisplayName
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
