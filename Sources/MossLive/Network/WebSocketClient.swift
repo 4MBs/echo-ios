@@ -47,6 +47,7 @@ actor WebSocketClient {
     private var sessionId: String?
     private var userInitiatedClose = true
     private var closedAfterFatalError = false
+    private var handshakeComplete = false
     private var pingSentAt: [Int64: ContinuousClock.Instant] = [:]
 
     private var eventContinuation: AsyncStream<Event>.Continuation?
@@ -185,7 +186,7 @@ actor WebSocketClient {
     /// caller keeps the frame buffered) or the send failed. Kept on the actor so
     /// the socket never crosses an isolation boundary.
     private func trySendFrame(_ data: Data) async -> Bool {
-        guard let task, task.state == .running else { return false }
+        guard handshakeComplete, let task, task.state == .running else { return false }
         do {
             try await task.send(.data(data))
             return true
@@ -279,6 +280,7 @@ actor WebSocketClient {
         let task = session.webSocketTask(with: endpoint.url)
         task.maximumMessageSize = 64 * 1024
         self.task = task
+        handshakeComplete = false
         task.resume()
 
         let hello = HelloMessage(
@@ -345,6 +347,7 @@ actor WebSocketClient {
                 sessionId = ack.sessionId
             }
             backoff.reset()
+            handshakeComplete = true
             startKeepalive()
             emit(.helloAck(ack))
             emit(.state(.connected(sessionId: ack.sessionId)))
@@ -419,6 +422,7 @@ actor WebSocketClient {
         keepaliveLoop?.cancel()
         keepaliveLoop = nil
         pingSentAt.removeAll()
+        handshakeComplete = false
         task?.cancel(with: code, reason: nil)
         task = nil
     }
