@@ -44,17 +44,19 @@ extension BackendAPI {
 
     func importLessonNotes(
         sessionId: String,
-        fileURL: URL,
-        recognizedText: String = ""
+        originalFilename: String,
+        pages: [LocalNotePage]
     ) async throws -> NoteImportResult {
-        let accessed = fileURL.startAccessingSecurityScopedResource()
-        defer {
-            if accessed { fileURL.stopAccessingSecurityScopedResource() }
+        guard !pages.isEmpty else {
+            throw APIError(message: "Das Dokument enthält keine importierbaren Seiten.")
         }
-        let payload = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        let textBytes = pages.reduce(0) { $0 + $1.text.utf8.count }
+        guard pages.count <= 2_000, textBytes <= 4_000_000 else {
+            throw APIError(message: "Der lokal extrahierte Notiztext ist zu groß.")
+        }
         let importId = UUID().uuidString.lowercased()
         let query = [
-            URLQueryItem(name: "filename", value: fileURL.lastPathComponent),
+            URLQueryItem(name: "filename", value: originalFilename),
             URLQueryItem(name: "import_id", value: importId),
         ]
         var upload = try URLRequest(
@@ -63,20 +65,16 @@ extension BackendAPI {
         )
         upload.httpMethod = "POST"
         upload.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        upload.setValue("application/vnd.echo.note-import", forHTTPHeaderField: "Content-Type")
-        let recognizedData = Data(recognizedText.utf8)
-        guard recognizedData.count <= 1_000_000 else {
-            throw APIError(message: "Der erkannte Bildtext ist größer als 1 MB.")
+        upload.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        struct TextOnlyImport: Encodable {
+            let privacy: String
+            let pages: [LocalNotePage]
         }
-        var textLength = UInt32(recognizedData.count).bigEndian
-        var envelope = Data("ECHONOTE1".utf8)
-        Swift.withUnsafeBytes(of: &textLength) { envelope.append(contentsOf: $0) }
-        envelope.append(recognizedData)
-        envelope.append(payload)
+        upload.httpBody = try JSONEncoder().encode(TextOnlyImport(privacy: "text_only", pages: pages))
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.upload(for: upload, from: envelope)
+            (data, response) = try await URLSession.shared.data(for: upload)
         } catch {
             throw await Self.noteOffline(error)
         }

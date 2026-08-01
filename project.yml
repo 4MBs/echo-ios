@@ -16,6 +16,9 @@ options:
 packages:
   OpusShim:
     path: LocalPackages/OpusShim
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.20
 
 settings:
   base:
@@ -35,6 +38,8 @@ targets:
     dependencies:
       - package: OpusShim
         product: OpusShim
+      - package: ZIPFoundation
+        product: ZIPFoundation
       - target: MossLiveWidget
         embed: true
       - target: EchoShareExtension
