@@ -140,10 +140,10 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
     // unrecognised subject should not arrive looking like the timetable's most
     // recognisable one.
     let fallback = SubjectStyle(
-        icon: "ph.graduation-cap", color: .blue, tint: .init(0x00_B8_D4)
+        icon: "ph.graduation-cap", color: .blue, tint: .init(0x00B8D4)
     )
     let catchAll = SubjectStyle(
-        icon: "ph.tray", color: .gray, tint: .init(0x54_6E_7A)
+        icon: "ph.tray", color: .gray, tint: .init(0x546E7A)
     )
     guard let subject = subject?.lowercased(), !subject.isEmpty else {
         return catchAll
@@ -152,49 +152,49 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
         ("sonstige", catchAll),
         // compounds first — each of these contains a keyword further down
         ("wirtschaft", .init(
-            icon: "ph.chart-line-up", color: .subjectAmber, tint: .init(0x00_BF_A5)
+            icon: "ph.chart-line-up", color: .subjectAmber, tint: .init(0x00BFA5)
         )),
-        ("mint", .init(icon: "ph.gear", color: .cyan, tint: .init(0x76_FF_03))),
-        ("förderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAE_EA_00))),
-        ("forderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAE_EA_00))),
-        ("hospitation", .init(icon: "ph.eye", color: .subjectSteel, tint: .init(0x6D_4C_41))),
-        ("mathe", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x29_79_FF))),
-        ("math", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x29_79_FF))),
-        ("physik", .init(icon: "ph.atom", color: .indigo, tint: .init(0x67_3A_B7))),
-        ("chemie", .init(icon: "ph.flask", color: .purple, tint: .init(0xF5_00_57))),
-        ("bio", .init(icon: "ph.plant", color: .green, tint: .init(0x64_DD_17))),
+        ("mint", .init(icon: "ph.gear", color: .cyan, tint: .init(0x76FF03))),
+        ("förderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAEEA00))),
+        ("forderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAEEA00))),
+        ("hospitation", .init(icon: "ph.eye", color: .subjectSteel, tint: .init(0x6D4C41))),
+        ("mathe", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x2979FF))),
+        ("math", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x2979FF))),
+        ("physik", .init(icon: "ph.atom", color: .indigo, tint: .init(0x673AB7))),
+        ("chemie", .init(icon: "ph.flask", color: .purple, tint: .init(0xF50057))),
+        ("bio", .init(icon: "ph.plant", color: .green, tint: .init(0x64DD17))),
         ("informatik", .init(
-            icon: "ph.code", color: .subjectSteel, tint: .init(0x1D_E9_B6)
+            icon: "ph.code", color: .subjectSteel, tint: .init(0x1DE9B6)
         )),
         ("deutsch", .init(
-            icon: "ph.book-open-text", color: .red, tint: .init(0xFF_17_44)
+            icon: "ph.book-open-text", color: .red, tint: .init(0xFF1744)
         )),
         ("englisch", .init(
-            icon: "ph.translate", color: .orange, tint: .init(0xFF_D6_00)
+            icon: "ph.translate", color: .orange, tint: .init(0xFFD600)
         )),
         ("franz", .init(
-            icon: "ph.chat-teardrop-text", color: .subjectPlum, tint: .init(0xFF_AB_00)
+            icon: "ph.chat-teardrop-text", color: .subjectPlum, tint: .init(0xFFAB00)
         )),
         ("latein", .init(
-            icon: "ph.scroll", color: .subjectTerracotta, tint: .init(0xAA_00_FF)
+            icon: "ph.scroll", color: .subjectTerracotta, tint: .init(0xAA00FF)
         )),
         ("spanisch", .init(
-            icon: "ph.chats-circle", color: .yellow, tint: .init(0xFF_3D_00)
+            icon: "ph.chats-circle", color: .yellow, tint: .init(0xFF3D00)
         )),
-        ("geschichte", .init(icon: "ph.hourglass", color: .brown, tint: .init(0xFF_6D_00))),
+        ("geschichte", .init(icon: "ph.hourglass", color: .brown, tint: .init(0xFF6D00))),
         ("erdkunde", .init(
-            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD_2C_00)
+            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD2C00)
         )),
         ("geo", .init(
-            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD_2C_00)
+            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD2C00)
         )),
-        ("musik", .init(icon: "ph.music-notes", color: .subjectPlum, tint: .init(0x62_00_EA))),
-        ("kunst", .init(icon: "ph.palette", color: .pink, tint: .init(0xD5_00_F9))),
-        ("sport", .init(icon: "ph.person-simple-run", color: .mint, tint: .init(0x00_C8_53))),
-        ("religion", .init(icon: "ph.church", color: .indigo, tint: .init(0x3F_51_B5))),
-        ("ethik", .init(icon: "ph.scales", color: .subjectSteel, tint: .init(0x30_4F_FE))),
+        ("musik", .init(icon: "ph.music-notes", color: .subjectPlum, tint: .init(0x6200EA))),
+        ("kunst", .init(icon: "ph.palette", color: .pink, tint: .init(0xD500F9))),
+        ("sport", .init(icon: "ph.person-simple-run", color: .mint, tint: .init(0x00C853))),
+        ("religion", .init(icon: "ph.church", color: .indigo, tint: .init(0x3F51B5))),
+        ("ethik", .init(icon: "ph.scales", color: .subjectSteel, tint: .init(0x304FFE))),
         ("politik", .init(
-            icon: "ph.bank", color: .subjectAmber, tint: .init(0x00_91_EA)
+            icon: "ph.bank", color: .subjectAmber, tint: .init(0x0091EA)
         )),
     ]
     for (keyword, style) in map where subject.contains(keyword) {

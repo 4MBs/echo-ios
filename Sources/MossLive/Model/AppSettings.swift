@@ -122,7 +122,7 @@ final class AppSettings {
         learnReminderEnabled = defaults.bool(forKey: "learnReminderEnabled")
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
-        recordButtonHue = defaults.double(forKey: "recordButtonHue")  // 0 = the red it was designed in
+        recordButtonHue = defaults.double(forKey: "recordButtonHue") // 0 = the red it was designed in
         let reminderMinutes = defaults.integer(forKey: "learnReminderMinutes")
         learnReminderMinutes = reminderMinutes == 0 ? 16 * 60 : reminderMinutes
         // migrate the old default: bare goodnotes:// lands in GoodNotes'

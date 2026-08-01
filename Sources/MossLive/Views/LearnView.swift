@@ -370,11 +370,11 @@ struct LearnView: View {
         }
     }
 
-    private func headerPill<Destination: View>(
+    private func headerPill(
         title: String,
         symbol: String,
         detail: String,
-        @ViewBuilder destination: @escaping () -> Destination
+        @ViewBuilder destination: @escaping () -> some View
     ) -> some View {
         NavigationLink {
             destination()

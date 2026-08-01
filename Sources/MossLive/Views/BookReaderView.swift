@@ -333,7 +333,7 @@ private struct PDFReader: View {
 
     private func pdfPage(forPrinted printed: Int) -> Int? {
         let pdfPage = printed - pageOffset
-        return (1...max(pageCount, 1)).contains(pdfPage) ? pdfPage : nil
+        return (1 ... max(pageCount, 1)).contains(pdfPage) ? pdfPage : nil
     }
 
     /// A compact native menu keeps the toolbar quiet while making both layouts
@@ -447,7 +447,7 @@ private final class BookPDFView: PDFView {
         let restingAtFit = restingScale == 0 || abs(scaleFactor - restingScale) < 0.001
         minScaleFactor = fit
         maxScaleFactor = fit * 6
-        if (restingAtFit || scaleFactor < fit), abs(scaleFactor - fit) > 0.001 {
+        if restingAtFit || scaleFactor < fit, abs(scaleFactor - fit) > 0.001 {
             scaleFactor = fit
         }
         restingScale = fit

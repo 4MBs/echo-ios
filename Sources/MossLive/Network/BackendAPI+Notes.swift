@@ -51,7 +51,7 @@ extension BackendAPI {
             throw APIError(message: "Das Dokument enthält keine importierbaren Seiten.")
         }
         let textBytes = pages.reduce(0) { $0 + $1.text.utf8.count }
-        guard pages.count <= 2_000, textBytes <= 4_000_000 else {
+        guard pages.count <= 2000, textBytes <= 4_000_000 else {
             throw APIError(message: "Der lokal extrahierte Notiztext ist zu groß.")
         }
         let importId = UUID().uuidString.lowercased()
