@@ -79,7 +79,7 @@ final class ShareViewController: UIViewController {
         } ?? provider.registeredTypeIdentifiers.first
     }
 
-    nonisolated private static func filename(
+    private nonisolated static func filename(
         for provider: NSItemProvider,
         source: URL,
         typeIdentifier: String
@@ -92,7 +92,7 @@ final class ShareViewController: UIViewController {
         return filename
     }
 
-    nonisolated private static func fileExtension(for typeIdentifier: String) -> String? {
+    private nonisolated static func fileExtension(for typeIdentifier: String) -> String? {
         if let known = UTType(typeIdentifier)?.preferredFilenameExtension { return known }
         let lowered = typeIdentifier.lowercased()
         if lowered.contains("goodnotes") { return "goodnotes" }
