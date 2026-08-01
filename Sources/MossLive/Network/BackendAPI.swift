@@ -123,9 +123,10 @@ struct BackendAPI {
         let cancelled: Bool
         let substitution: Bool
         let info: String
+        let type: String?
 
         enum CodingKeys: String, CodingKey {
-            case date, start, end, subject, title, teacher, room, cancelled, substitution, info
+            case date, start, end, subject, title, teacher, room, cancelled, substitution, info, type
             case startMs = "start_ms"
             case endMs = "end_ms"
             case subjectLong = "subject_long"
@@ -134,6 +135,7 @@ struct BackendAPI {
         var id: String { "\(date)-\(start)-\(subject)" }
         var startDate: Date? { startMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
         var endDate: Date? { endMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+        var isExam: Bool { type == "EXAM" }
     }
 
     struct TimetableNow: Codable, Sendable {
@@ -146,6 +148,10 @@ struct BackendAPI {
         let enabled: Bool
         let date: String?
         let lessons: [Lesson]
+    }
+
+    struct TimetableWeek: Codable, Sendable {
+        let days: [TimetableDay]
     }
 
     /// One subject of the school year — a folder in the Stunden grid.
@@ -249,6 +255,11 @@ struct BackendAPI {
     func timetableDay(date: String? = nil) async throws -> TimetableDay {
         let query = date.map { [URLQueryItem(name: "date", value: $0)] }
         return try await JSONDecoder().decode(TimetableDay.self, from: request("/timetable/day", query: query))
+    }
+
+    func timetableWeek(start: String? = nil) async throws -> TimetableWeek {
+        let query = start.map { [URLQueryItem(name: "start", value: $0)] }
+        return try await JSONDecoder().decode(TimetableWeek.self, from: request("/timetable/week", query: query))
     }
 
     /// The subjects the Stunden grid draws its folders from. Empty when no
@@ -359,13 +370,33 @@ struct BackendAPI {
         let options: [String]
         let answer: Int
         let explanation: String
+        let kind: String?
+        let expectedAnswer: String?
+        let concept: String?
+        let difficulty: Int?
+        let sourceLabel: String?
+        let sourceStartMs: Int64?
+        let sourceEndMs: Int64?
+        let sourceRevision: Int?
+        let stability: Double?
+        let difficultyScore: Double?
+        let reps: Int?
+        let lapses: Int?
         let box: Int
         let dueDate: String
 
         enum CodingKeys: String, CodingKey {
-            case id, subject, question, options, answer, explanation, box
+            case id, subject, question, options, answer, explanation, box, kind, concept, difficulty
             case sessionId = "session_id"
             case lessonTitle = "lesson_title"
+            case expectedAnswer = "expected_answer"
+            case sourceLabel = "source_label"
+            case sourceStartMs = "source_start_ms"
+            case sourceEndMs = "source_end_ms"
+            case sourceRevision = "source_revision"
+            case stability
+            case difficultyScore = "difficulty_score"
+            case reps, lapses
             case dueDate = "due_date"
         }
     }
@@ -430,10 +461,25 @@ struct BackendAPI {
     }
 
     /// Report one review result; the server reschedules the card.
-    func reviewCard(id: String, correct: Bool) async throws {
-        _ = try await request(
-            "/learn/review", method: "POST", jsonBody: ["card_id": id, "correct": correct]
-        )
+    func reviewCard(
+        id: String,
+        correct: Bool,
+        rating: Int? = nil,
+        responseMs: Int? = nil,
+        confidence: Int? = nil,
+        hintsUsed: Int = 0,
+        mode: String = "review"
+    ) async throws {
+        var body: [String: Any] = [
+            "card_id": id,
+            "correct": correct,
+            "hints_used": hintsUsed,
+            "mode": mode,
+        ]
+        if let rating { body["rating"] = rating }
+        if let responseMs { body["response_ms"] = responseMs }
+        if let confidence { body["confidence"] = confidence }
+        _ = try await request("/learn/review", method: "POST", jsonBody: body)
     }
 
     func deleteLesson(id: String) async throws {

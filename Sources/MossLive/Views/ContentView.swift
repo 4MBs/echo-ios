@@ -409,11 +409,15 @@ struct Blob: Shape {
         let radius = min(rect.width, rect.height) / 2
         let steps = 14
 
-        let points: [CGPoint] = (0 ..< steps).map { step in
+        var points: [CGPoint] = []
+        points.reserveCapacity(steps)
+        for step in 0 ..< steps {
             let angle = Double(step) / Double(steps) * 2 * .pi
             let bend = sin(angle * 3 + phase) * wobble + cos(angle * 5 - phase * 1.3) * wobble * 0.5
-            let distance = radius * (1 + bend)
-            return CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
+            let distance = radius * CGFloat(1 + bend)
+            let x = center.x + CGFloat(cos(angle)) * distance
+            let y = center.y + CGFloat(sin(angle)) * distance
+            points.append(CGPoint(x: x, y: y))
         }
 
         // Quad curves between the midpoints, each sample as the control point:

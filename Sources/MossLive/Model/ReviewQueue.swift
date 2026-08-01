@@ -16,6 +16,11 @@ final class ReviewQueue {
         let cardId: String
         let correct: Bool
         let answeredAt: Date
+        let rating: Int?
+        let responseMs: Int?
+        let confidence: Int?
+        let hintsUsed: Int?
+        let mode: String?
     }
 
     private(set) var pending: [Entry] = []
@@ -31,11 +36,39 @@ final class ReviewQueue {
     var answeredIDs: Set<String> { Set(pending.map(\.cardId)) }
 
     /// Send the result, or keep it for later if that fails.
-    func record(cardId: String, correct: Bool, api: BackendAPI) async {
+    func record(
+        cardId: String,
+        correct: Bool,
+        rating: Int? = nil,
+        responseMs: Int? = nil,
+        confidence: Int? = nil,
+        hintsUsed: Int = 0,
+        mode: String = "review",
+        api: BackendAPI
+    ) async {
         do {
-            try await api.reviewCard(id: cardId, correct: correct)
+            try await api.reviewCard(
+                id: cardId,
+                correct: correct,
+                rating: rating,
+                responseMs: responseMs,
+                confidence: confidence,
+                hintsUsed: hintsUsed,
+                mode: mode
+            )
         } catch {
-            pending.append(Entry(cardId: cardId, correct: correct, answeredAt: Date()))
+            pending.append(
+                Entry(
+                    cardId: cardId,
+                    correct: correct,
+                    answeredAt: Date(),
+                    rating: rating,
+                    responseMs: responseMs,
+                    confidence: confidence,
+                    hintsUsed: hintsUsed,
+                    mode: mode
+                )
+            )
             persist()
             log.info("queued review for \(cardId, privacy: .public); \(self.pending.count) waiting")
         }
@@ -50,7 +83,15 @@ final class ReviewQueue {
         var sent = 0
         for entry in ordered {
             do {
-                try await api.reviewCard(id: entry.cardId, correct: entry.correct)
+                try await api.reviewCard(
+                    id: entry.cardId,
+                    correct: entry.correct,
+                    rating: entry.rating,
+                    responseMs: entry.responseMs,
+                    confidence: entry.confidence,
+                    hintsUsed: entry.hintsUsed ?? 0,
+                    mode: entry.mode ?? "review"
+                )
                 sent += 1
             } catch {
                 break

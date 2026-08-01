@@ -64,10 +64,19 @@ struct SubjectDeckTile: View {
             )
             label
         }
-        // Saturation, not opacity: a card faded against the page background
-        // takes its white text down with it, and this one still has to be read.
-        // Draining the colour greys the fill and leaves the contrast alone.
-        .saturation(isEmpty ? 0.16 : 1)
+        // Empty subjects stay recognisable by their school colour. Their status
+        // and plus badge communicate emptiness; draining the entire grid made
+        // the Lernen tab look disabled and hid the subject colour system.
+        .overlay(alignment: .topTrailing) {
+            if isEmpty {
+                Image(systemName: "plus")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(8)
+                    .background(.black.opacity(0.24), in: Circle())
+                    .padding(10)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .aspectRatio(1.2, contentMode: .fit)
         .accessibilityElement(children: .combine)
