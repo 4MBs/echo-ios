@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 @main
@@ -23,14 +24,17 @@ struct MossLiveApp: App {
 /// and anything pinned to last year's numbers stops adapting with it.
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection: AppTab? = .aufnahme
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var pendingNoteImportCount = 0
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             List(AppTab.navigation, selection: $selection) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
+                    .badge(tab == .stunden ? pendingNoteImportCount : 0)
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
@@ -43,9 +47,18 @@ struct MainTabView: View {
         .navigationSplitViewStyle(.balanced)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
         .onAppear {
+            pendingNoteImportCount = PendingNoteImports.all().count
             if !model.settings.isConfigured {
                 selection = .einstellungen
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                pendingNoteImportCount = PendingNoteImports.all().count
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pendingNoteImportsChanged)) { _ in
+            pendingNoteImportCount = PendingNoteImports.all().count
         }
     }
 

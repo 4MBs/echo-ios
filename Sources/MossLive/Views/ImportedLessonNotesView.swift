@@ -12,8 +12,10 @@ struct ImportedLessonNotesView: View {
     let player: LessonAudioPlayer
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var notes: [BackendAPI.LessonNote] = []
+    @State private var pendingImports: [PendingNoteImports.Item] = []
     @State private var warnings: [String] = []
     @State private var loading = true
     @State private var importing = false
@@ -25,6 +27,9 @@ struct ImportedLessonNotesView: View {
         NavigationStack {
             List {
                 explanation
+                if !pendingImports.isEmpty {
+                    pendingImportSection
+                }
                 if !warnings.isEmpty {
                     warningSection
                 }
@@ -124,6 +129,11 @@ struct ImportedLessonNotesView: View {
             Text(errorMessage ?? "Unbekannter Fehler")
         }
         .task { await load() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                pendingImports = PendingNoteImports.all()
+            }
+        }
     }
 
     private var explanation: some View {
@@ -150,6 +160,40 @@ struct ImportedLessonNotesView: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
             }
+        }
+    }
+
+    private var pendingImportSection: some View {
+        Section {
+            ForEach(pendingImports) { item in
+                Button {
+                    Task { await importPending(item) }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "square.and.arrow.down")
+                            .foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.filename)
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                            Text("In diese Stunde importieren")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .disabled(importing)
+                .swipeActions(edge: .trailing) {
+                    Button("Verwerfen", role: .destructive) {
+                        PendingNoteImports.remove(item)
+                        pendingImports.removeAll { $0.id == item.id }
+                    }
+                }
+            }
+        } header: {
+            Text("Aus dem Teilen-Menü")
+        } footer: {
+            Text("Diese Dokumente wurden aus Goodnotes, Notability oder einer anderen App an Echo geteilt.")
         }
     }
 
@@ -180,6 +224,7 @@ struct ImportedLessonNotesView: View {
     }
 
     private func load() async {
+        pendingImports = PendingNoteImports.all()
         do {
             notes = try await api.lessonNotes(id: lesson.id)
                 .sorted(by: Self.noteOrder)
@@ -200,6 +245,26 @@ struct ImportedLessonNotesView: View {
                 recognizedText: recognizedText
             )
             warnings = result.warnings
+            notes = try await api.lessonNotes(id: lesson.id)
+                .sorted(by: Self.noteOrder)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func importPending(_ item: PendingNoteImports.Item) async {
+        importing = true
+        defer { importing = false }
+        do {
+            let recognizedText = await Self.recognizedImageText(at: item.url)
+            let result = try await api.importLessonNotes(
+                sessionId: lesson.id,
+                fileURL: item.url,
+                recognizedText: recognizedText
+            )
+            warnings = result.warnings
+            PendingNoteImports.remove(item)
+            pendingImports.removeAll { $0.id == item.id }
             notes = try await api.lessonNotes(id: lesson.id)
                 .sorted(by: Self.noteOrder)
         } catch {
