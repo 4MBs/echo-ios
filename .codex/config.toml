@@ -1,7 +1,0 @@
-[agents]
-enabled = true
-max_concurrent_threads_per_session = 2
-
-[agents.product_designer]
-description = "Senior product designer for Echo's iPad-first UX, information architecture, interaction design, and SwiftUI implementation guidance."
-config_file = "agents/product-designer.toml"
