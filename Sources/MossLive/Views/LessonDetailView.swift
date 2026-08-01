@@ -44,6 +44,7 @@ struct LessonDetailView: View {
     @State private var retranscribing = false
     @State private var showingRetranscriptionConfirmation = false
     @State private var showingTranscriptEditor = false
+    @State private var showingImportedNotes = false
 
     /// Where two columns start being wider than a readable measure each. An
     /// iPad in landscape is well past it; in portrait it is not.
@@ -70,6 +71,11 @@ struct LessonDetailView: View {
         .toolbar {
             if let detail {
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showingImportedNotes = true
+                    } label: {
+                        Label("Unterrichtsnotizen importieren", systemImage: "doc.badge.arrow.down")
+                    }
                     Menu {
                         Button {
                             showingTranscriptEditor = true
@@ -111,6 +117,11 @@ struct LessonDetailView: View {
                     applyAndCache(updated)
                 }
             }
+        }
+        .sheet(isPresented: $showingImportedNotes, onDismiss: {
+            Task { await load() }
+        }) {
+            ImportedLessonNotesView(api: api, lesson: info, player: player)
         }
         .confirmationDialog(
             "48-kHz-Aufnahme neu transkribieren?",
