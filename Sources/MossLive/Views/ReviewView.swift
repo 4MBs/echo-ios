@@ -8,6 +8,15 @@ struct ReviewView: View {
     enum Mode {
         case review
         case practice
+        case exam
+
+        var apiName: String {
+            switch self {
+            case .review: "review"
+            case .practice: "practice"
+            case .exam: "exam"
+            }
+        }
     }
 
     let api: BackendAPI
@@ -30,6 +39,11 @@ struct ReviewView: View {
     @State private var index = 0
     @State private var selected: Int?
     @State private var score = 0
+    @State private var typedAnswer = ""
+    @State private var revealed = false
+    @State private var answerComplete = false
+    @State private var confidence = 1
+    @State private var questionStartedAt = Date()
 
     var body: some View {
         content
@@ -73,6 +87,11 @@ struct ReviewView: View {
             index = 0
             score = 0
             selected = nil
+            typedAnswer = ""
+            revealed = false
+            answerComplete = false
+            confidence = 1
+            questionStartedAt = Date()
             phase = .running
         } catch {
             phase = .failed(error)
@@ -108,11 +127,29 @@ struct ReviewView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardSurface()
 
-                ForEach(Array(card.options.enumerated()), id: \.offset) { option, text in
-                    optionButton(option, text)
+                confidencePicker
+
+                if isChoice {
+                    ForEach(Array(card.options.enumerated()), id: \.offset) { option, text in
+                        optionButton(option, text)
+                    }
+                } else {
+                    constructedAnswer
                 }
 
-                if selected != nil {
+                if selected != nil || revealed {
+                    if let expected = card.expectedAnswer, !isChoice {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Musterantwort")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(expected)
+                                .font(.body.weight(.medium))
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .cardSurface(cornerRadius: 12)
+                    }
                     if !card.explanation.isEmpty {
                         Label(card.explanation, systemImage: "lightbulb.fill")
                             .font(.callout)
@@ -121,22 +158,34 @@ struct ReviewView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .cardSurface(cornerRadius: 12)
                     }
-                    if mode == .review, selected != card.answer {
+                    if mode == .review, answerComplete, selected != nil, selected != card.answer {
                         Label("Diese Karte kommt morgen wieder.", systemImage: "arrow.uturn.backward")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Button {
-                        next()
-                    } label: {
-                        Text(index + 1 < cards.count ? "Weiter" : "Ergebnis anzeigen")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                    if revealed, !isChoice, !answerComplete {
+                        ratingButtons
                     }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.large)
+                    if answerComplete {
+                        Button {
+                            next()
+                        } label: {
+                            Text(index + 1 < cards.count ? "Weiter" : "Ergebnis anzeigen")
+                                .fontWeight(.semibold)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.large)
+                    }
+                }
+
+                if let source = card.sourceLabel ?? card.lessonTitle {
+                    Label(sourceDescription(source), systemImage: "quote.opening")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
                 }
             }
             .padding(16)
@@ -150,12 +199,8 @@ struct ReviewView: View {
             selected = option
             let correct = option == card.answer
             if correct { score += 1 }
-            if mode == .review {
-                // The schedule lives on the server, so an answer given without
-                // one is written down and handed over later rather than lost.
-                let cardId = card.id
-                Task { await model.reviews.record(cardId: cardId, correct: correct, api: api) }
-            }
+            answerComplete = true
+            record(correct: correct, rating: correct ? 2 : 0)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: optionIcon(option))
@@ -177,6 +222,94 @@ struct ReviewView: View {
         .disabled(selected != nil)
     }
 
+    private var isChoice: Bool {
+        card.kind == nil || card.kind == "multiple_choice" || card.kind == "true_false"
+    }
+
+    private var confidencePicker: some View {
+        Picker("Wie sicher bist du?", selection: $confidence) {
+            Text("Unsicher").tag(0)
+            Text("Mittel").tag(1)
+            Text("Sicher").tag(2)
+        }
+        .pickerStyle(.segmented)
+        .disabled(selected != nil || revealed)
+        .accessibilityLabel("Sicherheit vor der Antwort")
+    }
+
+    private var constructedAnswer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if card.kind == "oral" {
+                Label("Antworte laut und vergleiche danach.", systemImage: "waveform")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                TextField("Deine Antwort", text: $typedAnswer, axis: .vertical)
+                    .lineLimit(3 ... 7)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(revealed)
+            }
+            Button(revealed ? "Antwort aufgedeckt" : "Mit Musterantwort vergleichen") {
+                revealed = true
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .disabled(revealed ||
+                (card.kind != "oral" && typedAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+        }
+    }
+
+    private var ratingButtons: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Wie gut war deine Antwort?")
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                ratingButton("Nicht gewusst", rating: 0, color: .red)
+                ratingButton("Schwer", rating: 1, color: .orange)
+                ratingButton("Gut", rating: 2, color: .blue)
+                ratingButton("Sicher", rating: 3, color: .green)
+            }
+        }
+    }
+
+    private func ratingButton(_ title: String, rating: Int, color: Color) -> some View {
+        Button(title) {
+            let correct = rating >= 2
+            if correct { score += 1 }
+            answerComplete = true
+            record(correct: correct, rating: rating)
+        }
+        .font(.caption.weight(.semibold))
+        .buttonStyle(.bordered)
+        .tint(color)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func record(correct: Bool, rating: Int) {
+        guard mode != .practice else { return }
+        let elapsed = max(0, Int(Date().timeIntervalSince(questionStartedAt) * 1000))
+        let cardId = card.id
+        let modeName = mode.apiName
+        let answerConfidence = confidence
+        Task {
+            await model.reviews.record(
+                cardId: cardId,
+                correct: correct,
+                rating: rating,
+                responseMs: elapsed,
+                confidence: answerConfidence,
+                mode: modeName,
+                api: api
+            )
+        }
+    }
+
+    private func sourceDescription(_ source: String) -> String {
+        guard let milliseconds = card.sourceStartMs else { return "Quelle: \(source)" }
+        let seconds = max(0, Int(milliseconds / 1000))
+        return "Quelle: \(source) · \(seconds / 60):\(String(format: "%02d", seconds % 60))"
+    }
+
     private func optionIcon(_ option: Int) -> String {
         guard selected != nil else { return "circle" }
         if option == card.answer { return "checkmark.circle.fill" }
@@ -195,6 +328,11 @@ struct ReviewView: View {
         if index + 1 < cards.count {
             index += 1
             selected = nil
+            typedAnswer = ""
+            revealed = false
+            answerComplete = false
+            confidence = 1
+            questionStartedAt = Date()
         } else {
             phase = .finished
         }
@@ -244,6 +382,8 @@ struct ReviewView: View {
                 : "\(wrong) Karten kommen morgen wieder dran."
         case .practice:
             return "Übung beeinflusst den Lernplan nicht.\nFällige Karten bleiben fällig."
+        case .exam:
+            return "Die Probe-Arbeit ist beendet.\nUnsichere Themen werden im nächsten Tagesplan priorisiert."
         }
     }
 }

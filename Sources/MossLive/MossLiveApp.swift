@@ -94,7 +94,7 @@ struct MainTabView: View {
         switch selection ?? .aufnahme {
         case .aufnahme: LiveView()
         case .stunden: LessonsView()
-        case .lernen: LearnView()
+        case .lernen: StudyDashboardView()
         case .bibliothek: LibraryView()
         case .chat: ChatView()
         case .einstellungen: SettingsView()

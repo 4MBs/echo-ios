@@ -573,7 +573,6 @@ private struct SubjectDeckCard: View {
         // rather than as depth.
         .scrollTransition { content, phase in
             content
-                .opacity(phase.isIdentity ? 1 : 0.8)
                 .scaleEffect(phase.isIdentity || !moves ? 1 : 0.97)
         }
     }
