@@ -256,12 +256,20 @@ enum LocalNoteImporter {
             }
             guard !evidence.isEmpty, let currentIndex = lines.firstIndex(of: candidate) else { continue }
             let nativeIndex = evidence.sorted()[evidence.count / 2]
-            let previousExact = nativeLines[..<nativeIndex].reversed().first {
-                exactKeys.contains(normalized($0))
-            }.map(String.init)
-            let nextExact = nativeLines.dropFirst(nativeIndex + 1).first {
-                exactKeys.contains(normalized($0))
-            }.map(String.init)
+            var previousExact: String?
+            var previousIndex = nativeIndex
+            while previousIndex > 0, previousExact == nil {
+                previousIndex -= 1
+                let line = nativeLines[previousIndex]
+                if exactKeys.contains(normalized(line)) { previousExact = line }
+            }
+            var nextExact: String?
+            var nextIndex = nativeIndex + 1
+            while nextIndex < nativeLines.count, nextExact == nil {
+                let line = nativeLines[nextIndex]
+                if exactKeys.contains(normalized(line)) { nextExact = line }
+                nextIndex += 1
+            }
             guard previousExact != nil || nextExact != nil else { continue }
 
             lines.remove(at: currentIndex)
