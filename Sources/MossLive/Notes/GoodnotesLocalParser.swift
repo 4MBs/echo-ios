@@ -22,9 +22,9 @@ struct GoodnotesLocalDocument: Sendable {
 }
 
 enum GoodnotesLocalParser {
-    private static let maxEntries = 20_000
-    private static let maxMemberBytes = 64 * 1_024 * 1_024
-    private static let maxArchiveBytes = 256 * 1_024 * 1_024
+    private static let maxEntries = 20000
+    private static let maxMemberBytes = 64 * 1024 * 1024
+    private static let maxArchiveBytes = 256 * 1024 * 1024
 
     enum ParserError: LocalizedError {
         case invalidDocument
@@ -122,7 +122,7 @@ enum GoodnotesLocalParser {
                 .map { (URL(fileURLWithPath: $0).lastPathComponent, $0) }
         }
         let searchIndex = Dictionary(
-            uniqueKeysWithValues: ((try? member("index.search.pb")).map(parseIndex) ?? [])
+            uniqueKeysWithValues: (try? member("index.search.pb")).map(parseIndex) ?? []
         )
 
         var pages: [LocalNotePage] = []
@@ -273,8 +273,7 @@ enum GoodnotesLocalParser {
            let transformData = messageValue(model, 20),
            let transform = try? protobufFields(transformData),
            let originData = messageValue(transform, 1),
-           let origin = point(originData)
-        {
+           let origin = point(originData) {
             x = origin.0
             y = origin.1
         }
@@ -364,14 +363,12 @@ enum GoodnotesLocalParser {
            let boundsData = messageValue(fields, 1),
            let bounds = try? protobufFields(boundsData),
            let originData = messageValue(bounds, 1),
-           let origin = point(originData)
-        {
+           let origin = point(originData) {
             return origin
         }
         if !handwriting,
            let transformData = messageValue(fields, 3),
-           let transform = try? protobufFields(transformData)
-        {
+           let transform = try? protobufFields(transformData) {
             var values: [Int: Float] = [:]
             for field in transform {
                 if case .fixed32(let value) = field.value { values[field.number] = value }
@@ -413,7 +410,7 @@ enum GoodnotesLocalParser {
             let value: ProtobufValue
             switch wire {
             case 0:
-                value = .varint(try varint(data, &offset))
+                value = try .varint(varint(data, &offset))
             case 1:
                 guard offset + 8 <= data.count else { throw ParserError.malformedData }
                 value = .fixed64(Double(bitPattern: littleUInt64(data, offset)))
@@ -565,7 +562,9 @@ enum GoodnotesLocalParser {
             matchLength += 4
             guard output.count + matchLength <= expectedSize else { throw ParserError.malformedData }
             let start = output.count - matchOffset
-            for index in 0 ..< matchLength { output.append(output[start + index]) }
+            for index in 0 ..< matchLength {
+                output.append(output[start + index])
+            }
         }
         guard output.count == expectedSize else { throw ParserError.malformedData }
         return Data(output)

@@ -586,7 +586,7 @@ func splitIntoColumns<Element>(_ items: [Element], count: Int) -> [[Element]] {
 
 #Preview {
     VStack(spacing: 26) {
-        SubjectHoursHeader(total: 513_000, week: 15_120)
+        SubjectHoursHeader(total: 513_000, week: 15120)
         SubjectHoursHeader(total: 2400, week: 0)
     }
     .padding(20)

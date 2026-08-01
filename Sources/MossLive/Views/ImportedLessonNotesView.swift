@@ -140,7 +140,8 @@ struct ImportedLessonNotesView: View {
             Label {
                 Text(
                     "Echo verarbeitet Goodnotes, PDF und Bilder vollständig lokal auf diesem iPad. "
-                        + "Nur der extrahierte Text und vorhandene Seitenzeitpunkte werden an deinen Server übertragen; "
+                        +
+                        "Nur der extrahierte Text und vorhandene Seitenzeitpunkte werden an deinen Server übertragen; "
                         + "niemals die Goodnotes-Datei oder ein Seitenbild."
                 )
                 .font(.callout)
@@ -310,7 +311,6 @@ struct ImportedLessonNotesView: View {
         let value = max(0, Int(seconds))
         return String(format: "%d:%02d", value / 60, value % 60)
     }
-
 }
 
 private struct ImportedNoteRow: View {

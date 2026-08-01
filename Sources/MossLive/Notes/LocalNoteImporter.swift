@@ -52,8 +52,7 @@ enum LocalNoteImporter {
                let thumbnail = document.thumbnail,
                let image = UIImage(data: thumbnail),
                let result = await recognize(image),
-               !result.text.isEmpty
-            {
+               !result.text.isEmpty {
                 document.pages[0].text = combine(
                     native: document.pages[0].text,
                     localOCR: result,
@@ -64,7 +63,7 @@ enum LocalNoteImporter {
 
         case "pdf":
             guard let document = PDFDocument(data: data) else { throw ImportError.unreadableDocument }
-            return result(pages: await pdfPages(document, name: stem(filename)))
+            return await result(pages: pdfPages(document, name: stem(filename)))
 
         case "jpg", "jpeg", "png":
             guard let image = UIImage(data: data) else { throw ImportError.unreadableDocument }
@@ -74,14 +73,14 @@ enum LocalNoteImporter {
         case "note":
             let archive = try Archive(data: data, accessMode: .read)
             let pdfEntries = archive.filter {
-                $0.type == .file && $0.path.lowercased().hasSuffix(".pdf") && $0.uncompressedSize <= 64 * 1_024 * 1_024
+                $0.type == .file && $0.path.lowercased().hasSuffix(".pdf") && $0.uncompressedSize <= 64 * 1024 * 1024
             }
             var pages: [LocalNotePage] = []
             for entry in pdfEntries {
                 var pdfData = Data()
                 try archive.extract(entry) { chunk in pdfData.append(chunk) }
                 guard let document = PDFDocument(data: pdfData) else { continue }
-                pages.append(contentsOf: await pdfPages(document, name: stem(filename), startingAt: pages.count))
+                await pages.append(contentsOf: pdfPages(document, name: stem(filename), startingAt: pages.count))
             }
             return result(pages: pages)
 
@@ -103,7 +102,7 @@ enum LocalNoteImporter {
             // only when the page is a scan or contains almost no text.
             if text.filter(\.isLetter).count < 8 {
                 let bounds = page.bounds(for: .mediaBox)
-                let width: CGFloat = 2_200
+                let width: CGFloat = 2200
                 let height = max(1, width * bounds.height / max(1, bounds.width))
                 let image = page.thumbnail(of: CGSize(width: width, height: height), for: .mediaBox)
                 if let recognized = await recognize(image) { text = recognized.text }
