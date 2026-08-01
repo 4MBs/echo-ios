@@ -106,6 +106,12 @@ the same Goodnotes page updates it through the document's stable internal IDs.
 Echo has no note editor or drawing canvas. Goodnotes and Notability remain the
 place where notes are written; Echo only imports, reads and links them.
 
+Echo also installs an iOS Share Extension. A page or document shared from
+Goodnotes, Notability or Files is placed in Echo's App Group inbox. Open the
+destination lesson, choose **Unterrichtsnotizen**, then tap the queued document
+under **Aus dem Teilen-Menü**. The extension never guesses which lesson a file
+belongs to and does not upload anything before that explicit choice.
+
 ### Lernen
 
 Each lesson becomes a quiz deck, scheduled on a Leitner ladder. A card you get

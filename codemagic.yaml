@@ -32,7 +32,7 @@ workflows:
         script: |
           BUILD=$((BUILD_NUMBER + 100))
           V="1.0.$BUILD"
-          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist; do
+          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist Sources/EchoShareExtension/Info.plist; do
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST" \
               || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$PLIST"
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" \
@@ -80,6 +80,8 @@ workflows:
       - name: Ad-hoc sign with entitlements
         script: |
           APP=build/dd/Build/Products/Release-iphoneos/MossLive.app
+          codesign --force --sign - --entitlements EchoShareExtension.entitlements \
+            "$APP/PlugIns/EchoShareExtension.appex"
           codesign --force --sign - --entitlements MossLiveWidget.entitlements \
             "$APP/PlugIns/MossLiveWidget.appex"
           codesign --force --sign - --entitlements MossLive.entitlements "$APP"

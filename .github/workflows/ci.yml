@@ -61,7 +61,7 @@ jobs:
       - name: Stamp build version
         run: |
           V="1.0.${{ github.run_number }}"
-          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist; do
+          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist Sources/EchoShareExtension/Info.plist; do
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST" \
               || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$PLIST"
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$PLIST" \
@@ -140,6 +140,8 @@ jobs:
       - name: Ad-hoc sign with entitlements
         run: |
           APP=build/dd/Build/Products/Release-iphoneos/MossLive.app
+          codesign --force --sign - --entitlements EchoShareExtension.entitlements \
+            "$APP/PlugIns/EchoShareExtension.appex"
           codesign --force --sign - --entitlements MossLiveWidget.entitlements \
             "$APP/PlugIns/MossLiveWidget.appex"
           codesign --force --sign - --entitlements MossLive.entitlements "$APP"

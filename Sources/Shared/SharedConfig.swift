@@ -43,6 +43,14 @@ enum SharedConfig {
         return groups.first { $0.contains("mosslive") } ?? groups.first
     }()
 
+    /// Shared files used by extensions. Unlike `UserDefaults`, a document has
+    /// to live in the App Group container itself so it survives after the
+    /// short-lived share extension exits.
+    static var containerURL: URL? {
+        guard let id = resolvedGroupID else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id)
+    }
+
     private static var defaults: UserDefaults? {
         guard let id = resolvedGroupID else { return nil }
         return UserDefaults(suiteName: id)
