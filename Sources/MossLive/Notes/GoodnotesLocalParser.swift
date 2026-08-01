@@ -135,8 +135,10 @@ enum GoodnotesLocalParser {
             let objects = parseObjects(noteData)
             guard !objects.isEmpty else { continue }
 
-            let typedRows = objects.compactMap(typedTextRow)
-            allExactTypedLines.append(contentsOf: typedRows.flatMap { splitLines($0.text) })
+            let typedObjects = objects.compactMap(typedTextRow)
+            let typedRows = objects.flatMap(typedTextAnchorRows)
+            let typedAnchors = typedRows.sorted(by: readingOrder)
+            allExactTypedLines.append(contentsOf: typedAnchors.map(\.text))
             let searchPath = searchIndex[pageId] ?? "search/\(pageId)"
             var warning: String?
             var rows: [TextRow] = []
@@ -157,6 +159,12 @@ enum GoodnotesLocalParser {
             // actual page transform. They are authoritative for typed text.
             // Replace fuzzy/search copies in place and insert missing objects
             // at their real coordinates instead of appending them at the end.
+            let multilineKeys = Set(typedObjects.filter { splitLines($0.text).count > 1 }.map {
+                normalized($0.text)
+            })
+            rows.removeAll { row in
+                row.kind == .typed && multilineKeys.contains(normalized(row.text))
+            }
             for typed in typedRows {
                 if let match = rows.firstIndex(where: {
                     $0.kind == .typed && normalized($0.text) == normalized(typed.text)
@@ -278,6 +286,36 @@ enum GoodnotesLocalParser {
             y = origin.1
         }
         return TextRow(y: y, x: x, order: object.sequence, text: text, kind: .typed)
+    }
+
+    private static func typedTextAnchorRows(_ object: NoteObject) -> [TextRow] {
+        guard let row = typedTextRow(object) else { return [] }
+        let lines = splitLines(row.text)
+        guard lines.count > 1 else { return [row] }
+
+        var textBoxHeight: Float?
+        if let root = try? protobufFields(object.payload),
+           let modelData = messageValue(root, 21),
+           let model = try? protobufFields(modelData),
+           let textBoxData = messageValue(model, 32),
+           let textBox = try? protobufFields(textBoxData),
+           let sizeData = messageValue(textBox, 2),
+           let size = point(sizeData) {
+            textBoxHeight = size.1
+        }
+        // Goodnotes sizes a multiline box with one additional layout slot
+        // (the exported attributed text commonly ends in a newline). Dividing
+        // by only the visible lines drifts later rows below neighbouring text.
+        let lineHeight = max(12, (textBoxHeight ?? Float((lines.count + 1) * 28)) / Float(lines.count + 1))
+        return lines.enumerated().map { index, line in
+            TextRow(
+                y: row.y + Float(index) * lineHeight,
+                x: row.x,
+                order: row.order + index,
+                text: line,
+                kind: .typed
+            )
+        }
     }
 
     private static func parseSearch(_ data: Data) -> (rows: [TextRow], strokeIds: Set<String>, revision: Int?) {

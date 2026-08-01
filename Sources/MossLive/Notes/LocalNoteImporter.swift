@@ -151,27 +151,161 @@ enum LocalNoteImporter {
         localOCR: OCRResult,
         exactTypedLines: [String]
     ) -> String {
-        guard localOCR.confidence >= 0.45 else { return native }
-        if native.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return localOCR.text }
+        mergeGoodnotesText(
+            native: native,
+            ocrText: localOCR.text,
+            ocrConfidence: localOCR.confidence,
+            exactTypedLines: exactTypedLines
+        )
+    }
+
+    static func mergeGoodnotesText(
+        native: String,
+        ocrText: String,
+        ocrConfidence: Float,
+        exactTypedLines: [String]
+    ) -> String {
+        guard ocrConfidence >= 0.45 else { return native }
+        if native.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return ocrText }
 
         let nativeLetters = native.filter(\.isLetter).count
-        let ocrLetters = localOCR.text.filter(\.isLetter).count
+        let ocrLetters = ocrText.filter(\.isLetter).count
         // A 499px Goodnotes thumbnail can be too small for reliable OCR. It
         // may replace native handwriting only when it recovered essentially
         // the same amount of content with a healthy model confidence.
-        guard ocrLetters >= max(8, Int(Double(nativeLetters) * 0.85)), localOCR.confidence >= 0.55 else {
+        guard ocrLetters >= max(8, Int(Double(nativeLetters) * 0.85)), ocrConfidence >= 0.55 else {
             return native
         }
 
-        var lines = localOCR.text.split(whereSeparator: \.isNewline).map(String.init)
-        for exact in exactTypedLines where !exact.isEmpty {
-            if let index = lines.firstIndex(where: { similarity($0, exact) >= 0.62 }) {
+        let exactLines = exactTypedLines.filter { !$0.isEmpty }
+        let exactKeys = Set(exactLines.map(normalized))
+        let nativeHandwritingWords = native
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .filter { !exactKeys.contains(normalized($0)) }
+            .flatMap { $0.split(whereSeparator: \.isWhitespace).map(String.init) }
+            .filter { normalized($0).count >= 3 }
+
+        var lines = ocrText.split(whereSeparator: \.isNewline).map(String.init)
+        lines = lines.map { line in
+            guard !exactLines.contains(where: { similarity(line, $0) >= 0.62 }) else { return line }
+            return reconcileHandwriting(line, with: nativeHandwritingWords)
+        }
+
+        // Vision may omit a short line at the edge of Goodnotes' 499px
+        // thumbnail. Exact typed lines are losslessly available in the native
+        // object model, so restore a missing line next to its nearest surviving
+        // typed neighbour instead of appending it at the bottom.
+        for (exactIndex, exact) in exactLines.enumerated() {
+            let occurrence = exactLines.prefix(exactIndex + 1)
+                .filter { normalized($0) == normalized(exact) }
+                .count
+            let matches = matchingLineIndices(in: lines, expected: exact)
+            if matches.count >= occurrence {
+                let index = matches[occurrence - 1]
                 lines[index] = exact
-            } else if !lines.contains(where: { normalized($0) == normalized(exact) }) {
-                lines.append(exact)
+                continue
+            }
+            let next = exactLines.dropFirst(exactIndex + 1)
+                .compactMap { bestLineIndex(in: lines, matching: $0) }
+                .first
+            let previous = exactLines.prefix(exactIndex).reversed()
+                .compactMap { bestLineIndex(in: lines, matching: $0) }
+                .first
+            let insertion = next ?? previous.map { min(lines.count, $0 + 1) } ?? lines.count
+            lines.insert(exact, at: insertion)
+        }
+        lines = positionHandwritingUsingNativeOrder(
+            lines,
+            native: native,
+            exactLines: exactLines
+        )
+        return lines.joined(separator: "\n")
+    }
+
+    private static func positionHandwritingUsingNativeOrder(
+        _ mergedLines: [String],
+        native: String,
+        exactLines: [String]
+    ) -> [String] {
+        let nativeLines = native.split(whereSeparator: \.isNewline).map(String.init)
+        let exactKeys = Set(exactLines.map(normalized))
+        var lines = mergedLines
+        var insertedAfter: [String: Int] = [:]
+
+        // Vision occasionally gives one large handwriting box whose midpoint
+        // lies above a short typed label. The Goodnotes search data still
+        // contains the recognized handwriting tokens in page order, so use
+        // those tokens to place the OCR line between its nearest typed anchors.
+        let candidates = mergedLines.filter { line in
+            !exactLines.contains(where: { similarity(line, $0) >= 0.62 })
+        }
+        for candidate in candidates {
+            let candidateWords = candidate.split(whereSeparator: \.isWhitespace)
+                .map(String.init)
+                .filter { normalized($0).count >= 3 }
+            guard !candidateWords.isEmpty else { continue }
+
+            let evidence = nativeLines.indices.filter { nativeIndex in
+                let nativeLine = nativeLines[nativeIndex]
+                guard !exactKeys.contains(normalized(nativeLine)) else { return false }
+                let nativeWords = nativeLine.split(whereSeparator: \.isWhitespace).map(String.init)
+                return candidateWords.contains { word in
+                    nativeWords.contains { similarity(word, $0) >= 0.74 }
+                }
+            }
+            guard !evidence.isEmpty, let currentIndex = lines.firstIndex(of: candidate) else { continue }
+            let nativeIndex = evidence.sorted()[evidence.count / 2]
+            let previousExact = nativeLines[..<nativeIndex].reversed().first {
+                exactKeys.contains(normalized($0))
+            }.map(String.init)
+            let nextExact = nativeLines.dropFirst(nativeIndex + 1).first {
+                exactKeys.contains(normalized($0))
+            }.map(String.init)
+            guard previousExact != nil || nextExact != nil else { continue }
+
+            lines.remove(at: currentIndex)
+            if let previousExact,
+               let anchorIndex = bestLineIndex(in: lines, matching: previousExact) {
+                let key = normalized(previousExact)
+                let offset = insertedAfter[key, default: 0]
+                var insertion = min(lines.count, anchorIndex + 1 + offset)
+                if let nextExact,
+                   let nextIndex = bestLineIndex(in: lines, matching: nextExact) {
+                    insertion = min(insertion, nextIndex)
+                }
+                lines.insert(candidate, at: insertion)
+                insertedAfter[key] = offset + 1
+            } else if let nextExact,
+                      let nextIndex = bestLineIndex(in: lines, matching: nextExact) {
+                lines.insert(candidate, at: nextIndex)
             }
         }
-        return lines.joined(separator: "\n")
+        return lines
+    }
+
+    private static func bestLineIndex(in lines: [String], matching expected: String) -> Int? {
+        let matches = lines.enumerated().map { ($0.offset, similarity($0.element, expected)) }
+        guard let best = matches.max(by: { $0.1 < $1.1 }), best.1 >= 0.62 else { return nil }
+        return best.0
+    }
+
+    private static func matchingLineIndices(in lines: [String], expected: String) -> [Int] {
+        lines.indices.filter { similarity(lines[$0], expected) >= 0.62 }
+    }
+
+    private static func reconcileHandwriting(_ line: String, with nativeWords: [String]) -> String {
+        line.split(whereSeparator: \.isWhitespace).map { rawWord in
+            let word = String(rawWord)
+            guard let candidate = nativeWords.max(by: {
+                similarity(word, $0) < similarity(word, $1)
+            }), similarity(word, candidate) >= 0.74
+            else { return word }
+            guard normalized(word) != normalized(candidate) else { return word }
+            return word.first?.isUppercase == true
+                ? candidate.prefix(1).uppercased() + String(candidate.dropFirst())
+                : candidate
+        }.joined(separator: " ")
     }
 
     private static func similarity(_ lhs: String, _ rhs: String) -> Double {
