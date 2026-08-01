@@ -8,7 +8,8 @@ extension Notification.Name {
 ///
 /// The extension only copies the original document into the App Group. The
 /// user chooses the destination lesson in the full app, where the existing
-/// authenticated importer performs OCR/upload and can show useful errors.
+/// authenticated importer performs all decoding/OCR locally and uploads only
+/// the extracted text plus optional page timestamps.
 enum PendingNoteImports {
     struct Item: Identifiable, Hashable, Sendable {
         let id: String

@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
-import Vision
 
 /// External notes attached to one recorded lesson. Echo deliberately does not
 /// offer a canvas or text editor here: Goodnotes, Notability and any PDF/image
@@ -140,9 +139,9 @@ struct ImportedLessonNotesView: View {
         Section {
             Label {
                 Text(
-                    "Echo liest vorhandene Notizen als Unterrichtskontext. "
-                        + "Bei Goodnotes kann die letzte Seitenänderung mit der Aufnahme verbunden werden; "
-                        + "sie ist kein exakter Zeitstempel jedes Pencil-Strichs."
+                    "Echo verarbeitet Goodnotes, PDF und Bilder vollständig lokal auf diesem iPad. "
+                        + "Nur der extrahierte Text und vorhandene Seitenzeitpunkte werden an deinen Server übertragen; "
+                        + "niemals die Goodnotes-Datei oder ein Seitenbild."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -154,7 +153,7 @@ struct ImportedLessonNotesView: View {
     }
 
     private var warningSection: some View {
-        Section("Hinweise von Goodnotes") {
+        Section("Hinweise zum lokalen Import") {
             ForEach(warnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle")
                     .font(.callout)
@@ -238,13 +237,13 @@ struct ImportedLessonNotesView: View {
         importing = true
         defer { importing = false }
         do {
-            let recognizedText = await Self.recognizedImageText(at: url)
+            let extraction = try await LocalNoteImporter.extract(from: url)
             let result = try await api.importLessonNotes(
                 sessionId: lesson.id,
-                fileURL: url,
-                recognizedText: recognizedText
+                originalFilename: url.lastPathComponent,
+                pages: extraction.pages
             )
-            warnings = result.warnings
+            warnings = Array(Set(extraction.warnings + result.warnings)).sorted()
             notes = try await api.lessonNotes(id: lesson.id)
                 .sorted(by: Self.noteOrder)
         } catch {
@@ -256,13 +255,13 @@ struct ImportedLessonNotesView: View {
         importing = true
         defer { importing = false }
         do {
-            let recognizedText = await Self.recognizedImageText(at: item.url)
+            let extraction = try await LocalNoteImporter.extract(from: item.url)
             let result = try await api.importLessonNotes(
                 sessionId: lesson.id,
-                fileURL: item.url,
-                recognizedText: recognizedText
+                originalFilename: item.filename,
+                pages: extraction.pages
             )
-            warnings = result.warnings
+            warnings = Array(Set(extraction.warnings + result.warnings)).sorted()
             PendingNoteImports.remove(item)
             pendingImports.removeAll { $0.id == item.id }
             notes = try await api.lessonNotes(id: lesson.id)
@@ -312,27 +311,6 @@ struct ImportedLessonNotesView: View {
         return String(format: "%d:%02d", value / 60, value % 60)
     }
 
-    /// Images have no searchable text container, so Vision supplies the text
-    /// that the backend will use as lesson context. PDF and native note formats
-    /// are decoded on the server and intentionally skip this path.
-    private static func recognizedImageText(at url: URL) async -> String {
-        guard ["jpg", "jpeg", "png"].contains(url.pathExtension.lowercased()) else { return "" }
-        let accessed = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessed { url.stopAccessingSecurityScopedResource() }
-        }
-        return await Task.detached(priority: .userInitiated) {
-            let request = VNRecognizeTextRequest()
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-            request.recognitionLanguages = ["de-DE", "en-US"]
-            let handler = VNImageRequestHandler(url: url, options: [:])
-            guard (try? handler.perform([request])) != nil else { return "" }
-            return (request.results ?? [])
-                .compactMap { $0.topCandidates(1).first?.string }
-                .joined(separator: "\n")
-        }.value
-    }
 }
 
 private struct ImportedNoteRow: View {

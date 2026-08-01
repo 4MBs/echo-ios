@@ -96,12 +96,19 @@ along.
 Each archived lesson can also import notes authored elsewhere: native
 Goodnotes documents, Notability `.note` files with an embedded PDF, PDFs,
 JPEGs and PNGs. PDF export is the dependable interchange route for Notability.
-Echo extracts searchable text and Goodnotes' own handwriting recognition and
-adds it to the lesson context used by summaries, quizzes and chat. When
-Goodnotes includes a page-content timestamp inside the lesson, the imported
-page links to that point in the recording. It is labelled as the page's last
-edit, not presented as an exact timestamp for every Pencil stroke. Reimporting
-the same Goodnotes page updates it through the document's stable internal IDs.
+Echo decodes searchable text, exact typed objects and Goodnotes' own
+handwriting index locally on the iPad. For scans and missing handwriting data,
+Apple Vision's accurate on-device text model is used as a conservative
+fallback. Visual page coordinates determine reading order. When Goodnotes
+includes a page-content timestamp inside the lesson, the imported page links
+to that point in the recording. It is labelled as the page's last edit, not
+presented as an exact timestamp for every Pencil stroke. Reimporting the same
+Goodnotes page updates it through the document's stable internal IDs.
+
+The original Goodnotes/Notability/PDF/image file and all rendered page images
+remain on the iPad. Echo sends only the locally extracted text, stable page ID,
+optional page timestamp and warnings to the user's own backend; new imports do
+not create server-side note attachments.
 
 Echo has no note editor or drawing canvas. Goodnotes and Notability remain the
 place where notes are written; Echo only imports, reads and links them.
