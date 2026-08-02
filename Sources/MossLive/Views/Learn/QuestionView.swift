@@ -17,6 +17,9 @@ struct QuestionView: View {
     let api: BackendAPI
     let width: CGFloat
     let isLast: Bool
+    /// Whether answers change the schedule, which is the only thing that makes
+    /// "kommt morgen wieder" true or false.
+    let countsForPlan: Bool
     /// correct, rating 0…3, milliseconds taken, confidence when the student
     /// judged the answer themselves.
     let onAnswer: (Bool, Int, Int, Int?) -> Void
@@ -29,7 +32,7 @@ struct QuestionView: View {
     @State private var typed = ""
     @State private var revealed = false
     @State private var rated = false
-    @State private var playingSource = false
+    @State private var lastRating = 2
     @State private var startedAt = Date()
     @FocusState private var writing: Bool
 
@@ -47,13 +50,9 @@ struct QuestionView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.section) {
-                origin
                 question
                 if isChoice { options }
-                if isChoice, answered { verdict }
-                if revealed, !isChoice { expectedAnswer }
-                if answered || revealed { explanation }
-                if answered || revealed { sourceControls }
+                if answered || revealed { aftermath }
             }
             .frame(maxWidth: Theme.Width.readable, alignment: .leading)
             .frame(maxWidth: .infinity)
@@ -65,31 +64,19 @@ struct QuestionView: View {
         .animation(reduceMotion ? nil : .snappy, value: selected)
         .animation(reduceMotion ? nil : .snappy, value: revealed)
         .animation(reduceMotion ? nil : .snappy, value: rated)
+        // The system's own answer to "did that register" — the same feedback a
+        // correct or a rejected entry gets everywhere else in iOS.
+        .sensoryFeedback(trigger: selected) { _, new in
+            guard let new else { return nil }
+            return new == card.answer ? .success : .error
+        }
     }
 
     // MARK: - The question
 
-    private var origin: some View {
-        HStack(spacing: 8) {
-            SubjectDot(subject: card.subject)
-            Text(originText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var originText: String {
-        var parts = [card.subject ?? otherSubjectName]
-        if let started = lesson?.startedAt {
-            parts.append(LearnDay.short(started))
-        } else if let title = card.lessonTitle, !title.isEmpty {
-            parts.append(title)
-        }
-        return parts.joined(separator: " · ")
-    }
-
+    /// The largest thing on the screen, on the background rather than in a box.
+    /// Where it came from is in the header — it is true of the whole screen, not
+    /// of this paragraph.
     private var question: some View {
         Text(card.question)
             .font(width >= Theme.Width.largeQuestion ? .title : .title2)
@@ -97,6 +84,40 @@ struct QuestionView: View {
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
+    }
+
+    /// Everything the answer produced, in one block so it arrives as one move:
+    /// the verdict, what the card was after, why, what happens to it next, and
+    /// the two ways back into the lesson it came from.
+    private var aftermath: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.inset) {
+            if isChoice, answered { verdict }
+            if revealed, !isChoice { expectedAnswer }
+            explanation
+            if answered { scheduleNote }
+            CardSourceActions(api: api, card: card, lesson: lesson)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What the answer did to the card. The schedule lives on the server, so
+    /// this says what is certain — a missed card comes back tomorrow, a known
+    /// one waits longer — and never invents a number of days.
+    @ViewBuilder
+    private var scheduleNote: some View {
+        if let text = scheduleText {
+            Label(text, systemImage: "clock.arrow.circlepath")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Practice says nothing here: it changes nothing, and repeating that on
+    /// twenty cards in a row is noise. The result screen says it once.
+    private var scheduleText: String? {
+        guard countsForPlan else { return nil }
+        if isChoice { return selected == card.answer ? "Kommt später wieder." : "Kommt morgen wieder." }
+        return lastRating >= 2 ? "Kommt später wieder." : "Kommt morgen wieder."
     }
 
     // MARK: - Choosing
@@ -153,6 +174,7 @@ struct QuestionView: View {
     private func rate(_ rating: Int) {
         guard !rated else { return }
         rated = true
+        lastRating = rating
         onAnswer(rating >= 2, rating, elapsedMs, confidence(for: rating))
     }
 
@@ -213,39 +235,6 @@ struct QuestionView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    // MARK: - Back into the lesson
-
-    /// The one thing this app can do that a flashcard app cannot: the twenty
-    /// seconds of the lesson the question was written from. It used to be a grey
-    /// line of text saying "Quelle: Mathematik · 12:30".
-    @ViewBuilder
-    private var sourceControls: some View {
-        if let start = card.sourceStartMs, hasRecording {
-            if playingSource {
-                SourceExcerptPlayer(
-                    api: api,
-                    lessonId: card.sessionId,
-                    startMs: start,
-                    endMs: card.sourceEndMs
-                ) {
-                    playingSource = false
-                }
-            } else {
-                Button {
-                    playingSource = true
-                } label: {
-                    Label("Im Unterricht hören", systemImage: "waveform")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-            }
-        }
-    }
-
-    private var hasRecording: Bool {
-        lesson?.hasAudio == true || BackendAPI.cachedAudio(id: card.sessionId) != nil
     }
 
     // MARK: - The bar that never moves

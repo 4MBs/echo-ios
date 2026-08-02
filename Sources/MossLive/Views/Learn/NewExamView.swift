@@ -225,6 +225,7 @@ private struct SuggestionRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.row) {
+            SubjectGlyph(subject: lesson.subjectLong ?? lesson.subject, size: 30)
             VStack(alignment: .leading, spacing: 3) {
                 Text(lesson.subjectLong ?? lesson.subject)
                     .font(.body)
@@ -235,6 +236,7 @@ private struct SuggestionRow: View {
             Spacer(minLength: 8)
             Button("Übernehmen", action: onApply)
                 .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
         }
         .frame(minHeight: 44)
     }

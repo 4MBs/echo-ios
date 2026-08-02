@@ -48,8 +48,6 @@ struct ExamView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.section) {
                 header
-                LearnPrimaryButton("Lernrunde starten") { startRound() }
-                    .disabled(deck.isEmpty)
                 topicSection
                 materialSection
                 if let actionError {
@@ -87,29 +85,55 @@ struct ExamView: View {
 
     // MARK: - Head
 
+    /// The exam as one block: whose it is, when it is, how solid the material
+    /// is, and the round that closes the gap — in that order, so the button
+    /// stands on the facts that justify it rather than floating above them.
+    ///
+    /// No gradient and no white type on a subject colour. The page it replaces
+    /// filled its head with the subject's fill and wrote on it in white, which
+    /// for Englisch is about 1.2:1; the colour now does its job in the glyph,
+    /// where it is a mark rather than a background for text.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                SubjectDot(subject: exam.subject)
-                Text(exam.subject)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Theme.Space.inset) {
+            HStack(alignment: .top, spacing: Theme.Space.row) {
+                SubjectGlyph(subject: exam.subject, size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(exam.subject)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(exam.name.isEmpty ? "Arbeit" : exam.name)
+                        .font(.title2.weight(.semibold))
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                CountdownChip(days: exam.daysRemaining)
             }
-            Text(exam.name.isEmpty ? "Arbeit" : exam.name)
-                .font(.title.weight(.bold))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(exam.subject), \(exam.name), \(LearnDay.countdown(days: exam.daysRemaining))"
+            )
+
             Text(dateLine)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            ReadinessBar(value: readiness, subject: exam.subject, width: 120)
-                .padding(.top, 4)
+
+            ReadinessBar(value: readiness, subject: exam.subject, width: 140)
+
+            HStack(spacing: Theme.Space.row) {
+                LearnPrimaryButton("Lernrunde starten") { startRound() }
+                    .disabled(deck.isEmpty)
+                Spacer(minLength: 0)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .padding(Theme.Space.inset + 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .learnSurface()
     }
 
     private var dateLine: String {
         let count = deck.count == 1 ? "1 Karte" : "\(deck.count) Karten"
         guard let date = LearnDay.date(exam.examDate) else { return count }
-        return "\(LearnDay.short(date)) · \(LearnDay.countdown(days: exam.daysRemaining)) · \(count)"
+        return "\(LearnDay.short(date)) · \(count)"
     }
 
     private var readiness: Double {

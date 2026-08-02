@@ -10,6 +10,7 @@ import SwiftUI
 struct StudySessionView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     let session: StudySession
 
@@ -26,7 +27,7 @@ struct StudySessionView: View {
                 // The result is its own screen with its own way out. Leaving the
                 // progress bar and a second "Beenden" above it would put the
                 // same action on the screen twice.
-                if !session.isFinished { header }
+                if !session.isFinished { header(width: geo.size.width) }
                 stage(width: geo.size.width)
             }
         }
@@ -48,16 +49,42 @@ struct StudySessionView: View {
 
     // MARK: - Chrome
 
-    /// Progress, position, and the one way out. No score: a running count of
-    /// what you got wrong is pressure, not information.
-    private var header: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("\(session.position) von \(session.total)")
-                    .font(.footnote.monospacedDigit())
+    /// Where the question comes from, where the round is, and the one way out.
+    ///
+    /// The origin moved up here out of the content: it is true of the whole
+    /// screen rather than part of the question, and in the header it gives the
+    /// round the subject's colour without painting anything. No score — a
+    /// running count of what you got wrong is pressure, not information — and
+    /// no timer, because nothing here is timed.
+    private func header(width: CGFloat) -> some View {
+        // In a Slide Over slice, or at accessibility text sizes, the origin
+        // gives up its words and keeps its glyph: the position and the way out
+        // are what the header is for.
+        let showsOrigin = width >= Theme.Width.narrow && typeSize < .accessibility1
+        return VStack(spacing: 10) {
+            HStack(spacing: Theme.Space.row) {
+                if let card = session.current {
+                    SubjectGlyph(subject: card.subject, size: 30)
+                    if showsOrigin {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(card.subject ?? otherSubjectName)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                            if let origin = originLine(for: card) {
+                                Text(origin)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+                Spacer(minLength: 8)
+                Text("\(session.position)/\(session.total)")
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .contentTransition(.numericText())
-                Spacer()
+                    .accessibilityLabel("Frage \(session.position) von \(session.total)")
                 Button("Beenden") { requestExit() }
                     .font(.body)
                     .keyboardShortcut(.escape, modifiers: [])
@@ -67,10 +94,17 @@ struct StudySessionView: View {
                 .tint(Theme.accent)
         }
         .padding(.horizontal, Theme.Space.screen)
-        .padding(.top, 12)
+        .padding(.top, 10)
         .padding(.bottom, 10)
+        .background(.bar)
         .accessibilityElement(children: .contain)
-        .accessibilityValue("Frage \(session.position) von \(session.total)")
+    }
+
+    /// The lesson a card was written from, spelled as a date when the archive
+    /// knows it and as the lesson's own title when it does not.
+    private func originLine(for card: BackendAPI.LearnCard) -> String? {
+        if let started = lessons[card.sessionId]?.startedAt { return LearnDay.short(started) }
+        return card.lessonTitle?.trimmingCharacters(in: .whitespaces).nilWhenEmpty
     }
 
     @ViewBuilder
@@ -90,6 +124,7 @@ struct StudySessionView: View {
                 api: api,
                 width: width,
                 isLast: session.position == session.total,
+                countsForPlan: session.mode.reportsResults,
                 onAnswer: { correct, rating, responseMs, confidence in
                     guard session.record(correct: correct, rating: rating) else { return }
                     model.record(

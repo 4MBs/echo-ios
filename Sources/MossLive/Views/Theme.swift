@@ -45,8 +45,6 @@ enum Theme {
     enum Width {
         /// A comfortable line length for a question.
         static let readable: CGFloat = 720
-        /// How wide the one filled button on a screen is allowed to get.
-        static let action: CGFloat = 480
         /// One column of content in a detail panel.
         static let column: CGFloat = 700
         /// Where Heute splits into two columns.

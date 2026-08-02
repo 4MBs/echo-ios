@@ -95,20 +95,27 @@ struct TodayView: View {
         } else if store.cards.isEmpty, plan.isEmpty, store.exams.isEmpty {
             noCardsYet
         } else if width >= Theme.Width.twoColumn {
+            // Two columns, each held to a readable measure and the pair centred:
+            // stretching a row of six words across 1300pt is what makes an iPad
+            // app look like a resized phone app.
             HStack(alignment: .top, spacing: Theme.Space.section) {
                 VStack(alignment: .leading, spacing: Theme.Space.section) {
                     startSection
                     planSection
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: Theme.Width.column)
                 VStack(alignment: .leading, spacing: Theme.Space.section) {
                     examSection
                     weakSection
                     footer
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: Theme.Width.column)
             }
+            .frame(maxWidth: .infinity, alignment: .center)
         } else {
+            // One column that fills the panel rather than a 700pt strip with
+            // dead grey beside it: these are rows of four or five words, not
+            // paragraphs, so they stay readable at any width this branch sees.
             VStack(alignment: .leading, spacing: Theme.Space.section) {
                 startSection
                 planSection
@@ -116,13 +123,13 @@ struct TodayView: View {
                 weakSection
                 footer
             }
-            .frame(maxWidth: Theme.Width.column, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     /// The answer to "what now", and the button that does it.
     private var startSection: some View {
-        TodayStart(
+        TodayHero(
             plan: plan,
             resumable: model.resumableSession,
             hasCards: !store.cards.isEmpty,
@@ -138,18 +145,22 @@ struct TodayView: View {
         )
     }
 
-    /// What is in the round, and the one setting that changes it.
+    /// What is in the round, and — beside the heading — the one setting that
+    /// shapes it.
     @ViewBuilder
     private var planSection: some View {
         if !plan.blocks.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.row) {
-                LearnSectionHeader("Was drin ist")
+                HStack(alignment: .firstTextBaseline) {
+                    LearnSectionHeader("Was drin ist")
+                    Spacer(minLength: 8)
+                    DailyGoalMenu(minutes: minutesBinding)
+                }
                 LearnRowGroup {
-                    ForEach(plan.blocks) { block in
+                    ForEach(Array(plan.blocks.enumerated()), id: \.element.id) { index, block in
                         PlanBlockRow(block: block)
-                        LearnRowDivider()
+                        if index < plan.blocks.count - 1 { LearnRowDivider() }
                     }
-                    DailyGoalRow(minutes: minutesBinding)
                 }
             }
         }
