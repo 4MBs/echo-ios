@@ -24,7 +24,7 @@ struct BookReaderView: View {
             case .none, .downloading:
                 downloadProgress
             case .ready(let url):
-                PDFReader(url: url, bookID: book.id)
+                PDFReader(url: url, book: book)
             case .failed(let error):
                 ErrorState(error) { await open() }
                     .groupedScreen()
@@ -70,27 +70,34 @@ struct BookReaderView: View {
     }
 }
 
-/// The reader itself: a PDFKit page view with the control bar underneath.
+/// The reader itself: a PDFKit page view with the control bar underneath, and
+/// — while a book is open — Buch-KI beside it.
 private struct PDFReader: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     let url: URL
+    let book: BackendAPI.Book
 
     /// Printed page number minus PDF page number. Schoolbooks put a cover and
     /// often a few unnumbered pages in front, so the two rarely line up — and
     /// the shift differs per book, which is why it is stored per book.
     @AppStorage private var pageOffset: Int
 
-    init(url: URL, bookID: String) {
+    init(url: URL, book: BackendAPI.Book) {
         self.url = url
-        _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(bookID)")
+        self.book = book
+        _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(book.id)")
     }
 
     @State private var document: PDFDocument?
     @State private var twoUp = true
     @State private var currentPage = 1
+    @State private var visiblePages: [Int] = [1]
     @State private var pageCount = 0
     @State private var proxy = PDFViewProxy()
+    @State private var bookAI = BookAIStore()
+    @State private var askingBookAI = false
     @State private var askingForPage = false
     @State private var typedPage = ""
     @State private var openedAt = "1"
@@ -102,6 +109,41 @@ private struct PDFReader: View {
     @FocusState private var numberingFocused: Bool
 
     var body: some View {
+        HStack(spacing: 0) {
+            reader
+            if showsSidePanel {
+                Divider().ignoresSafeArea(edges: .bottom)
+                bookAIPanel(close: { askingBookAI = false })
+                    .frame(width: 380)
+                    .transition(.move(edge: .trailing))
+            }
+        }
+        .animation(.smooth(duration: 0.25), value: showsSidePanel)
+        // Parsing a 300 MB schoolbook off the main thread keeps the push
+        // animation smooth, and reusing the document means flipping the layout
+        // does not re-read the file.
+        .task(id: url) {
+            document = await Task.detached(priority: .userInitiated) {
+                LoadedDocument(document: PDFDocument(url: url))
+            }.value.document
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { bookAIButton }
+            if model.settings.showPageNumberEditor {
+                ToolbarItem(placement: .topBarTrailing) { readerMenu }
+            }
+        }
+        // No room for both on a phone, so there the panel is a sheet — left at
+        // half height, where the top of the page is still in view behind it.
+        .sheet(isPresented: sheetPresented) {
+            bookAIPanel(close: nil)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
+    }
+
+    private var reader: some View {
         Group {
             if let document {
                 PDFKitView(
@@ -109,6 +151,7 @@ private struct PDFReader: View {
                     twoUp: twoUp,
                     proxy: proxy,
                     currentPage: $currentPage,
+                    visiblePages: $visiblePages,
                     pageCount: $pageCount
                 )
                 // Switching layout needs a freshly built PDFView: PDFKit does not
@@ -121,19 +164,51 @@ private struct PDFReader: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) { controlBar }
-        // Parsing a 300 MB schoolbook off the main thread keeps the push
-        // animation smooth, and reusing the document means flipping the layout
-        // does not re-read the file.
-        .task(id: url) {
-            document = await Task.detached(priority: .userInitiated) {
-                LoadedDocument(document: PDFDocument(url: url))
-            }.value.document
+    }
+
+    // MARK: - Buch-KI
+
+    /// Only ever here, inside an open book: the question Buch-KI answers is
+    /// "this page", which the shelf outside has no answer for.
+    private var bookAIButton: some View {
+        Button {
+            askingBookAI.toggle()
+        } label: {
+            Label("Buch-KI", systemImage: "sparkles")
+                .labelStyle(.titleAndIcon)
+                .font(.subheadline.weight(.medium))
         }
-        .toolbar {
-            if model.settings.showPageNumberEditor {
-                ToolbarItem(placement: .topBarTrailing) { readerMenu }
-            }
-        }
+        .buttonStyle(.glass)
+        .accessibilityLabel(askingBookAI ? "Buch-KI schließen" : "Buch-KI öffnen")
+    }
+
+    /// A regular width (iPad, and a phone in landscape) keeps the panel beside
+    /// the book so the page stays readable while the answer is read.
+    private var showsSidePanel: Bool {
+        askingBookAI && sizeClass == .regular
+    }
+
+    private var sheetPresented: Binding<Bool> {
+        Binding(
+            get: { askingBookAI && sizeClass != .regular },
+            set: { askingBookAI = $0 }
+        )
+    }
+
+    private func bookAIPanel(close: (() -> Void)?) -> some View {
+        BookAIPanel(
+            bookID: book.id,
+            bookTitle: book.title,
+            numbering: numbering,
+            visiblePages: visiblePages,
+            store: bookAI,
+            goToPage: { page in
+                proxy.go(toPage: page)
+                // On a phone the sheet covers the page it just turned to.
+                if sizeClass != .regular { askingBookAI = false }
+            },
+            close: close
+        )
     }
 
     /// Set once per book and then forgotten, so it belongs in the navigation
@@ -310,30 +385,24 @@ private struct PDFReader: View {
         .onChange(of: typedPage) { _, text in
             let digits = String(text.filter(\.isNumber).prefix(5))
             if digits != text { typedPage = digits }
-            if let printed = Int(digits), let pdfPage = pdfPage(forPrinted: printed) {
+            if let printed = Int(digits), let pdfPage = numbering.pdfPage(forPrinted: printed) {
                 proxy.go(toPage: pdfPage)
             }
         }
     }
 
-    /// The number printed on a PDF page. Pages ahead of the book's own page 1 —
-    /// cover, title page, whatever else — carry no printed number.
-    private func printedNumber(_ pdfPage: Int) -> Int? {
-        let printed = pdfPage + pageOffset
-        return printed >= 1 ? printed : nil
+    /// The book's own numbering, shared with Buch-KI's panel so a cited page is
+    /// named there exactly as the reader names it here.
+    private var numbering: BookPageNumbering {
+        BookPageNumbering(offset: pageOffset, pageCount: pageCount)
     }
 
     private func printedLabel(_ pdfPage: Int) -> String {
-        printedNumber(pdfPage).map(String.init) ?? "—"
+        numbering.printedLabel(pdfPage)
     }
 
     private var printedLast: Int {
-        max(pageCount + pageOffset, 0)
-    }
-
-    private func pdfPage(forPrinted printed: Int) -> Int? {
-        let pdfPage = printed - pageOffset
-        return (1 ... max(pageCount, 1)).contains(pdfPage) ? pdfPage : nil
+        numbering.printedLast
     }
 
     /// A compact native menu keeps the toolbar quiet while making both layouts
@@ -464,6 +533,9 @@ private struct PDFKitView: UIViewRepresentable {
     let twoUp: Bool
     let proxy: PDFViewProxy
     @Binding var currentPage: Int
+    /// Every PDF page on screen: one, or both halves of a spread. Buch-KI asks
+    /// about exactly these.
+    @Binding var visiblePages: [Int]
     @Binding var pageCount: Int
 
     func makeUIView(context: Context) -> PDFView {
@@ -505,8 +577,11 @@ private struct PDFKitView: UIViewRepresentable {
         // A page of a different size needs its own floor, so re-fit on arrival.
         (view as? BookPDFView)?.applyScaleLimits()
         pageCount = document.pageCount
-        let visible = view.visiblePages.map { document.index(for: $0) + 1 }
-        if let first = visible.min() { currentPage = first }
+        let visible = view.visiblePages.map { document.index(for: $0) + 1 }.sorted()
+        if let first = visible.first {
+            currentPage = first
+            visiblePages = visible
+        }
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
