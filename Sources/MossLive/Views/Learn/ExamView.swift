@@ -246,7 +246,7 @@ struct ExamView: View {
     }
 
     private func delete() async {
-        guard (try? await api.deleteLearnExam(id: exam.id)) != nil else {
+        guard await (try? api.deleteLearnExam(id: exam.id)) != nil else {
             actionError = "Die Arbeit konnte nicht gelöscht werden."
             return
         }
