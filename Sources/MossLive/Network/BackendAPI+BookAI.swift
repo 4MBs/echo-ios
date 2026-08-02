@@ -49,7 +49,7 @@ extension BackendAPI {
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? true
-            let text = (try c.decodeIfPresent(String.self, forKey: .text) ?? "")
+            let text = try (c.decodeIfPresent(String.self, forKey: .text) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard ok, !text.isEmpty else {
                 throw APIError(message: "Der Server hat keine Antwort geliefert.")
