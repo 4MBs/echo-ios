@@ -87,7 +87,6 @@ enum LearnDay {
         default: "noch \(days) Tage"
         }
     }
-
 }
 
 /// Due, and not already answered on a card whose result is still queued —
