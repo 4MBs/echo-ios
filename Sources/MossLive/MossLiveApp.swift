@@ -25,13 +25,19 @@ struct MossLiveApp: App {
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selection: AppTab? = .aufnahme
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var pendingNoteImportCount = 0
 
+    /// Which place the sidebar is on. It lives on the model rather than in this
+    /// view so a screen can send the student somewhere — Lernen with no cards
+    /// yet offers "Zur Aufnahme", and that has to actually go there.
+    private var selection: Binding<AppTab?> {
+        Binding(get: { model.selectedTab }, set: { model.selectedTab = $0 })
+    }
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            List(AppTab.navigation, selection: $selection) { tab in
+            List(AppTab.navigation, selection: selection) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
                     .badge(tab == .stunden ? pendingNoteImportCount : 0)
@@ -46,10 +52,24 @@ struct MainTabView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
+        // Studying covers the whole window, from wherever it was started: the
+        // Lernen screen, a subject board or a single lesson. It is a mode, not a
+        // place, so it hides the sidebar and has exactly one way out.
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { model.studySession != nil },
+                set: { if !$0 { model.endStudy() } }
+            )
+        ) {
+            if let session = model.studySession {
+                StudySessionView(session: session)
+                    .environment(model)
+            }
+        }
         .onAppear {
             pendingNoteImportCount = PendingNoteImports.all().count
             if !model.settings.isConfigured {
-                selection = .einstellungen
+                model.selectedTab = .einstellungen
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -78,7 +98,7 @@ struct MainTabView: View {
             SidebarOfflineNote()
                 .padding(.horizontal, 20)
                 .padding(.bottom, 4)
-            List(selection: $selection) {
+            List(selection: selection) {
                 Label(AppTab.einstellungen.title, systemImage: AppTab.einstellungen.systemImage)
                     .tag(AppTab.einstellungen)
             }
@@ -91,10 +111,10 @@ struct MainTabView: View {
 
     @ViewBuilder
     private var selectedView: some View {
-        switch selection ?? .aufnahme {
+        switch model.selectedTab ?? .aufnahme {
         case .aufnahme: LiveView()
         case .stunden: LessonsView()
-        case .lernen: StudyDashboardView()
+        case .lernen: TodayView()
         case .bibliothek: LibraryView()
         case .chat: ChatView()
         case .einstellungen: SettingsView()

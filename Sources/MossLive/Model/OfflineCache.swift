@@ -21,8 +21,14 @@ enum OfflineCache {
     enum Key {
         static let books = "books"
         static let lessons = "lessons"
-        static let learnOverview = "learn-overview"
         static let learnCards = "learn-cards"
+        /// The last daily plan the server sent. Kept so Heute has a shape to
+        /// draw before — and without — a reply; it is only trusted while its
+        /// `date` is still today.
+        static let learnPlan = "learn-plan"
+        static let learnExams = "learn-exams"
+        /// The round that was running when the app went away.
+        static let studySession = "study-session"
         static let timetableNow = "timetable-now"
         static let timetableDay = "timetable-day"
         static let timetableSubjects = "timetable-subjects"

@@ -47,6 +47,21 @@ final class AppModel {
     private(set) var recordingStartedAt: Date?
     var bannerMessage: String?
 
+    /// Which place of the app the sidebar is on. Held here rather than in the
+    /// shell so a screen can send the student somewhere that answers its empty
+    /// state ("Zur Aufnahme") instead of describing it.
+    var selectedTab: AppTab? = .aufnahme
+
+    // MARK: - Studying
+
+    /// The round on screen. Presented as a full-screen modal by the shell, so
+    /// studying is a mode with one way out rather than a page inside a tab.
+    private(set) var studySession: StudySession?
+    /// A round that was interrupted hard enough to lose its modal — killed for
+    /// memory, mostly. Heute offers to pick it up rather than reopening it
+    /// over whatever the student meant to do.
+    private(set) var resumableSession: StudySession?
+
     let settings = AppSettings()
     let timetable: TimetableStore
     let chat = ChatStore()
@@ -132,6 +147,57 @@ final class AppModel {
         }
         Task { [weak self] in await self?.syncTimetableNotifications() }
         Task { [weak self] in await self?.recoverInterruptedRecordings() }
+        resumableSession = StudySession.restore()
+    }
+
+    // MARK: - Studying
+
+    func startStudy(_ session: StudySession) {
+        resumableSession = nil
+        studySession = session
+    }
+
+    /// Pick up the interrupted round exactly where it stopped.
+    func resumeStudy() {
+        guard let resumableSession else { return }
+        studySession = resumableSession
+        self.resumableSession = nil
+    }
+
+    /// Leave the round. Answers are already reported or queued, so there is
+    /// nothing here to save — only the resume point to throw away.
+    func endStudy() {
+        studySession?.discard()
+        studySession = nil
+        resumableSession = nil
+    }
+
+    /// Hand one answer to the schedule, or to the queue when there is no server.
+    ///
+    /// Practice never reports: the whole point of it is that going over Tuesday
+    /// again does not push Tuesday's cards up the ladder.
+    func record(
+        answer card: BackendAPI.LearnCard,
+        correct: Bool,
+        rating: Int,
+        responseMs: Int,
+        confidence: Int?,
+        in session: StudySession
+    ) {
+        guard session.mode.reportsResults else { return }
+        let client = api
+        let mode = session.mode.apiName
+        Task {
+            await self.reviews.record(
+                cardId: card.id,
+                correct: correct,
+                rating: rating,
+                responseMs: responseMs,
+                confidence: confidence,
+                mode: mode,
+                api: client
+            )
+        }
     }
 
     // MARK: - Timetable (tiers 2 + 4)

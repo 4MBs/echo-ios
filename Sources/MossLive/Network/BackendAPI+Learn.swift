@@ -1,7 +1,9 @@
 import Foundation
 
 extension BackendAPI {
-    struct LearnExam: Codable, Sendable, Identifiable, Equatable {
+    /// `Hashable` so an exam can be a navigation destination's value — the row
+    /// pushes the exam itself rather than an id the next screen has to look up.
+    struct LearnExam: Codable, Sendable, Identifiable, Hashable {
         let id: String
         let name: String
         let subject: String
