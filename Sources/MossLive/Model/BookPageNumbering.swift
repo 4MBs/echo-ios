@@ -37,6 +37,7 @@ struct BookPageNumbering: Equatable {
 
     /// The PDF page carrying a printed number, if the book has it.
     func pdfPage(forPrinted printed: Int) -> Int? {
+        guard printed >= 1 else { return nil }
         let pdfPage = printed - offset
         return (1 ... max(pageCount, 1)).contains(pdfPage) ? pdfPage : nil
     }
