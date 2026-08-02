@@ -11,22 +11,24 @@ struct PlanBlockRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.row) {
-            SubjectDot(subject: block.subject)
-            Text(block.subject)
-                .font(.body)
-                .lineLimit(1)
-            Text(cardCount)
-                .font(.body.monospacedDigit())
-                .foregroundStyle(.secondary)
+            SubjectGlyph(subject: block.subject)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(block.subject)
+                    .font(.body)
+                    .lineLimit(1)
+                Text(block.reason)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 8)
-            Text(block.reason)
-                .font(.footnote)
+            Text(cardCount)
+                .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.tail)
         }
         .padding(.horizontal, Theme.Space.inset)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(block.subject), \(cardCount), \(block.reason)")
     }
@@ -36,9 +38,13 @@ struct PlanBlockRow: View {
     }
 }
 
-/// The daily goal, as a line that says what it did rather than a control that
-/// asks a question before the work.
-struct DailyGoalRow: View {
+/// The daily goal, next to the heading of the section it decides.
+///
+/// It used to be a full row at the foot of the plan, which read as one more
+/// thing in the plan rather than as the setting that shaped it. As a small menu
+/// beside "Was drin ist" it sits where a list's sort control sits, states its
+/// current value, and never blocks the way to the work.
+struct DailyGoalMenu: View {
     @Binding var minutes: Int
 
     var body: some View {
@@ -49,22 +55,15 @@ struct DailyGoalRow: View {
                 }
             }
         } label: {
-            HStack(spacing: 8) {
-                Text("Zugeschnitten auf \(minutes) Minuten am Tag")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Text("\(minutes) Min am Tag")
+                    .font(.subheadline)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, Theme.Space.inset)
-            .padding(.vertical, 12)
-            // A row of footnote-sized type is about 40pt tall; a target is 44.
-            .frame(minHeight: 44)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityLabel("Zeit am Tag: \(minutes) Minuten")
         .accessibilityHint("Ändert, wie lang deine Lernrunde ist")
     }
@@ -75,28 +74,38 @@ struct ExamRow: View {
     let exam: BackendAPI.LearnExam
     let readiness: Double
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
         HStack(spacing: Theme.Space.row) {
-            SubjectDot(subject: exam.subject)
+            SubjectGlyph(subject: exam.subject)
             VStack(alignment: .leading, spacing: 3) {
                 Text(headline)
                     .font(.body)
                     .lineLimit(1)
-                Text(dateLine)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(dateLine)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if typeSize < .accessibility1 {
+                        ReadinessBar(value: readiness, subject: exam.subject, width: 44)
+                    }
+                }
             }
             Spacer(minLength: 8)
-            ReadinessBar(value: readiness, subject: exam.subject)
+            CountdownChip(days: exam.daysRemaining)
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, Theme.Space.inset)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(headline), \(dateLine), Bereitschaft \(Readiness(readiness).word)")
+        .accessibilityLabel(
+            "\(headline), \(dateLine), \(LearnDay.countdown(days: exam.daysRemaining)), "
+                + "Bereitschaft \(Readiness(readiness).word)"
+        )
     }
 
     private var headline: String {
@@ -107,8 +116,35 @@ struct ExamRow: View {
         guard let date = LearnDay.date(exam.examDate) else {
             return LearnDay.countdown(days: exam.daysRemaining)
         }
-        if exam.daysRemaining <= 0 { return "Heute" }
-        return "\(LearnDay.short(date)) · \(LearnDay.countdown(days: exam.daysRemaining))"
+        return LearnDay.short(date)
+    }
+}
+
+/// How many days are left, as the one number an exam row is scanned for.
+///
+/// A count and its unit stacked, not a sentence: down a list of three exams the
+/// eye compares the numerals. It is a plain trailing figure rather than a
+/// coloured pill — the urgency is in the number, and colouring it would spend
+/// the result colours on something that is not a result.
+struct CountdownChip: View {
+    let days: Int
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            if days <= 0 {
+                Text("Heute")
+                    .font(.subheadline.weight(.semibold))
+            } else {
+                Text("\(days)")
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                Text(days == 1 ? "Tag" : "Tage")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .lineLimit(1)
+        .accessibilityHidden(true)
     }
 }
 
@@ -118,7 +154,7 @@ struct TopicRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.row) {
-            SubjectDot(subject: topic.subject)
+            SubjectGlyph(subject: topic.subject, size: 28)
             VStack(alignment: .leading, spacing: 3) {
                 Text(topic.name)
                     .font(.body)
@@ -129,13 +165,13 @@ struct TopicRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            ReadinessBar(value: topic.readiness, subject: topic.subject)
+            ReadinessBar(value: topic.readiness, subject: topic.subject, width: 52)
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, Theme.Space.inset)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(topic.name), \(detail), \(topic.word)")
     }

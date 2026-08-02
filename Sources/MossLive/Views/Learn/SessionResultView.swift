@@ -29,17 +29,39 @@ struct SessionResultView: View {
         }
     }
 
+    /// The count, the proportion, and what follows from it — in that order,
+    /// because that is the order the three questions are asked in.
+    ///
+    /// One surface rather than three loose lines, and no grade: no trophy, no
+    /// confetti, no colour that judges the student. The bar is the only place
+    /// green and red appear, and both piles are written out beside it.
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Fertig")
-                .font(.title.weight(.bold))
-            Text("\(session.correctCount) von \(session.total) richtig")
-                .font(.title3)
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: Theme.Space.inset) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Fertig")
+                    .font(.title.weight(.bold))
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(session.correctCount)")
+                        .font(.largeTitle.weight(.bold))
+                        .monospacedDigit()
+                    Text("von \(session.total) richtig")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            }
+
+            OutcomeBar(correct: session.correctCount, wrong: session.total - session.correctCount)
+
             Text(consequence)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(Theme.Space.inset + 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .learnSurface()
         .accessibilityElement(children: .combine)
     }
 
@@ -77,7 +99,7 @@ struct SessionResultView: View {
     }
 
     private var actions: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.row) {
+        HStack(spacing: Theme.Space.inset) {
             LearnPrimaryButton("Fertig") { onFinish(nil) }
                 // Return closes the round, so a round begun on a keyboard can be
                 // finished on one.
@@ -86,8 +108,11 @@ struct SessionResultView: View {
                 Button(missed.count == 1 ? "Die eine noch mal" : "Die \(missed.count) noch mal") {
                     onFinish(StudySession(mode: .practice, title: "Noch mal", cards: missed))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -107,12 +132,12 @@ private struct MissedRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: Theme.Space.row) {
-                SubjectDot(subject: card.subject)
+            HStack(alignment: .top, spacing: Theme.Space.row) {
+                SubjectGlyph(subject: card.subject, size: 26)
                 Text(card.question)
                     .font(.body)
                     .multilineTextAlignment(.leading)
-                    .lineLimit(isOpen ? nil : 1)
+                    .lineLimit(isOpen ? nil : 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: isOpen ? "chevron.up" : "chevron.down")
                     .font(.footnote.weight(.semibold))

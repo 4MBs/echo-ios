@@ -104,9 +104,59 @@ struct SubjectView: View {
             Text(actionError ?? "")
         }
         .task { await loadDecks() }
+        // A round started from this page changes what is due on it, so the
+        // counts are fetched again when the round's modal closes.
+        .onChange(of: model.studySession == nil) { _, ended in
+            if ended { Task { await loadDecks() } }
+        }
     }
 
     // MARK: - What is waiting in this subject
+
+    /// What this subject adds up to as cards, and one way into them.
+    ///
+    /// The counts were already on the rows; what was missing was the obvious
+    /// move a student makes on a subject page — "dann üben wir eben Mathe" —
+    /// which previously meant going back to Lernen and finding it in a menu.
+    /// One bordered button: this page is for reading the archive, and studying
+    /// it is the second thing you can do here, not the first.
+    @ViewBuilder
+    private var studyBar: some View {
+        let cards = decks.values.flatMap(\.cards)
+        let due = decks.values.flatMap(\.due)
+        if !cards.isEmpty {
+            HStack(spacing: 12) {
+                Text(studyBarText(total: cards.count, due: due.count))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button(due.isEmpty ? "Üben" : "Lernen starten") {
+                    let deck = due.isEmpty
+                        ? Array(cards.sorted { cardReadiness($0) < cardReadiness($1) }.prefix(20))
+                        : StudyPlan.interleaved(due)
+                    model.startStudy(
+                        StudySession(
+                            mode: due.isEmpty ? .practice : .review,
+                            title: folder.name,
+                            cards: deck
+                        )
+                    )
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.regular)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .cardSurface(cornerRadius: 20)
+        }
+    }
+
+    private func studyBarText(total: Int, due: Int) -> String {
+        let cards = total == 1 ? "1 Karte" : "\(total) Karten"
+        return due > 0 ? "\(cards) · \(due) fällig" : cards
+    }
 
     private var scope: SubjectScope {
         folder.isOther ? .unfiled : .named(folder.name)
@@ -132,6 +182,7 @@ struct SubjectView: View {
             ScrollView {
                 VStack(spacing: 26) {
                     SubjectHoursHeader(total: totalSeconds, week: weekSeconds)
+                    studyBar
                     columns(width: geo.size.width)
                 }
                 .padding(.horizontal, 24)
