@@ -56,7 +56,7 @@ struct SettingsView: View {
                             title: "Lernen",
                             systemImage: "brain.head.profile",
                             tint: .orange,
-                            value: reminderValue
+                            value: learnValue
                         )
                     }
                     NavigationLink {
@@ -103,16 +103,20 @@ struct SettingsView: View {
         return host
     }
 
-    private var reminderValue: String {
+    /// The daily goal leads, because that is what the row now mostly holds; the
+    /// reminder time follows it only when there is one.
+    private var learnValue: String {
         let settings = model.settings
-        guard settings.learnReminderEnabled else { return "Aus" }
+        let goal = "\(settings.dailyLearnMinutes) Min"
+        guard settings.learnReminderEnabled else { return goal }
         let date = Calendar.current.date(
             bySettingHour: settings.learnReminderMinutes / 60,
             minute: settings.learnReminderMinutes % 60,
             second: 0,
             of: .now
         )
-        return date?.formatted(date: .omitted, time: .shortened) ?? "An"
+        guard let time = date?.formatted(date: .omitted, time: .shortened) else { return goal }
+        return "\(goal) · \(time)"
     }
 }
 

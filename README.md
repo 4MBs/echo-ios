@@ -125,9 +125,27 @@ Each lesson becomes a quiz deck, scheduled on a Leitner ladder. A card you get
 wrong returns tomorrow; a card you get right returns after 1, 3, 7, 14 and 30
 days. Only exam-relevant material becomes cards.
 
-The tab opens as a dashboard: a greeting, the one tap that starts what is due
-today, and under it a card per subject in the subject's own colour. The name it
-greets is set in Einstellungen → Lernen.
+The tab is one screen and one button. A line says what is due and roughly how
+long it takes; **Lernen starten** begins the round. Under it: what the round is
+made of, the exams that are coming, and at most three topics that are still
+wobbling. The daily budget is a single setting (Einstellungen → Lernen, also
+editable straight from the plan line), not a question asked before every round.
+
+A round is a full-screen mode with one way out. One question at a time, two
+interactions for a multiple-choice card and three for a written one, pass/fail
+self-assessment with the finer grades one level down. Progress survives locking
+the iPad, switching apps and being killed for memory: the round is written to
+disk after every answer and picked up again within half an hour.
+
+Every card knows which minute of which lesson it was written from, so a wrong
+answer offers **Im Unterricht hören** — the passage itself, with three seconds of
+run-up, stopping where the question stopped.
+
+Cards, plan and exams are stored on the iPad. The Lernen screen renders from
+that store before any request is made, a round can be played through with no
+network at all, and answers wait in a queue until the server is back. Browsing
+lives in Stunden, where the lessons already are: a lesson row shows what is due
+in it, and a lesson page can have its cards written.
 
 ### Chat and the answer note
 

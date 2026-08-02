@@ -203,6 +203,97 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
     return fallback
 }
 
+// MARK: - How solid something is
+
+/// How well a card is known, as a word.
+///
+/// The area used to print this as a percentage — "72 % bereit" — computed from
+/// `log2(stability + 2) / 6` minus a lapse deduction. Two decimal places of
+/// nothing: the student cannot derive it, cannot influence it directly and
+/// cannot tell 72 from 68. A word can be checked against how the last round
+/// actually felt, and it is never the only carrier of the meaning: every place
+/// that shows it shows a bar as well.
+enum Readiness: Equatable {
+    case fresh
+    case shaky
+    case nearly
+    case solid
+
+    init(_ value: Double) {
+        switch value {
+        case ..<0.01: self = .fresh
+        case ..<0.45: self = .shaky
+        case ..<0.75: self = .nearly
+        default: self = .solid
+        }
+    }
+
+    var word: String {
+        switch self {
+        case .fresh: "neu"
+        case .shaky: "wackelt"
+        case .nearly: "fast sicher"
+        case .solid: "sicher"
+        }
+    }
+}
+
+/// How solid one card is, 0…1.
+///
+/// **Provisional.** The server sends a readiness per exam but not per subject or
+/// topic, so this stands in for those two — which is why it is never printed as
+/// a number. One implementation, here, because there were two of it with
+/// different bracketing.
+func cardReadiness(_ card: BackendAPI.LearnCard) -> Double {
+    guard (card.reps ?? 0) > 0 else { return 0 }
+    let stability = max(0, card.stability ?? Double(card.box))
+    let strength = min(1, log2(stability + 2) / 6)
+    let lapsePenalty = min(0.25, Double(card.lapses ?? 0) * 0.03)
+    return max(0, strength - lapsePenalty)
+}
+
+/// A group of cards about one thing, and how solid it is.
+struct StudyTopic: Identifiable, Equatable {
+    let name: String
+    let subject: String?
+    let cards: [BackendAPI.LearnCard]
+    let readiness: Double
+
+    var id: String { "\(subject ?? "")|\(name)" }
+    var word: String { Readiness(readiness).word }
+}
+
+/// The deck grouped by what it is about, weakest first.
+///
+/// The concept the card generator wrote, falling back to the lesson it came
+/// from — one grouping for the whole app, where there were two with slightly
+/// different fallbacks.
+func studyTopics(_ cards: [BackendAPI.LearnCard]) -> [StudyTopic] {
+    Dictionary(grouping: cards) { card in
+        card.concept?.trimmingCharacters(in: .whitespacesAndNewlines).nilWhenEmpty
+            ?? card.lessonTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nilWhenEmpty
+            ?? "Allgemein"
+    }
+    .map { name, group in
+        let values = group.map(cardReadiness)
+        return StudyTopic(
+            name: name,
+            subject: group.first?.subject,
+            cards: group,
+            readiness: values.reduce(0, +) / Double(max(1, values.count))
+        )
+    }
+    .sorted { lhs, rhs in
+        lhs.readiness == rhs.readiness
+            ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            : lhs.readiness < rhs.readiness
+    }
+}
+
+extension String {
+    var nilWhenEmpty: String? { isEmpty ? nil : self }
+}
+
 extension View {
     /// The answer a subject with nothing in it gives when it is tapped.
     ///
@@ -252,7 +343,7 @@ func lessonShareText(summary: String?, segments: [TranscriptSegment]) -> String 
     return parts.joined(separator: "\n")
 }
 
-// MARK: - Shared list states
+// MARK: - What a failed request looks like
 
 /// What a screen shows when a request did not work out.
 ///
@@ -316,84 +407,5 @@ struct ErrorState: View {
         // Server messages are written as fragments; they read as sentences here.
         let text = error.localizedDescription
         return text.prefix(1).uppercased() + String(text.dropFirst())
-    }
-}
-
-struct EmptyState: View {
-    let icon: String
-    let text: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Image(systemName: icon)
-        } description: {
-            Text(text)
-        }
-    }
-}
-
-/// One lesson as a row in the Lernen tab's subject list, where it sits beside
-/// the count of what is due and has to stay the height of one.
-///
-/// The date leads, because inside a list that already says "Mathematik" the
-/// date is the only thing that tells one recording from the next — everything
-/// the old row led with (the subject tile, the subject name, the room) was the
-/// same on every row down the page. What follows it is the opening of the
-/// summary, so the list can be read for what was taught rather than for when.
-///
-/// Stunden draws its own row (`SubjectView.swift`): that screen is nothing but
-/// lessons, so it can afford to lead with the topic and let the date follow.
-struct LessonRow: View {
-    let info: BackendAPI.LessonInfo
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(info.startedAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
-                    .font(.body)
-                    .lineLimit(1)
-                Text(timeLine)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if info.hasAudio {
-                    Image(systemName: "waveform")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            secondLine
-        }
-        .padding(.vertical, 3)
-    }
-
-    /// When it started and how long it ran. Not the room: inside a folder that
-    /// is the same on nearly every row, and the lesson's own page says it.
-    private var timeLine: String {
-        info.startedAt.formatted(date: .omitted, time: .shortened) + " · " + durationText
-    }
-
-    private var durationText: String {
-        let minutes = Int(info.durationSeconds) / 60
-        return minutes > 0 ? "\(minutes) Min" : "\(Int(info.durationSeconds)) s"
-    }
-
-    /// Two lines of the summary — or an honest word about there not being one,
-    /// which is a state worth seeing at a glance rather than a blank row.
-    @ViewBuilder
-    private var secondLine: some View {
-        if let excerpt = info.summaryExcerpt, !excerpt.isEmpty {
-            Text(excerpt)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-        } else {
-            Text(info.segmentCount > 0 ? "Noch keine Zusammenfassung" : "Kein Transkript")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-        }
     }
 }
