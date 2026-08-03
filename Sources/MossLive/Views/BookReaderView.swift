@@ -97,6 +97,7 @@ private struct PDFReader: View {
     @State private var pageCount = 0
     @State private var proxy = PDFViewProxy()
     @State private var bookAI = BookAIStore()
+    @State private var tasks = BookTaskStore()
     @State private var askingBookAI = false
     @State private var askingForPage = false
     @State private var typedPage = ""
@@ -127,6 +128,31 @@ private struct PDFReader: View {
                 LoadedDocument(document: PDFDocument(url: url))
             }.value.document
         }
+        // Read the exercises off whatever is on screen, then mark them. Both
+        // halves of a spread, and only once per page — the result is cached.
+        .task(id: pagesKey) {
+            let store = tasks
+            proxy.onPageTap = { page, point in
+                Task { @MainActor in store.select(page: page, at: point) }
+            }
+            guard let document else { return }
+            store.dropSelectionOutside(visiblePages)
+            // Anything already known about these pages shows at once; only the
+            // reading is deferred.
+            markTasks()
+            // Flicking through a chapter must not stop to read every page it
+            // passes: the next turn cancels this task before the sleep is over.
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            await store.detect(pages: visiblePages, in: document)
+            markTasks()
+        }
+        .onChange(of: tasks.selected) { _, task in
+            markTasks()
+            // Tapping a task is the whole request: the panel comes out with it
+            // already picked, so the only thing left to do is send.
+            if task != nil { askingBookAI = true }
+        }
+        .onDisappear { proxy.clearTasks() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { bookAIButton }
             if model.settings.showPageNumberEditor {
@@ -202,6 +228,8 @@ private struct PDFReader: View {
             numbering: numbering,
             visiblePages: visiblePages,
             store: bookAI,
+            selectedTask: tasks.selected,
+            clearTask: { tasks.clearSelection() },
             goToPage: { page in
                 proxy.go(toPage: page)
                 // On a phone the sheet covers the page it just turned to.
@@ -209,6 +237,17 @@ private struct PDFReader: View {
             },
             close: close
         )
+    }
+
+    /// Identity for the detection task: the pages on screen, plus whether the
+    /// document has finished parsing (the first spread is visible before it
+    /// has, and would otherwise never be read).
+    private var pagesKey: String {
+        "\(visiblePages)-\(document == nil)"
+    }
+
+    private func markTasks() {
+        proxy.showTasks(tasks.tasks(onPages: visiblePages), selected: tasks.selected)
     }
 
     /// Set once per book and then forgotten, so it belongs in the navigation
@@ -434,6 +473,41 @@ private struct LoadedDocument: @unchecked Sendable {
 /// exists once makeUIView has run).
 private final class PDFViewProxy {
     weak var pdfView: PDFView?
+    /// A tap that landed on a page: (PDF page number, point in that page's own
+    /// coordinates). The reader turns it into a task.
+    var onPageTap: ((Int, CGPoint) -> Void)?
+
+    /// The tint boxes drawn over the exercises on screen, so they can be taken
+    /// off again. They are annotations rather than a SwiftUI overlay because
+    /// PDFKit then does the zooming, scrolling and page-turning for us — a
+    /// box drawn on top would have to be re-projected on every gesture.
+    private var overlays: [PDFAnnotation] = []
+
+    /// Mark the exercises on the visible pages. Faint enough to read through,
+    /// visible enough to look tappable; the picked one is filled properly.
+    func showTasks(_ tasks: [BookPageTask], selected: BookPageTask?) {
+        clearTasks()
+        guard let document = pdfView?.document else { return }
+        for task in tasks {
+            guard let page = document.page(at: task.pdfPage - 1) else { continue }
+            let annotation = PDFAnnotation(bounds: task.bounds, forType: .square, withProperties: nil)
+            let picked = task == selected
+            annotation.color = picked ? UIColor.tintColor.withAlphaComponent(0.9) : .clear
+            annotation.interiorColor = UIColor.tintColor.withAlphaComponent(picked ? 0.22 : 0.07)
+            annotation.border = PDFBorder()
+            annotation.border?.lineWidth = picked ? 2 : 0
+            annotation.isReadOnly = true
+            page.addAnnotation(annotation)
+            overlays.append(annotation)
+        }
+    }
+
+    func clearTasks() {
+        for annotation in overlays {
+            annotation.page?.removeAnnotation(annotation)
+        }
+        overlays.removeAll()
+    }
 
     /// One page forward or back. `goToNextPage(_:)` is unreliable outside the
     /// page-view-controller mode, so the target page is computed by hand — in a
@@ -608,6 +682,22 @@ private struct PDFKitView: UIViewRepresentable {
                 swipe.cancelsTouchesInView = false
                 view.addGestureRecognizer(swipe)
             }
+
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            tap.delegate = self
+            // PDFKit's own recognizers keep working: this one only reports
+            // where the finger landed, it never swallows the touch.
+            tap.cancelsTouchesInView = false
+            view.addGestureRecognizer(tap)
+        }
+
+        /// A tap on the page, reported in that page's own coordinates so the
+        /// reader can look it up against the exercise boxes it knows about.
+        @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view as? PDFView, let document = view.document else { return }
+            let point = recognizer.location(in: view)
+            guard let page = view.page(for: point, nearest: false) else { return }
+            proxy?.onPageTap?(document.index(for: page) + 1, view.convert(point, to: page))
         }
 
         @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
