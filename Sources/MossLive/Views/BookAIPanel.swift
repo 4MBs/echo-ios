@@ -18,6 +18,11 @@ struct BookAIPanel: View {
     /// The PDF pages on screen right now — one page, or both of a spread.
     let visiblePages: [Int]
     let store: BookAIStore
+    /// The exercise tapped in the book, if one is picked. It is the question:
+    /// nothing has to be typed to send it.
+    let selectedTask: BookPageTask?
+    /// Put the picked exercise back.
+    let clearTask: () -> Void
     /// Turn the book to a PDF page (a tapped citation).
     let goToPage: (Int) -> Void
     /// nil in the sheet, where the sheet's own dismissal is the way out.
@@ -211,6 +216,15 @@ struct BookAIPanel: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            Label(
+                "Tippe im Buch direkt auf eine Aufgabe — sie wird ausgewählt und du kannst sie "
+                    + "gleich abschicken.",
+                systemImage: "hand.tap"
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
             ForEach(Self.prompts) { prompt in
                 Button {
                     store.draft = prompt.text
@@ -271,8 +285,11 @@ struct BookAIPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let task = selectedTask {
+                taskChip(task)
+            }
             HStack(spacing: 10) {
-                TextField("Frage zu dieser Seite…", text: $store.draft, axis: .vertical)
+                TextField(fieldPrompt, text: $store.draft, axis: .vertical)
                     .lineLimit(1 ... 4)
                     .focused($inputFocused)
                     .onSubmit(send)
@@ -297,14 +314,56 @@ struct BookAIPanel: View {
         .background(.bar)
     }
 
+    /// The picked exercise, shown the way the page shows it — number first,
+    /// then as much of the wording as fits. Tapping it in the book again, or
+    /// the cross here, puts it back.
+    private func taskChip(_ task: BookPageTask) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.viewfinder")
+                .font(.caption)
+                .foregroundStyle(Theme.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(task.label) · Seite \(numbering.printedLabel(task.pdfPage))")
+                    .font(.footnote.weight(.semibold))
+                if !task.text.isEmpty {
+                    Text(task.text)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 4)
+            Button(action: clearTask) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Aufgabe abwählen")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface(cornerRadius: Theme.Radius.control)
+    }
+
+    /// With an exercise picked the field is optional, and says so.
+    private var fieldPrompt: String {
+        selectedTask == nil ? "Frage zu dieser Seite…" : "Noch etwas dazu? (optional)"
+    }
+
     private var canSend: Bool {
-        store.canSend && model.connectivity.isOnline && !visiblePages.isEmpty
+        let hasQuestion = store.canSend || (selectedTask != nil && !store.sending)
+        return hasQuestion && model.connectivity.isOnline && !visiblePages.isEmpty
     }
 
     private func send() {
         guard canSend else { return }
-        let question = store.draft
+        // A picked exercise IS the question; anything typed alongside it is an
+        // addition to it, not a replacement.
+        let question = selectedTask.map { $0.question(note: store.draft) } ?? store.draft
         inputFocused = false
+        clearTask()
         Task { await store.ask(question, pages: visiblePages, bookID: bookID, api: api) }
     }
 }

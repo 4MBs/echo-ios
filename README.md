@@ -202,6 +202,14 @@ answer arrives with the pages it rests on attached, named with the book's printe
 numbers, and tapping one turns the reader to it. Reading a downloaded book stays
 offline; asking about it needs the server.
 
+**Tap the exercise itself.** The tasks on the open page are found on the iPad —
+the page is read with the system's on-device text recognition, which is the only
+way to find anything on a scanned book — and each one gets a faint box. Tapping
+it picks it, Buch-KI opens with the task already attached, and sending needs
+nothing typed: the number and the wording go with the question, so "Aufgabe 1"
+is never the wrong Aufgabe 1 when two pages are on screen. Typing alongside a
+picked task adds to it rather than replacing it.
+
 <p align="center">
   <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">
 </p>
