@@ -67,20 +67,27 @@ struct RecognisedLine: Equatable, Sendable {
 /// Turns recognised lines into tappable exercises.
 ///
 /// Schoolbooks set exercises as a numbered list: a small boxed number, the
-/// wording beside it, continuation lines indented under it. Three things make
-/// this harder than matching a leading digit:
+/// wording beside it, continuation lines indented under it. Four things make
+/// this harder than matching a leading digit, and every rule below is one of
+/// them:
 ///
-/// * the number is its own graphic, so recognition often reports it as a line
-///   of its own next to the wording rather than as part of it;
-/// * literary pages carry a *line-number ruler* down the margin — 5, 10, 15 —
-///   which looks exactly like a list of task numbers with text to their right;
-/// * a page has two columns, so "the next line down" is regularly in the other
-///   one.
-///
-/// So bare numbers are folded into the line beside them, rulers are told apart
-/// by their own arithmetic (they step by five, a task list counts up by one)
-/// and dropped, and a task only ever grows by lines sitting under it
-/// horizontally — which keeps it inside its column without modelling columns.
+/// * **The number is its own graphic**, so recognition often reports it as a
+///   line of its own beside the wording. Bare numbers are folded back into the
+///   line to their right.
+/// * **Literary pages carry a line-number ruler** down the margin — 5, 10, 15
+///   — which is structurally identical to a list of task numbers, and which
+///   recognition sometimes glues onto the body line ("25 konnte wirklich
+///   nicht sagen, dass…"). So rulers are spotted among *all* lines beginning
+///   with a number, not just bare ones, and told apart by their arithmetic:
+///   they step by five, an exercise list counts up by one.
+/// * **The running head is numbered too.** "1 Familienbeziehungen" at the top
+///   of a page parses exactly like an exercise, and it used to become one —
+///   and, being a 1, to take the place of the page's real Aufgabe 1. The top
+///   and bottom margins are not read.
+/// * **Exercise numbering does not restart per page.** A spread's list runs
+///   8, 9 on the left page and 1 … 8 on the right; a column may open at 5.
+///   So a run is accepted wherever it starts, as long as it counts up by one
+///   within one column — a lone number is only believed when it is low.
 enum BookTaskLayout {
     /// Highest exercise number a schoolbook page realistically prints.
     private static let highestNumber = 30
@@ -91,19 +98,36 @@ enum BookTaskLayout {
     /// the page width.
     private static let numberGap: CGFloat = 0.09
     /// A vertical gap wider than this many line heights ends a task.
-    private static let breakingGap: CGFloat = 2.2
+    private static let breakingGap: CGFloat = 2.0
+    /// Two numbers belong to the same column when their lines start within
+    /// this fraction of the page width of each other.
+    private static let columnTolerance: CGFloat = 0.06
+    /// Margins that carry the running head and the page number, as fractions
+    /// of the page height. Nothing in them is ever an exercise.
+    private static let headerBand: CGFloat = 0.06
+    private static let footerBand: CGFloat = 0.04
+    /// How many numbers in a row it takes to call something a ruler.
+    private static let rulerRun = 3
+    /// A number standing on its own is only an exercise if it is low enough to
+    /// open a list — otherwise it is a stray line number or a date.
+    private static let loneNumberLimit = 3
+    /// No exercise fills a fifth of the page; a block that would has run into
+    /// whatever is printed under it.
+    private static let maxBlockHeight: CGFloat = 0.22
     private static let maxTasksPerPage = 24
 
     private struct Start {
         let position: Int
         let number: Int
         let rest: String
+        let box: CGRect
     }
 
     static func tasks(from lines: [RecognisedLine], pdfPage: Int, pageBounds: CGRect) -> [BookPageTask] {
-        let candidates = merged(lines)
+        let body = lines.filter(isInsideBody)
+        let candidates = merged(withoutRulers(body))
         var tasks: [BookPageTask] = []
-        for start in starts(in: candidates) {
+        for start in accepted(in: candidates) {
             let block = blockLines(from: start, in: candidates)
             let wording = wordingOf(block, startingWith: start)
             guard wording.count >= shortestWording else { continue }
@@ -119,12 +143,22 @@ enum BookTaskLayout {
         return tasks
     }
 
+    /// Whether a line is in the part of the page that carries content, rather
+    /// than in the running head or the footer.
+    private static func isInsideBody(_ line: RecognisedLine) -> Bool {
+        line.box.midY < 1 - headerBand && line.box.midY > footerBand
+    }
+
     // MARK: - Reading a number off a line
 
-    /// The exercise number a line starts with, and what is left of the line.
-    /// A year ("2010") and a media code ("129040") are not exercise numbers,
-    /// which is why more than two digits disqualifies the line.
-    static func leadingNumber(_ text: String) -> (number: Int, rest: String)? {
+    /// Any number a line starts with, and what is left of the line. A year
+    /// ("2010") and a media code ("129040") are not what this is looking for,
+    /// which is why more than three digits disqualifies the line.
+    ///
+    /// Line numbers run past any exercise number — a page of prose is ruled up
+    /// to 110 — so spotting a *ruler* has to see those, which is why this is
+    /// not capped at an exercise number the way `leadingNumber` is.
+    static func leadingInteger(_ text: String) -> (number: Int, rest: String)? {
         let characters = Array(text.trimmingCharacters(in: .whitespacesAndNewlines))
         var index = 0
         var digits = ""
@@ -132,9 +166,7 @@ enum BookTaskLayout {
             digits.append(characters[index])
             index += 1
         }
-        guard digits.count <= 2, let number = Int(digits), (1 ... highestNumber).contains(number) else {
-            return nil
-        }
+        guard digits.count <= 3, let number = Int(digits), number >= 1 else { return nil }
         if index < characters.count, ".):]".contains(characters[index]) {
             index += 1
         }
@@ -142,15 +174,19 @@ enum BookTaskLayout {
         return (number, rest)
     }
 
+    /// The same, narrowed to numbers a schoolbook actually prints on an
+    /// exercise.
+    static func leadingNumber(_ text: String) -> (number: Int, rest: String)? {
+        guard let parsed = leadingInteger(text), parsed.number <= highestNumber else { return nil }
+        return parsed
+    }
+
     // MARK: - Folding the boxed numbers back into their wording
 
-    /// Every line, top of the page first, with margin rulers removed and each
-    /// bare number joined to the wording beside it.
+    /// Every line, top of the page first, with each bare number joined to the
+    /// wording beside it.
     static func merged(_ lines: [RecognisedLine]) -> [RecognisedLine] {
-        let rulers = rulerIndices(lines)
-        let kept = lines.enumerated()
-            .filter { !rulers.contains($0.offset) }
-            .map(\.element)
+        let kept = lines
             .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .sorted { $0.box.maxY > $1.box.maxY }
 
@@ -196,39 +232,42 @@ enum BookTaskLayout {
         return best
     }
 
-    /// Indices of margin line numbers — the "5, 10, 15" ruler beside a literary
-    /// text.
+    /// The lines with the margin line-number ruler taken out — the "5, 10, 15"
+    /// down the side of a literary text.
     ///
-    /// They are bare numbers in a column with wording to their right, which is
-    /// structurally the same thing as a list of exercise numbers, and on a page
-    /// like P.A.U.L.D. 58 they even share the margin with one. What separates
-    /// them is how they count: a ruler steps by five, an exercise list by one.
-    /// So the column is cut into runs of constant step and only the runs that
-    /// count in anything other than ones are dropped — which leaves the task
-    /// numbers standing directly underneath a ruler untouched.
-    private static func rulerIndices(_ lines: [RecognisedLine]) -> Set<Int> {
-        let bare: [Bare] = lines.enumerated().compactMap { index, line in
-            guard let parsed = leadingNumber(line.text), parsed.rest.isEmpty else { return nil }
-            return Bare(index: index, number: parsed.number, box: line.box)
+    /// This is the rule that stops a page of prose being covered in boxes. A
+    /// ruler is structurally identical to a list of exercise numbers, and
+    /// recognition reports it two different ways on the same book: sometimes
+    /// as a bare number of its own, sometimes glued to the body line it sits
+    /// beside ("25 konnte wirklich nicht sagen, dass…"). Both look like
+    /// exercises, so both are considered here, and what separates them is how
+    /// they count: a ruler steps by five, an exercise list counts up by one.
+    /// The column is cut into runs of constant step and only runs that count
+    /// in something other than ones are dropped, which leaves exercise numbers
+    /// standing in the same margin untouched.
+    static func withoutRulers(_ lines: [RecognisedLine]) -> [RecognisedLine] {
+        let numbered: [Numbered] = lines.enumerated().compactMap { index, line in
+            guard let parsed = leadingInteger(line.text) else { return nil }
+            return Numbered(index: index, number: parsed.number, box: line.box)
         }
-        guard bare.count >= 3 else { return [] }
+        guard numbered.count >= rulerRun else { return lines }
 
         var drop: Set<Int> = []
         var handled = Set<Int>()
-        for anchor in bare where !handled.contains(anchor.index) {
-            let column = bare
-                .filter { abs($0.box.midX - anchor.box.midX) < 0.03 }
+        for anchor in numbered where !handled.contains(anchor.index) {
+            let column = numbered
+                .filter { abs($0.box.minX - anchor.box.minX) < columnTolerance }
                 .sorted { $0.box.maxY > $1.box.maxY }
             handled.formUnion(column.map(\.index))
-            guard column.count >= 3 else { continue }
-            for run in runs(of: column.map(\.number)) where run.step != 1 && run.length >= 3 {
+            guard column.count >= rulerRun else { continue }
+            for run in runs(of: column.map(\.number)) where abs(run.step) != 1 && run.length >= rulerRun {
                 drop.formUnion(column[run.start ..< run.start + run.length].map(\.index))
             }
         }
-        return drop
+        return lines.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
     }
 
-    private struct Bare {
+    private struct Numbered {
         let index: Int
         let number: Int
         let box: CGRect
@@ -263,24 +302,44 @@ enum BookTaskLayout {
 
     /// The lines that open an exercise, in reading order.
     ///
-    /// Only a run that counts up survives: a schoolbook prints 1, 2, 3, so a
-    /// number that breaks the count started a sentence rather than a task. One
-    /// step may be skipped, because a boxed number is occasionally not read.
-    private static func starts(in lines: [RecognisedLine]) -> [Start] {
-        var kept: [Start] = []
+    /// A number is believed when the column it stands in counts up by one
+    /// through it — which is what an exercise list does and what a stray
+    /// number in prose does not. Where the count *starts* says nothing: a
+    /// spread's list runs 8, 9 at the foot of the left page and 1 … 8 down the
+    /// right one, and a second column regularly opens at 5 or 8. Requiring it
+    /// to start low was what left most of a book undetected.
+    ///
+    /// A number with no neighbours is only believed when it is low enough to
+    /// open a list, since a page really can carry a single "1".
+    private static func accepted(in lines: [RecognisedLine]) -> [Start] {
+        var candidates: [Start] = []
         for (position, line) in lines.enumerated() {
             guard let parsed = leadingNumber(line.text), parsed.rest.count >= shortestWording else {
                 continue
             }
-            if let last = kept.last {
-                guard parsed.number > last.number, parsed.number <= last.number + 2 else { continue }
-            } else {
-                // a list starts at 1; allow a page that opens mid-list
-                guard parsed.number <= 3 else { continue }
-            }
-            kept.append(Start(position: position, number: parsed.number, rest: parsed.rest))
+            candidates.append(Start(
+                position: position,
+                number: parsed.number,
+                rest: parsed.rest,
+                box: line.box
+            ))
         }
-        return kept
+
+        var keep = Set<Int>()
+        var handled = Set<Int>()
+        for anchor in candidates where !handled.contains(anchor.position) {
+            let column = candidates
+                .filter { abs($0.box.minX - anchor.box.minX) < columnTolerance }
+                .sorted { $0.box.maxY > $1.box.maxY }
+            handled.formUnion(column.map(\.position))
+            for run in runs(of: column.map(\.number)) where run.step == 1 && run.length >= 2 {
+                keep.formUnion(column[run.start ..< run.start + run.length].map(\.position))
+            }
+            for start in column where !keep.contains(start.position) && start.number <= loneNumberLimit {
+                keep.insert(start.position)
+            }
+        }
+        return candidates.filter { keep.contains($0.position) }
     }
 
     // MARK: - How far a task reaches
@@ -296,6 +355,8 @@ enum BookTaskLayout {
             let overlap = min(line.box.maxX, reach.maxX) - max(line.box.minX, reach.minX)
             guard overlap > min(line.box.width, reach.width) * 0.5 else { continue }
             guard reach.minY - line.box.maxY < height * breakingGap else { break }
+            // whatever sits below is long past the end of an exercise
+            guard reach.union(line.box).height < maxBlockHeight else { break }
             if let next = leadingNumber(line.text), next.rest.count >= shortestWording,
                next.number > start.number {
                 break
