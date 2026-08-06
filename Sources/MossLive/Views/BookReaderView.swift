@@ -128,8 +128,9 @@ private struct PDFReader: View {
                 LoadedDocument(document: PDFDocument(url: url))
             }.value.document
         }
-        // Read the exercises off whatever is on screen, then mark them. Both
-        // halves of a spread, and only once per page — the result is cached.
+        // Ask the server where the text sits on whatever is on screen, then
+        // mark it. Both halves of a spread, and only once per page — the
+        // answer is cached for as long as the book is open.
         .task(id: pagesKey) {
             let store = tasks
             proxy.onPageTap = { page, point in
@@ -138,12 +139,17 @@ private struct PDFReader: View {
             guard let document else { return }
             store.dropSelectionOutside(visiblePages)
             // Anything already known about these pages shows at once; only the
-            // reading is deferred.
+            // fetch is deferred.
             markTasks()
-            // Flicking through a chapter must not stop to read every page it
+            // Flicking through a chapter must not fire a request per page it
             // passes: the next turn cancels this task before the sleep is over.
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            await store.detect(pages: visiblePages, in: document)
+            await store.load(
+                pages: visiblePages,
+                bookID: book.id,
+                pageBounds: pageBounds(of: document, pages: visiblePages),
+                api: api
+            )
             markTasks()
         }
         .onChange(of: tasks.selected) { _, task in
@@ -229,6 +235,7 @@ private struct PDFReader: View {
             visiblePages: visiblePages,
             store: bookAI,
             selectedTask: tasks.selected,
+            tapHint: tapHint,
             clearTask: { tasks.clearSelection() },
             goToPage: { page in
                 proxy.go(toPage: page)
@@ -248,6 +255,44 @@ private struct PDFReader: View {
 
     private func markTasks() {
         proxy.showTasks(tasks.tasks(onPages: visiblePages), selected: tasks.selected)
+    }
+
+    /// Each visible page's own size, so the server's fractions can be turned
+    /// into rectangles. Pages of one book are not always the same shape.
+    private func pageBounds(of document: PDFDocument, pages: [Int]) -> [Int: CGRect] {
+        var bounds: [Int: CGRect] = [:]
+        for number in pages {
+            if let page = document.page(at: number - 1) {
+                bounds[number] = page.bounds(for: .cropBox)
+            }
+        }
+        return bounds
+    }
+
+    /// What the panel says about tapping. A book the server has not read yet
+    /// has nothing to tap, and that is worth saying — otherwise the page just
+    /// looks like it has no exercises on it.
+    private var tapHint: String {
+        if tasks.isScanning {
+            let percent = Int((tasks.scanFraction ?? 0) * 100)
+            return "Der Server liest dieses Buch gerade ein (\(percent) %). Danach kannst du "
+                + "Aufgaben direkt antippen."
+        }
+        if tasks.needsScan {
+            return "Dieses Buch wurde auf dem Server noch nicht eingelesen — tippbare Aufgaben "
+                + "gibt es erst danach. Frag solange hier."
+        }
+        return "Tippe im Buch direkt auf eine Aufgabe — sie wird ausgewählt und du kannst sie "
+            + "gleich abschicken."
+    }
+
+    /// The reader talks to the same server the rest of the app does.
+    private var api: BackendAPI {
+        BackendAPI(
+            host: model.settings.serverHost,
+            port: model.settings.serverPort,
+            token: model.settings.authToken
+        )
     }
 
     /// Set once per book and then forgotten, so it belongs in the navigation

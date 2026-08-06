@@ -21,6 +21,9 @@ struct BookAIPanel: View {
     /// The exercise tapped in the book, if one is picked. It is the question:
     /// nothing has to be typed to send it.
     let selectedTask: BookPageTask?
+    /// What to say about tapping — a book the server has not read yet has
+    /// nothing to tap, and saying so beats leaving the page looking dead.
+    let tapHint: String
     /// Put the picked exercise back.
     let clearTask: () -> Void
     /// Turn the book to a PDF page (a tapped citation).
@@ -217,8 +220,7 @@ struct BookAIPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Label(
-                "Tippe im Buch direkt auf eine Aufgabe — sie wird ausgewählt und du kannst sie "
-                    + "gleich abschicken.",
+                tapHint,
                 systemImage: "hand.tap"
             )
             .font(.footnote)
@@ -323,7 +325,7 @@ struct BookAIPanel: View {
                 .font(.caption)
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(task.label) · Seite \(numbering.printedLabel(task.pdfPage))")
+                Text("\(task.labelText) · Seite \(numbering.printedLabel(task.pdfPage))")
                     .font(.footnote.weight(.semibold))
                 if !task.text.isEmpty {
                     Text(task.text)
