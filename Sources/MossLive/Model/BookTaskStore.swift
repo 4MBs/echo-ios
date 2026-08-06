@@ -1,108 +1,75 @@
 import CoreGraphics
+import Foundation
 import Observation
-import PDFKit
-import UIKit
-import Vision
 
-/// Finds the exercises on the page the reader is showing, so they can be
-/// tapped instead of typed.
+/// What the reader knows about the text on the pages it is showing, and which
+/// block the student has tapped.
 ///
-/// The books are scans — there is no selectable text in them to hit-test — so
-/// the page is rendered and read with the system's on-device text recognition.
-/// Nothing leaves the iPad: this is only about *where* a task is, and the AI
-/// that solves it reads the real page on the server as before.
-enum BookTaskDetector {
-    /// Wide enough that ten-point body type is legible to the recogniser, and
-    /// small enough that a page costs a fraction of a second.
-    static let renderWidth: CGFloat = 1600
-
-    /// The exercises on one page, or nothing when the page cannot be read.
-    @MainActor
-    static func tasks(onPage number: Int, of page: PDFPage) async -> [BookPageTask] {
-        // A rotated page would put the rendered image and the page's own
-        // coordinates at right angles, and every box would land somewhere else.
-        // Schoolbook scans are upright; anything else simply gets no taps.
-        guard page.rotation % 360 == 0 else { return [] }
-        let bounds = page.bounds(for: .cropBox)
-        guard bounds.width > 1, bounds.height > 1 else { return [] }
-        guard let image = render(page, bounds: bounds) else { return [] }
-        let lines = await recognise(CarriedImage(image: image))
-        return BookTaskLayout.tasks(from: lines, pdfPage: number, pageBounds: bounds)
-    }
-
-    @MainActor
-    private static func render(_ page: PDFPage, bounds: CGRect) -> CGImage? {
-        let height = (bounds.height * (renderWidth / bounds.width)).rounded()
-        guard height > 1 else { return nil }
-        let size = CGSize(width: renderWidth, height: height)
-        return page.thumbnail(of: size, for: .cropBox).cgImage
-    }
-
-    /// Text recognition off the main actor: a page takes long enough that
-    /// running it inline would show up as a stutter while turning pages.
-    private static func recognise(_ carried: CarriedImage) async -> [RecognisedLine] {
-        await Task.detached(priority: .userInitiated) { () -> [RecognisedLine] in
-            let request = VNRecognizeTextRequest()
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-            request.recognitionLanguages = ["de-DE", "en-US"]
-            let handler = VNImageRequestHandler(cgImage: carried.image, options: [:])
-            do {
-                try handler.perform([request])
-            } catch {
-                return []
-            }
-            return (request.results ?? []).compactMap { observation -> RecognisedLine? in
-                guard let text = observation.topCandidates(1).first?.string else { return nil }
-                // Vision's boxes are already normalised with the origin at the
-                // bottom left — the same convention PDFKit uses for a page.
-                return RecognisedLine(text: text, box: observation.boundingBox)
-            }
-        }.value
-    }
-
-    /// A rendered page on its way to the recogniser. CGImage is immutable and
-    /// this one is handed over, never shared.
-    private struct CarriedImage: @unchecked Sendable {
-        let image: CGImage
-    }
-}
-
-/// What the reader knows about the exercises on the pages it is showing, and
-/// which one the student has picked.
-///
-/// Detection is cached per PDF page: flipping back and forth through a chapter
-/// must not re-read the same pages, and a book is only ever open one at a time.
+/// The blocks come from the server, which read the book once with a
+/// layout-aware OCR model. Nothing is recognised on the device: a scanned
+/// schoolbook has no text layer to hit-test, and working the exercises out from
+/// the numbering does not survive contact with real books — a line-number ruler
+/// down the margin of a literary text counts exactly like a task list, a
+/// running head numbered "1" is not Aufgabe 1, and a spread's list runs 8, 9 on
+/// one page and 1 … 8 on the other. The model already knows which block is
+/// which; the app just draws them.
 @MainActor
 @Observable
 final class BookTaskStore {
-    /// The exercise the student tapped, if any. Buch-KI's panel sends this.
+    /// The block the student tapped. Buch-KI's panel sends this.
     private(set) var selected: BookPageTask?
+    /// Whether the server has read this book yet — "none" means nobody has
+    /// scanned it, which is not the same as a page with nothing on it.
+    private(set) var scanStatus = "unknown"
+    /// How far a running scan has got, 0…1.
+    private(set) var scanFraction: Double?
 
     private var found: [Int: [BookPageTask]] = [:]
-    private var running: Set<Int> = []
+    private var loading: Set<Int> = []
+
+    var isScanning: Bool { scanStatus == "scanning" }
+    /// True once we know the server has nothing for this book.
+    var needsScan: Bool { scanStatus == "none" }
 
     func tasks(onPages pages: [Int]) -> [BookPageTask] {
         pages.flatMap { found[$0] ?? [] }
     }
 
-    /// Read the pages now on screen, if they have not been read already.
-    func detect(pages: [Int], in document: PDFDocument) async {
-        for number in pages where found[number] == nil && !running.contains(number) {
-            guard let page = document.page(at: number - 1) else {
-                found[number] = []
-                continue
+    /// Fetch the regions of the pages now on screen, once each.
+    func load(pages: [Int], bookID: String, pageBounds: [Int: CGRect], api: BackendAPI) async {
+        let wanted = pages.filter { found[$0] == nil && !loading.contains($0) }
+        guard !wanted.isEmpty else { return }
+        loading.formUnion(wanted)
+        defer { loading.subtract(wanted) }
+        do {
+            let response = try await api.bookRegions(id: bookID, pages: wanted)
+            scanStatus = response.status
+            scanFraction = response.fraction
+            for page in wanted {
+                let bounds = pageBounds[page] ?? .zero
+                found[page] = response.regions(onPage: page).enumerated().map { index, region in
+                    BookPageTask(
+                        pdfPage: page,
+                        index: index,
+                        label: region.label,
+                        text: region.text,
+                        bounds: region.rect(in: bounds)
+                    )
+                }
             }
-            running.insert(number)
-            found[number] = await BookTaskDetector.tasks(onPage: number, of: page)
-            running.remove(number)
+        } catch {
+            // Offline, or the server is not reachable: reading the book still
+            // works, there is just nothing to tap.
+            scanStatus = "unavailable"
         }
     }
 
-    /// A tap somewhere on a page: picks the task under the finger, and picking
-    /// the one already picked puts it back.
+    /// A tap somewhere on a page: picks the block under the finger, and picking
+    /// the one already picked puts it back. When blocks overlap the smallest
+    /// wins, so an exercise inside a list is preferred over the list.
     func select(page: Int, at point: CGPoint) {
-        guard let task = (found[page] ?? []).first(where: { $0.bounds.contains(point) }) else { return }
+        let hits = (found[page] ?? []).filter { $0.bounds.contains(point) }
+        guard let task = hits.min(by: { $0.bounds.area < $1.bounds.area }) else { return }
         selected = task == selected ? nil : task
     }
 
@@ -117,4 +84,17 @@ final class BookTaskStore {
             selected = nil
         }
     }
+
+    /// Forget everything — after the book is re-scanned on the server.
+    func reset() {
+        found.removeAll()
+        loading.removeAll()
+        selected = nil
+        scanStatus = "unknown"
+        scanFraction = nil
+    }
+}
+
+private extension CGRect {
+    var area: CGFloat { width * height }
 }
