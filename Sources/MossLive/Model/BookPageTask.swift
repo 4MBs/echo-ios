@@ -44,12 +44,22 @@ struct BookPageTask: Identifiable, Hashable, Sendable {
         return isExercise ? "Aufgabe" : "Markierter Text"
     }
 
-    /// The question that goes to the server when this block is sent.
+    /// How this one block reads inside a request.
     ///
     /// It carries the wording as well as the number: with two pages on screen
     /// both halves of a spread can have an "Aufgabe 1", and the wording is what
     /// tells them apart. The pages travel beside the question in the request,
     /// so nothing here needs to name a page.
+    func phrase(budget: Int = maxWordingCharacters) -> String {
+        let wording = Self.shortened(text, limit: budget)
+        if isExercise {
+            let opening = number.map { "Aufgabe \($0)" } ?? "Diese Aufgabe"
+            return wording.isEmpty ? opening : "\(opening): „\(wording)“"
+        }
+        return "Diese Stelle: „\(wording)“"
+    }
+
+    /// The question that goes to the server when this block is sent alone.
     func question(note: String = "") -> String {
         let wording = Self.shortened(text)
         var lines: [String] = []
@@ -69,13 +79,45 @@ struct BookPageTask: Identifiable, Hashable, Sendable {
         return lines.joined(separator: "\n")
     }
 
+    /// The question for everything the student has picked.
+    ///
+    /// Several blocks go in one request rather than one each, because they are
+    /// usually parts of the same piece of work — "3, 4 and 5 on this page" —
+    /// and the AI answers them better together, having read the page once.
+    /// They are numbered so the answer can come back in the same order.
+    static func question(for tasks: [BookPageTask], note: String = "") -> String {
+        let extra = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        // One block keeps the wording it has always had — it is what the
+        // server's prompt and its tests are written against.
+        guard tasks.count > 1 else {
+            return tasks.first?.question(note: extra) ?? extra
+        }
+
+        // Share the wording budget out, so ten picked blocks cannot push the
+        // question past the length the server accepts.
+        let budget = max(120, maxWordingCharacters * 2 / tasks.count)
+        let onlyExercises = tasks.allSatisfy(\.isExercise)
+        var lines = [
+            onlyExercises
+                ? "Löse diese \(tasks.count) Aufgaben von der Seite, der Reihe nach:"
+                : "Bearbeite diese \(tasks.count) Stellen von der Seite, der Reihe nach:",
+        ]
+        for (index, task) in tasks.enumerated() {
+            lines.append("\(index + 1). \(task.phrase(budget: budget))")
+        }
+        if !extra.isEmpty {
+            lines.append(extra)
+        }
+        return lines.joined(separator: "\n")
+    }
+
     /// One line, and short enough that the server's question limit is never the
     /// thing that fails. The AI reads the real page anyway; this says *which*
     /// block, it does not replace it.
-    static func shortened(_ text: String) -> String {
+    static func shortened(_ text: String, limit: Int = maxWordingCharacters) -> String {
         let flat = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard flat.count > maxWordingCharacters else { return flat }
-        return String(flat.prefix(maxWordingCharacters)) + "…"
+        guard flat.count > limit else { return flat }
+        return String(flat.prefix(limit)) + "…"
     }
 
     static let maxWordingCharacters = 600

@@ -101,6 +101,47 @@ final class BookPageTaskQuestionTests: XCTestCase {
         )
     }
 
+    /// Several picked blocks go in one request, numbered, in the order they
+    /// were tapped — a student doing 3, 4 and 5 asks once, not three times.
+    func testSeveralBlocksBecomeOneNumberedRequest() {
+        let three = task("3 Beschreiben Sie in jeweils 1 – 2 Sätzen den Eindruck.")
+        let four = task("4 Untersuchen Sie das Verhalten von Vater und Sohn.")
+        let five = task("5 Zeigen Sie an Beispielen aus dem Text auf.")
+        let question = BookPageTask.question(for: [three, four, five])
+        XCTAssertTrue(question.hasPrefix("Löse diese 3 Aufgaben"))
+        XCTAssertTrue(question.contains("1. Aufgabe 3:"))
+        XCTAssertTrue(question.contains("2. Aufgabe 4:"))
+        XCTAssertTrue(question.contains("3. Aufgabe 5:"))
+        // the order tapped is the order asked
+        XCTAssertLessThan(
+            question.range(of: "Aufgabe 3")!.lowerBound,
+            question.range(of: "Aufgabe 5")!.lowerBound
+        )
+    }
+
+    /// A mixed picking — an exercise and a paragraph — is not "solve these".
+    func testAMixedSelectionIsWordedForBoth() {
+        let exercise = task("1 Fassen Sie zusammen, welche Aufgabe der Vater stellt.")
+        let paragraph = task("Der Erzähler kann dem Geschehen neutral gegenüberstehen.", label: "Text")
+        let question = BookPageTask.question(for: [exercise, paragraph])
+        XCTAssertTrue(question.hasPrefix("Bearbeite diese 2 Stellen"))
+        XCTAssertTrue(question.contains("Aufgabe 1:"))
+        XCTAssertTrue(question.contains("Diese Stelle:"))
+    }
+
+    /// Ten blocks must not push the request past what the server accepts.
+    func testManyBlocksStayInsideTheServersLimit() {
+        let many = (1 ... 10).map { task("\($0) " + String(repeating: "sehr ausführlich ", count: 60)) }
+        let question = BookPageTask.question(for: many, note: "Bitte kurz.")
+        XCTAssertLessThan(question.count, 2000)
+        XCTAssertTrue(question.contains("10. Aufgabe 10"))
+        XCTAssertTrue(question.hasSuffix("Bitte kurz."))
+    }
+
+    func testNothingPickedIsJustWhatWasTyped() {
+        XCTAssertEqual(BookPageTask.question(for: [], note: "Was ist das?"), "Was ist das?")
+    }
+
     func testAnExerciseIsNamedAndQuoted() {
         let exercise = task("1 Fassen Sie zusammen, welche Aufgabe der Vater dem Sohn stellt.")
         XCTAssertEqual(exercise.number, 1)

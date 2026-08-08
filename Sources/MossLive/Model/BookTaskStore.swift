@@ -16,8 +16,10 @@ import Observation
 @MainActor
 @Observable
 final class BookTaskStore {
-    /// The block the student tapped. Buch-KI's panel sends this.
-    private(set) var selected: BookPageTask?
+    /// The blocks the student has tapped, in the order they were tapped —
+    /// which is the order they go to Buch-KI, so "solve 3 and 5" arrives as
+    /// 3 then 5. Tapping a picked block again puts it back.
+    private(set) var selected: [BookPageTask] = []
     /// Whether the server has read this book yet — "none" means nobody has
     /// scanned it, which is not the same as a page with nothing on it.
     private(set) var scanStatus = "unknown"
@@ -64,32 +66,42 @@ final class BookTaskStore {
         }
     }
 
-    /// A tap somewhere on a page: picks the block under the finger, and picking
-    /// the one already picked puts it back. When blocks overlap the smallest
-    /// wins, so an exercise inside a list is preferred over the list.
+    /// A tap somewhere on a page: adds the block under the finger to the
+    /// selection, or takes it out again if it was already in. Several can be
+    /// held at once — one tap each — so a student can send "3, 4 and 5"
+    /// together instead of three times over.
+    ///
+    /// When blocks overlap the smallest wins, so an exercise inside a list is
+    /// picked rather than the list around it.
     func select(page: Int, at point: CGPoint) {
         let hits = (found[page] ?? []).filter { $0.bounds.contains(point) }
         guard let task = hits.min(by: { $0.bounds.area < $1.bounds.area }) else { return }
-        selected = task == selected ? nil : task
+        toggle(task)
+    }
+
+    func toggle(_ task: BookPageTask) {
+        if let index = selected.firstIndex(of: task) {
+            selected.remove(at: index)
+        } else {
+            selected.append(task)
+        }
     }
 
     func clearSelection() {
-        selected = nil
+        selected.removeAll()
     }
 
-    /// The panel is about the pages on screen, so a selection left behind on a
-    /// page that has been turned away from is not a selection any more.
+    /// The panel is about the pages on screen, so anything picked on a page
+    /// that has been turned away from is not picked any more.
     func dropSelectionOutside(_ pages: [Int]) {
-        if let task = selected, !pages.contains(task.pdfPage) {
-            selected = nil
-        }
+        selected.removeAll { !pages.contains($0.pdfPage) }
     }
 
     /// Forget everything — after the book is re-scanned on the server.
     func reset() {
         found.removeAll()
         loading.removeAll()
-        selected = nil
+        selected.removeAll()
         scanStatus = "unknown"
         scanFraction = nil
     }

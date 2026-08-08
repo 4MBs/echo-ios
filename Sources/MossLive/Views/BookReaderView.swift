@@ -152,11 +152,12 @@ private struct PDFReader: View {
             )
             markTasks()
         }
-        .onChange(of: tasks.selected) { _, task in
+        .onChange(of: tasks.selected) { was, now in
             markTasks()
-            // Tapping a task is the whole request: the panel comes out with it
-            // already picked, so the only thing left to do is send.
-            if task != nil { askingBookAI = true }
+            // Tapping the first block is the whole request: the panel comes out
+            // with it already picked, so the only thing left to do is send.
+            // Picking a second one must not yank it open again.
+            if was.isEmpty, !now.isEmpty { askingBookAI = true }
         }
         .onDisappear { proxy.clearTasks() }
         .toolbar {
@@ -207,10 +208,10 @@ private struct PDFReader: View {
             askingBookAI.toggle()
         } label: {
             Label("Buch-KI", systemImage: "sparkles")
-                .labelStyle(.titleAndIcon)
-                .font(.subheadline.weight(.medium))
         }
-        .buttonStyle(.glass)
+        // No explicit button style: a toolbar item already gets the system's
+        // own treatment, and dressing it up again is what made this read as a
+        // custom control sitting in an Apple navigation bar.
         .accessibilityLabel(askingBookAI ? "Buch-KI schließen" : "Buch-KI öffnen")
     }
 
@@ -230,13 +231,13 @@ private struct PDFReader: View {
     private func bookAIPanel(close: (() -> Void)?) -> some View {
         BookAIPanel(
             bookID: book.id,
-            bookTitle: book.title,
             numbering: numbering,
             visiblePages: visiblePages,
             store: bookAI,
-            selectedTask: tasks.selected,
+            selectedTasks: tasks.selected,
             tapHint: tapHint,
-            clearTask: { tasks.clearSelection() },
+            unpick: { tasks.toggle($0) },
+            clearTasks: { tasks.clearSelection() },
             goToPage: { page in
                 proxy.go(toPage: page)
                 // On a phone the sheet covers the page it just turned to.
@@ -282,8 +283,8 @@ private struct PDFReader: View {
             return "Dieses Buch wurde auf dem Server noch nicht eingelesen — tippbare Aufgaben "
                 + "gibt es erst danach. Frag solange hier."
         }
-        return "Tippe im Buch direkt auf eine Aufgabe — sie wird ausgewählt und du kannst sie "
-            + "gleich abschicken."
+        return "Tippe im Buch direkt auf eine Aufgabe. Mehrere nacheinander antippen geht auch — "
+            + "nochmal tippen hebt sie wieder auf."
     }
 
     /// The reader talks to the same server the rest of the app does.
@@ -528,19 +529,22 @@ private final class PDFViewProxy {
     /// box drawn on top would have to be re-projected on every gesture.
     private var overlays: [PDFAnnotation] = []
 
-    /// Mark the exercises on the visible pages. Faint enough to read through,
-    /// visible enough to look tappable; the picked one is filled properly.
-    func showTasks(_ tasks: [BookPageTask], selected: BookPageTask?) {
+    /// Mark the text blocks on the visible pages. Unpicked ones are faint
+    /// enough to read straight through and just visible enough to look
+    /// tappable; picked ones are filled and outlined in the tint, so several
+    /// held at once read as a set rather than as one highlight among many.
+    func showTasks(_ tasks: [BookPageTask], selected: [BookPageTask]) {
         clearTasks()
         guard let document = pdfView?.document else { return }
+        let picked = Set(selected)
         for task in tasks {
             guard let page = document.page(at: task.pdfPage - 1) else { continue }
             let annotation = PDFAnnotation(bounds: task.bounds, forType: .square, withProperties: nil)
-            let picked = task == selected
-            annotation.color = picked ? UIColor.tintColor.withAlphaComponent(0.9) : .clear
-            annotation.interiorColor = UIColor.tintColor.withAlphaComponent(picked ? 0.22 : 0.07)
+            let isPicked = picked.contains(task)
+            annotation.color = isPicked ? UIColor.tintColor.withAlphaComponent(0.9) : .clear
+            annotation.interiorColor = UIColor.tintColor.withAlphaComponent(isPicked ? 0.24 : 0.07)
             annotation.border = PDFBorder()
-            annotation.border?.lineWidth = picked ? 2 : 0
+            annotation.border?.lineWidth = isPicked ? 2 : 0
             annotation.isReadOnly = true
             page.addAnnotation(annotation)
             overlays.append(annotation)
