@@ -33,7 +33,7 @@ struct BookReaderView: View {
         }
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await open() }
+        .task(id: book.id) { await open() }
     }
 
     private var downloadProgress: some View {
@@ -52,6 +52,7 @@ struct BookReaderView: View {
         .groupedScreen()
     }
 
+    @MainActor
     private func open(ignoreCache: Bool = false) async {
         let url: URL
         do {
@@ -72,9 +73,11 @@ struct BookReaderView: View {
             return
         }
 
-        let document = await Task.detached(priority: .userInitiated) {
-            LoadedDocument(document: PDFDocument(url: url))
-        }.value.document
+        // Keep construction and every later access on the main actor. PDFKit
+        // starts its own page-analysis queues; handing a newly created
+        // PDFDocument across executors before attaching it to PDFView adds a
+        // second ownership transition exactly while the reader is opening.
+        let document = PDFDocument(url: url)
         guard !Task.isCancelled else { return }
         guard let document, document.pageCount > 0 else {
             await recoverInvalidDownload()
@@ -527,12 +530,6 @@ private struct PDFReader: View {
     }
 }
 
-/// Hands a freshly parsed document back from the loading task. PDFDocument is
-/// not `Sendable`, but nothing touches this one until the reader owns it.
-private struct LoadedDocument: @unchecked Sendable {
-    let document: PDFDocument?
-}
-
 /// Bridge so the SwiftUI control bar can drive the UIKit PDFView (which only
 /// exists once makeUIView has run).
 private final class PDFViewProxy {
@@ -613,25 +610,6 @@ private final class PDFViewProxy {
     }
 }
 
-/// A swipe that remembers where the finger landed. UISwipeGestureRecognizer
-/// only reports where the flick ended, which is no use for telling a page turn
-/// apart from a back swipe that started at the screen edge.
-private final class PageSwipeGestureRecognizer: UISwipeGestureRecognizer {
-    private(set) var startX: CGFloat = .greatestFiniteMagnitude
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let touch = touches.first, let view {
-            startX = touch.location(in: view).x
-        }
-        super.touchesBegan(touches, with: event)
-    }
-
-    override func reset() {
-        super.reset()
-        startX = .greatestFiniteMagnitude
-    }
-}
-
 /// A PDFView that will not let the page shrink below its natural size on screen.
 ///
 /// The floor is not a fixed number: it is derived from whatever is on screen
@@ -680,11 +658,28 @@ private final class BookPDFView: PDFView {
     }
 }
 
-/// PDFKit wrapper. The non-continuous display modes are the only ones that show
-/// a real book: exactly one page (or one 2–3 style spread) fills the screen and
-/// nothing scrolls. They bring no page-turn gesture of their own, and the
-/// page-view controller that would provide one forces single-page layout — so
-/// the sideways flick is added here instead.
+/// One setup path for the production reader and its regression test. PDFKit's
+/// page controller keeps only the active pages mounted and owns the horizontal
+/// page gesture. That avoids competing recognizers and the raw-scroll
+/// `visiblePagesChanged` churn that can crash PDFPageAnalyzerV2 on iPadOS 26.
+enum BookPDFViewConfiguration {
+    @MainActor
+    static func apply(to pdfView: PDFView, document: PDFDocument, twoUp: Bool) {
+        pdfView.displayDirection = .horizontal
+        pdfView.displayMode = twoUp ? .twoUp : .singlePage
+        pdfView.displaysAsBook = twoUp
+        pdfView.displaysPageBreaks = true
+        pdfView.pageBreakMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        pdfView.autoScales = false
+        pdfView.backgroundColor = .clear
+        pdfView.usePageViewController(true, withViewOptions: nil)
+        pdfView.document = document
+    }
+}
+
+/// PDFKit wrapper. The non-continuous display modes show exactly one page (or
+/// one 2–3 style spread), while PDFKit's page controller supplies the bounded
+/// horizontal transition without keeping a continuous document scroll alive.
 private struct PDFKitView: UIViewRepresentable {
     let document: PDFDocument
     let twoUp: Bool
@@ -698,18 +693,9 @@ private struct PDFKitView: UIViewRepresentable {
     func makeUIView(context: Context) -> PDFView {
         let pdfView = BookPDFView()
         proxy.pdfView = pdfView
-        // PDFKit is order-sensitive: layout has to be configured before the
-        // document is attached, or the direction quietly falls back to vertical.
-        pdfView.displayDirection = .horizontal
-        pdfView.displayMode = twoUp ? .twoUp : .singlePage
-        pdfView.displaysAsBook = twoUp
-        pdfView.displaysPageBreaks = true
-        pdfView.pageBreakMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-        // autoScales would overwrite the scale limits on every layout pass;
-        // BookPDFView takes over the fitting instead.
-        pdfView.autoScales = false
-        pdfView.backgroundColor = .clear
-        pdfView.document = document
+        // PDFKit is order-sensitive: layout and the page controller have to be
+        // configured before the document is attached.
+        BookPDFViewConfiguration.apply(to: pdfView, document: document, twoUp: twoUp)
 
         context.coordinator.proxy = proxy
         context.coordinator.onPageChange = { updatePageState($0) }
@@ -771,14 +757,6 @@ private struct PDFKitView: UIViewRepresentable {
                 })
             }
 
-            for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
-                let swipe = PageSwipeGestureRecognizer(target: self, action: #selector(handleSwipe))
-                swipe.direction = direction
-                swipe.delegate = self
-                swipe.cancelsTouchesInView = false
-                view.addGestureRecognizer(swipe)
-            }
-
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
             tap.delegate = self
             // PDFKit's own recognizers keep working: this one only reports
@@ -804,53 +782,6 @@ private struct PDFKitView: UIViewRepresentable {
                   let index = document.validIndex(for: page) else { return }
             proxy?.onPageTap?(index + 1, view.convert(point, to: page))
         }
-
-        @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
-            guard let view = recognizer.view as? BookPDFView else { return }
-            // Once the reader has zoomed in, a sideways drag means "look at the
-            // rest of this page", not "turn it".
-            guard view.restingScale == 0 || view.scaleFactor <= view.restingScale * 1.05 else { return }
-            proxy?.step(recognizer.direction == .left ? 1 : -1)
-        }
-
-        /// A backwards flick starting at the very left edge belongs to the
-        /// navigation controller, so going back to the library still works.
-        /// Everywhere else it turns the page.
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let swipe = gestureRecognizer as? PageSwipeGestureRecognizer,
-                  swipe.direction == .right else { return true }
-            return swipe.startX > Self.edgeStrip
-        }
-
-        /// The PDF's own scroll view keeps its pan recognizer, and the flick has
-        /// to run alongside it. Recognizers from outside the reader — the back
-        /// swipe above all — must not: turning a page and leaving the book at
-        /// the same time is how a swipe back used to end up in the library.
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            belongsToReader(otherGestureRecognizer, alongside: gestureRecognizer)
-        }
-
-        /// Outside recognizers wait for the page turn to fail before they run.
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            !belongsToReader(otherGestureRecognizer, alongside: gestureRecognizer)
-        }
-
-        private func belongsToReader(
-            _ other: UIGestureRecognizer,
-            alongside mine: UIGestureRecognizer
-        ) -> Bool {
-            guard let readerView = mine.view, let otherView = other.view else { return false }
-            return otherView.isDescendant(of: readerView)
-        }
-
-        /// Width of the strip along the left edge reserved for the back swipe.
-        private static let edgeStrip: CGFloat = 40
 
         deinit {
             detach()

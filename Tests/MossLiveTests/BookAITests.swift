@@ -1,3 +1,7 @@
+import Combine
+import PDFKit
+import SwiftUI
+import UIKit
 @testable import MossLive
 import XCTest
 
@@ -118,5 +122,124 @@ final class BookCacheValidationTests: XCTestCase {
         try Data("%PDF-1.7".utf8).write(to: file)
         XCTAssertTrue(BackendAPI.isUsableBookFile(file))
         XCTAssertFalse(BackendAPI.isUsableBookFile(root), "a directory cannot masquerade as a cached PDF")
+    }
+}
+
+/// Exercises the transition that failed on the device: a navigation route is
+/// already open, the reader resolves a cached file, and PDFKit replaces the
+/// loading view. The route must survive that replacement and the concrete
+/// PDFView must use the bounded page-controller layout.
+@MainActor
+final class BookReaderPresentationTests: XCTestCase {
+    func testLoadingAPDFKeepsTheReaderOpen() async throws {
+        let id = "reader-presentation-\(UUID().uuidString)"
+        let cachedURL = try writeFixture(id: id)
+        defer { try? FileManager.default.removeItem(at: cachedURL) }
+
+        let book = BackendAPI.Book(
+            id: id,
+            title: "Reader regression",
+            fileName: "fixture.pdf",
+            sizeBytes: Int64(try Data(contentsOf: cachedURL).count)
+        )
+        let probe = ReaderPathProbe(path: [id])
+        let model = AppModel()
+        let root = ReaderNavigationHarness(
+            probe: probe,
+            api: BackendAPI(host: "127.0.0.1", port: 9, token: "test"),
+            book: book
+        )
+        .environment(model)
+        let host = UIHostingController(rootView: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1024, height: 768))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        var pdfView: PDFView?
+        for _ in 0 ..< 50 where pdfView == nil {
+            host.view.layoutIfNeeded()
+            pdfView = firstPDFView(in: host.view)
+            if pdfView == nil { try await Task.sleep(for: .milliseconds(20)) }
+        }
+
+        let opened = try XCTUnwrap(pdfView, "the loading phase must become a PDFView")
+        XCTAssertTrue(opened.isUsingPageViewController)
+        XCTAssertEqual(probe.path, [id], "loading the document must not pop the active book")
+
+        // Give PDFKit's initial visible-page notifications time to run; the
+        // regression used to occur as soon as those notifications arrived.
+        try await Task.sleep(for: .milliseconds(300))
+        host.view.layoutIfNeeded()
+        XCTAssertEqual(probe.path, [id])
+        XCTAssertNotNil(firstPDFView(in: host.view))
+    }
+
+    private func writeFixture(id: String) throws -> URL {
+        let directory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("library-books", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("\(id).pdf")
+        let bounds = CGRect(x: 0, y: 0, width: 430, height: 590)
+        let data = UIGraphicsPDFRenderer(bounds: bounds).pdfData { renderer in
+            for page in 1 ... 6 {
+                renderer.beginPage()
+                let context = renderer.cgContext
+                context.setStrokeColor(UIColor.black.cgColor)
+                context.setLineWidth(1)
+                for row in 0 ... 8 {
+                    let y = CGFloat(80 + row * 45)
+                    context.move(to: CGPoint(x: 35, y: y))
+                    context.addLine(to: CGPoint(x: 395, y: y))
+                }
+                for column in 0 ... 4 {
+                    let x = CGFloat(35 + column * 90)
+                    context.move(to: CGPoint(x: x, y: 80))
+                    context.addLine(to: CGPoint(x: x, y: 440))
+                }
+                context.strokePath()
+                NSString(string: "Synthetic table — page \(page)").draw(
+                    at: CGPoint(x: 35, y: 35),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 18)]
+                )
+            }
+        }
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func firstPDFView(in view: UIView) -> PDFView? {
+        if let pdfView = view as? PDFView { return pdfView }
+        for subview in view.subviews {
+            if let found = firstPDFView(in: subview) { return found }
+        }
+        return nil
+    }
+}
+
+@MainActor
+private final class ReaderPathProbe: ObservableObject {
+    @Published var path: [String]
+
+    init(path: [String]) {
+        self.path = path
+    }
+}
+
+@MainActor
+private struct ReaderNavigationHarness: View {
+    @ObservedObject var probe: ReaderPathProbe
+    let api: BackendAPI
+    let book: BackendAPI.Book
+
+    var body: some View {
+        NavigationStack(path: $probe.path) {
+            Color.clear
+                .navigationDestination(for: String.self) { _ in
+                    BookReaderView(api: api, book: book)
+                }
+        }
     }
 }
