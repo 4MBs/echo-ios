@@ -52,13 +52,24 @@ workflows:
             | sed -E 's/^ +//; s/ \([0-9A-Fa-f-]+\) \((Shutdown|Booted)\).*$//')
           [ -n "$DEVICE" ] || { echo "no iOS simulator on this image"; exit 1; }
           echo "picked simulator: $DEVICE"
+          TEST_LOG=$(mktemp)
+          set +e
           xcodebuild test \
             -project MossLive.xcodeproj \
             -scheme MossLive \
             -destination "platform=iOS Simulator,name=$DEVICE" \
             -clonedSourcePackagesDirPath .spm-packages \
             -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO | tail -100
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$TEST_LOG" | tail -100
+          TEST_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "Failure diagnostics omitted from the final 100 lines:"
+            grep -Ei -B 3 -A 3 'test case .* failed|error:|XCTAssert|fatal error' "$TEST_LOG" \
+              | tail -200 || true
+          fi
+          rm -f "$TEST_LOG"
+          exit "$TEST_STATUS"
 
       - name: Build unsigned device binary
         script: |
