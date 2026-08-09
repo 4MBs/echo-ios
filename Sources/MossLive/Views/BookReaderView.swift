@@ -151,59 +151,59 @@ private struct PDFReader: View {
 
     var body: some View {
         reader
-        // Ask the server where the text sits on whatever is on screen, then
-        // mark it. Both halves of a spread, and only once per page — the
-        // answer is cached for as long as the book is open.
-        .task(id: pagesKey) {
-            let store = tasks
-            proxy.onPageTap = { page, point in
-                Task { @MainActor in store.select(page: page, at: point) }
-            }
-            store.dropSelectionOutside(visiblePages)
-            // Anything already known about these pages shows at once; only the
-            // fetch is deferred.
-            markTasks()
-            // Flicking through a chapter must not fire a request per page it
-            // passes: the next turn cancels this task before the sleep is over.
-            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            repeat {
-                await store.load(
-                    pages: visiblePages,
-                    bookID: book.id,
-                    pageBounds: pageBounds(of: document, pages: visiblePages),
-                    api: api
-                )
+            // Ask the server where the text sits on whatever is on screen, then
+            // mark it. Both halves of a spread, and only once per page — the
+            // answer is cached for as long as the book is open.
+            .task(id: pagesKey) {
+                let store = tasks
+                proxy.onPageTap = { page, point in
+                    Task { @MainActor in store.select(page: page, at: point) }
+                }
+                store.dropSelectionOutside(visiblePages)
+                // Anything already known about these pages shows at once; only the
+                // fetch is deferred.
                 markTasks()
-                // If these pages are still being scanned, let their markers
-                // appear without requiring the student to turn away and back.
-                guard store.isScanning, store.hasPendingPages(visiblePages) else { return }
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            } while !Task.isCancelled
-        }
-        .onChange(of: tasks.selected) { was, now in
-            markTasks()
-            // Tapping the first block is the whole request: the panel comes out
-            // with it already picked, so the only thing left to do is send.
-            // Picking a second one must not yank it open again.
-            if was.isEmpty, !now.isEmpty { askingBookAI = true }
-        }
-        .onDisappear { proxy.clearTasks() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { bookAIButton }
-            if model.settings.showPageNumberEditor {
-                ToolbarItem(placement: .topBarTrailing) { readerMenu }
+                // Flicking through a chapter must not fire a request per page it
+                // passes: the next turn cancels this task before the sleep is over.
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                repeat {
+                    await store.load(
+                        pages: visiblePages,
+                        bookID: book.id,
+                        pageBounds: pageBounds(of: document, pages: visiblePages),
+                        api: api
+                    )
+                    markTasks()
+                    // If these pages are still being scanned, let their markers
+                    // appear without requiring the student to turn away and back.
+                    guard store.isScanning, store.hasPendingPages(visiblePages) else { return }
+                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                } while !Task.isCancelled
             }
-        }
-        // This is one adaptive presentation, not a hand-switched HStack and
-        // sheet. SwiftUI keeps it as a trailing inspector on iPad and adapts it
-        // to a sheet in compact width without letting navigation behind that
-        // modal change underneath it.
-        .inspector(isPresented: $askingBookAI) {
-            bookAIPanel(close: { askingBookAI = false })
-                .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
+            .onChange(of: tasks.selected) { was, now in
+                markTasks()
+                // Tapping the first block is the whole request: the panel comes out
+                // with it already picked, so the only thing left to do is send.
+                // Picking a second one must not yank it open again.
+                if was.isEmpty, !now.isEmpty { askingBookAI = true }
+            }
+            .onDisappear { proxy.clearTasks() }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { bookAIButton }
+                if model.settings.showPageNumberEditor {
+                    ToolbarItem(placement: .topBarTrailing) { readerMenu }
+                }
+            }
+            // This is one adaptive presentation, not a hand-switched HStack and
+            // sheet. SwiftUI keeps it as a trailing inspector on iPad and adapts it
+            // to a sheet in compact width without letting navigation behind that
+            // modal change underneath it.
+            .inspector(isPresented: $askingBookAI) {
+                bookAIPanel(close: { askingBookAI = false })
+                    .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
     }
 
     private var reader: some View {
