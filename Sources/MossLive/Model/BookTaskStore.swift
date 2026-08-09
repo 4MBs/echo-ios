@@ -69,6 +69,10 @@ final class BookTaskStore {
                 }
             }
         } catch {
+            // Page turns and leaving the reader cancel the view task on
+            // purpose. That is not an outage and must not replace a real scan
+            // status with the misleading "unavailable" state.
+            guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
             // Offline, or the server is not reachable: reading the book still
             // works, there is just nothing to tap.
             scanStatus = "unavailable"

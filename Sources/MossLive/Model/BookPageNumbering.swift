@@ -64,3 +64,13 @@ struct BookPageNumbering: Equatable {
         printedNumber(pdfPage).map { "Seite \($0)" } ?? "PDF-Seite \(pdfPage)"
     }
 }
+
+/// Page-turn availability is based on the whole visible spread, not only its
+/// first page. On the final two-page spread `currentPage` is still the left
+/// page, so comparing only that value leaves a next button that can never move.
+enum BookReaderPaging {
+    static func canStepForward(visiblePages: [Int], pageCount: Int) -> Bool {
+        guard pageCount > 0 else { return true }
+        return (visiblePages.max() ?? 0) < pageCount
+    }
+}
