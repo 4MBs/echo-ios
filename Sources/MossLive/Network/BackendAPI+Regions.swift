@@ -23,6 +23,12 @@ extension BackendAPI {
         let bbox: [Double]
         let text: String
 
+        init(label: String, bbox: [Double], text: String) {
+            self.label = label
+            self.bbox = bbox
+            self.text = text
+        }
+
         var id: String { "\(label)-\(bbox)-\(text.prefix(24))" }
 
         /// Whether this block is one exercise, which is what the student
@@ -32,12 +38,21 @@ extension BackendAPI {
         /// The rectangle in a page of the given size, with the origin moved to
         /// the bottom left — PDFKit's convention.
         func rect(in bounds: CGRect) -> CGRect {
-            guard bbox.count == 4 else { return .zero }
-            let x0 = bounds.minX + bbox[0] * bounds.width
-            let x1 = bounds.minX + bbox[2] * bounds.width
+            guard bbox.count == 4,
+                  bounds.width.isFinite, bounds.height.isFinite,
+                  bounds.width > 0, bounds.height > 0,
+                  bbox.allSatisfy(\.isFinite) else { return .zero }
+            let left = min(max(bbox[0], 0), 1)
+            let topFraction = min(max(bbox[1], 0), 1)
+            let right = min(max(bbox[2], 0), 1)
+            let bottomFraction = min(max(bbox[3], 0), 1)
+            guard left < right, topFraction < bottomFraction else { return .zero }
+
+            let x0 = bounds.minX + left * bounds.width
+            let x1 = bounds.minX + right * bounds.width
             // y0/y1 count down from the top of the page; PDFKit counts up.
-            let top = bounds.minY + (1 - bbox[1]) * bounds.height
-            let bottom = bounds.minY + (1 - bbox[3]) * bounds.height
+            let top = bounds.minY + (1 - topFraction) * bounds.height
+            let bottom = bounds.minY + (1 - bottomFraction) * bounds.height
             return CGRect(x: x0, y: min(top, bottom), width: x1 - x0, height: abs(top - bottom))
         }
     }
@@ -50,24 +65,38 @@ extension BackendAPI {
         let status: String
         /// How far a running scan has got, 0…1.
         let fraction: Double?
+        /// Pages that have actually been written. During a partial scan an
+        /// absent page and a completed blank page both have an empty array in
+        /// `pages`, so this field keeps the app from caching the former.
+        let availablePages: Set<Int>?
         /// Keyed by PDF page number.
         let pages: [String: [PageRegion]]
 
         var isReady: Bool { status == "ready" }
         var isScanning: Bool { status == "scanning" }
+        var isPartial: Bool { status == "partial" }
 
         func regions(onPage page: Int) -> [PageRegion] {
             pages[String(page)] ?? []
         }
 
+        func isAvailable(page: Int) -> Bool {
+            if let availablePages { return availablePages.contains(page) }
+            // Older servers do not send available_pages. A complete scan can
+            // safely cache empty pages; an in-progress one cannot.
+            return isReady || !regions(onPage: page).isEmpty
+        }
+
         enum CodingKeys: String, CodingKey {
             case status, fraction, pages
+            case availablePages = "available_pages"
         }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             status = try c.decodeIfPresent(String.self, forKey: .status) ?? "none"
             fraction = try c.decodeIfPresent(Double.self, forKey: .fraction)
+            availablePages = try c.decodeIfPresent(Set<Int>.self, forKey: .availablePages)
             pages = try c.decodeIfPresent([String: [PageRegion]].self, forKey: .pages) ?? [:]
         }
     }
