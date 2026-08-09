@@ -13,11 +13,11 @@ workflows:
     triggering:
       events:
         - push
+        - pull_request
       branch_patterns:
         - pattern: main
           include: true
-        - pattern: codex/audio-p0-reliability
-          include: true
+          source: false
       cancel_previous_builds: true
     scripts:
       - name: Versions
