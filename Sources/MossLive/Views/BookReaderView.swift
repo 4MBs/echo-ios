@@ -12,21 +12,22 @@ struct BookReaderView: View {
 
     private enum Phase {
         case downloading(Double)
-        case ready(URL)
+        case ready(PDFDocument)
         case failed(Error)
     }
 
     @State private var phase: Phase?
+    @State private var invalidDownloadRecoveryAttempted = false
 
     var body: some View {
         Group {
             switch phase {
             case .none, .downloading:
                 downloadProgress
-            case .ready(let url):
-                PDFReader(url: url, book: book)
+            case .ready(let document):
+                PDFReader(document: document, book: book)
             case .failed(let error):
-                ErrorState(error) { await open() }
+                ErrorState(error) { await retry() }
                     .groupedScreen()
             }
         }
@@ -51,22 +52,62 @@ struct BookReaderView: View {
         .groupedScreen()
     }
 
-    private func open() async {
-        if let cached = BackendAPI.cachedBook(id: book.id) {
-            phase = .ready(cached)
-            return
-        }
-        phase = .downloading(0)
+    private func open(ignoreCache: Bool = false) async {
+        let url: URL
         do {
-            let url = try await api.downloadBook(book) { fraction in
-                Task { @MainActor in
-                    if case .downloading = phase { phase = .downloading(fraction) }
+            if !ignoreCache, let cached = BackendAPI.cachedBook(id: book.id) {
+                phase = .downloading(0)
+                url = cached
+            } else {
+                phase = .downloading(0)
+                url = try await api.downloadBook(book) { fraction in
+                    Task { @MainActor in
+                        if case .downloading = phase { phase = .downloading(fraction) }
+                    }
                 }
             }
-            phase = .ready(url)
         } catch {
+            guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
             phase = .failed(error)
+            return
         }
+
+        let document = await Task.detached(priority: .userInitiated) {
+            LoadedDocument(document: PDFDocument(url: url))
+        }.value.document
+        guard !Task.isCancelled else { return }
+        guard let document, document.pageCount > 0 else {
+            await recoverInvalidDownload()
+            return
+        }
+        phase = .ready(document)
+    }
+
+    /// A file can exist on disk and still not be a PDF (an interrupted old
+    /// download, a zero-byte file, or a proxy error returned with HTTP 200).
+    /// Retry it once from the server; a second parse failure is surfaced
+    /// instead of leaving the reader on an endless spinner or retrying forever.
+    private func recoverInvalidDownload() async {
+        BackendAPI.removeCachedBook(id: book.id)
+        guard !invalidDownloadRecoveryAttempted else {
+            phase = .failed(BookOpenError.invalidPDF)
+            return
+        }
+        invalidDownloadRecoveryAttempted = true
+        await open(ignoreCache: true)
+    }
+
+    private func retry() async {
+        invalidDownloadRecoveryAttempted = false
+        await open()
+    }
+}
+
+private enum BookOpenError: LocalizedError {
+    case invalidPDF
+
+    var errorDescription: String? {
+        "Die geladene Datei ist kein lesbares PDF. Bitte versuche es erneut."
     }
 }
 
@@ -76,7 +117,7 @@ private struct PDFReader: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    let url: URL
+    let document: PDFDocument
     let book: BackendAPI.Book
 
     /// Printed page number minus PDF page number. Schoolbooks put a cover and
@@ -84,13 +125,12 @@ private struct PDFReader: View {
     /// the shift differs per book, which is why it is stored per book.
     @AppStorage private var pageOffset: Int
 
-    init(url: URL, book: BackendAPI.Book) {
-        self.url = url
+    init(document: PDFDocument, book: BackendAPI.Book) {
+        self.document = document
         self.book = book
         _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(book.id)")
     }
 
-    @State private var document: PDFDocument?
     @State private var twoUp = true
     @State private var currentPage = 1
     @State private var visiblePages: [Int] = [1]
@@ -110,24 +150,7 @@ private struct PDFReader: View {
     @FocusState private var numberingFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            reader
-            if showsSidePanel {
-                Divider().ignoresSafeArea(edges: .bottom)
-                bookAIPanel(close: { askingBookAI = false })
-                    .frame(width: 380)
-                    .transition(.move(edge: .trailing))
-            }
-        }
-        .animation(.smooth(duration: 0.25), value: showsSidePanel)
-        // Parsing a 300 MB schoolbook off the main thread keeps the push
-        // animation smooth, and reusing the document means flipping the layout
-        // does not re-read the file.
-        .task(id: url) {
-            document = await Task.detached(priority: .userInitiated) {
-                LoadedDocument(document: PDFDocument(url: url))
-            }.value.document
-        }
+        reader
         // Ask the server where the text sits on whatever is on screen, then
         // mark it. Both halves of a spread, and only once per page — the
         // answer is cached for as long as the book is open.
@@ -136,7 +159,6 @@ private struct PDFReader: View {
             proxy.onPageTap = { page, point in
                 Task { @MainActor in store.select(page: page, at: point) }
             }
-            guard let document else { return }
             store.dropSelectionOutside(visiblePages)
             // Anything already known about these pages shows at once; only the
             // fetch is deferred.
@@ -172,34 +194,30 @@ private struct PDFReader: View {
                 ToolbarItem(placement: .topBarTrailing) { readerMenu }
             }
         }
-        // No room for both on a phone, so there the panel is a sheet — left at
-        // half height, where the top of the page is still in view behind it.
-        .sheet(isPresented: sheetPresented) {
-            bookAIPanel(close: nil)
+        // This is one adaptive presentation, not a hand-switched HStack and
+        // sheet. SwiftUI keeps it as a trailing inspector on iPad and adapts it
+        // to a sheet in compact width without letting navigation behind that
+        // modal change underneath it.
+        .inspector(isPresented: $askingBookAI) {
+            bookAIPanel(close: { askingBookAI = false })
+                .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
     }
 
     private var reader: some View {
-        Group {
-            if let document {
-                PDFKitView(
-                    document: document,
-                    twoUp: twoUp,
-                    proxy: proxy,
-                    currentPage: $currentPage,
-                    visiblePages: $visiblePages,
-                    pageCount: $pageCount
-                )
-                // Switching layout needs a freshly built PDFView: PDFKit does not
-                // relayout an existing one when displayMode changes.
-                .id(twoUp)
-            } else {
-                ProgressView()
-            }
-        }
+        PDFKitView(
+            document: document,
+            twoUp: twoUp,
+            proxy: proxy,
+            currentPage: $currentPage,
+            visiblePages: $visiblePages,
+            pageCount: $pageCount
+        )
+        // Switching layout needs a freshly built PDFView: PDFKit does not
+        // relayout an existing one when displayMode changes.
+        .id(twoUp)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) { controlBar }
@@ -219,19 +237,7 @@ private struct PDFReader: View {
         // own treatment, and dressing it up again is what made this read as a
         // custom control sitting in an Apple navigation bar.
         .accessibilityLabel(askingBookAI ? "Buch-KI schließen" : "Buch-KI öffnen")
-    }
-
-    /// A regular width (iPad, and a phone in landscape) keeps the panel beside
-    /// the book so the page stays readable while the answer is read.
-    private var showsSidePanel: Bool {
-        askingBookAI && sizeClass == .regular
-    }
-
-    private var sheetPresented: Binding<Bool> {
-        Binding(
-            get: { askingBookAI && sizeClass != .regular },
-            set: { askingBookAI = $0 }
-        )
+        .disabled(visiblePages.isEmpty)
     }
 
     private func bookAIPanel(close: (() -> Void)?) -> some View {
@@ -253,11 +259,9 @@ private struct PDFReader: View {
         )
     }
 
-    /// Identity for the detection task: the pages on screen, plus whether the
-    /// document has finished parsing (the first spread is visible before it
-    /// has, and would otherwise never be read).
+    /// Identity for the detection task: the pages on screen.
     private var pagesKey: String {
-        "\(visiblePages)-\(document == nil)"
+        "\(visiblePages)"
     }
 
     private func markTasks() {
@@ -426,7 +430,7 @@ private struct PDFReader: View {
             } label: {
                 Image(systemName: "arrow.right")
             }
-            .disabled(pageCount > 0 && currentPage >= pageCount)
+            .disabled(!BookReaderPaging.canStepForward(visiblePages: visiblePages, pageCount: pageCount))
             .accessibilityLabel("Nächste Seite")
         }
         .buttonStyle(.glass)
@@ -722,6 +726,16 @@ private struct PDFKitView: UIViewRepresentable {
     func updateUIView(_ view: PDFView, context: Context) {
         proxy.pdfView = view
         context.coordinator.onPageChange = { updatePageState($0) }
+    }
+
+    static func dismantleUIView(_ view: PDFView, coordinator: Coordinator) {
+        coordinator.detach()
+        if coordinator.proxy?.pdfView === view {
+            coordinator.proxy?.pdfView = nil
+        }
+        // Break PDFKit's ownership of the document as soon as this concrete
+        // view is replaced (layout switch, navigation back, or book change).
+        view.document = nil
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }

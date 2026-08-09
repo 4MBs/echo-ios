@@ -61,6 +61,16 @@ final class BookPageNumberingTests: XCTestCase {
         XCTAssertEqual(plain.pdfPage(forPrinted: 7), 7)
         XCTAssertEqual(plain.citationLabel(pdfPage: 7), "Seite 7")
     }
+
+    func testTheLastVisiblePageControlsForwardNavigation() {
+        XCTAssertTrue(BookReaderPaging.canStepForward(visiblePages: [318, 319], pageCount: 320))
+        XCTAssertFalse(
+            BookReaderPaging.canStepForward(visiblePages: [319, 320], pageCount: 320),
+            "the left page of the final spread must not leave a dead next button enabled"
+        )
+        XCTAssertFalse(BookReaderPaging.canStepForward(visiblePages: [320], pageCount: 320))
+        XCTAssertTrue(BookReaderPaging.canStepForward(visiblePages: [1], pageCount: 0))
+    }
 }
 
 /// Decoding the server's answer: the panel only ever shows citations it can
@@ -91,5 +101,22 @@ final class BookAnswerDecodingTests: XCTestCase {
     func testEmptyOrRefusedAnswersThrow() {
         XCTAssertThrowsError(try answer(#"{"ok": true, "text": "   "}"#))
         XCTAssertThrowsError(try answer(#"{"ok": false, "error": "unknown book"}"#))
+    }
+}
+
+final class BookCacheValidationTests: XCTestCase {
+    func testAnEmptyOrNonFileCacheEntryIsRejected() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("book-cache-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let file = root.appendingPathComponent("book.pdf")
+        XCTAssertTrue(FileManager.default.createFile(atPath: file.path, contents: Data()))
+        XCTAssertFalse(BackendAPI.isUsableBookFile(file), "a zero-byte interrupted download is not a book")
+
+        try Data("%PDF-1.7".utf8).write(to: file)
+        XCTAssertTrue(BackendAPI.isUsableBookFile(file))
+        XCTAssertFalse(BackendAPI.isUsableBookFile(root), "a directory cannot masquerade as a cached PDF")
     }
 }

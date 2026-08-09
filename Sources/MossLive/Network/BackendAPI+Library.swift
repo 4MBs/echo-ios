@@ -40,18 +40,37 @@ extension BackendAPI {
     /// The already-downloaded copy of a book, if there is one.
     static func cachedBook(id: String) -> URL? {
         let url = booksDirectory().appendingPathComponent("\(id).pdf")
-        if FileManager.default.fileExists(atPath: url.path) { return url }
+        if isUsableBookFile(url) { return url }
+        // A zero-byte/interrupted file is not an offline copy. Leaving it in
+        // place makes every later open skip the download and spin forever.
+        try? FileManager.default.removeItem(at: url)
 
         // Preserve downloads made by earlier versions, which incorrectly used
         // iOS's purgeable Caches directory.
         let legacy = legacyCachedBook(id: id)
-        guard FileManager.default.fileExists(atPath: legacy.path) else { return nil }
+        guard isUsableBookFile(legacy) else {
+            try? FileManager.default.removeItem(at: legacy)
+            return nil
+        }
         do {
             try FileManager.default.moveItem(at: legacy, to: url)
             return url
         } catch {
-            return nil
+            // Another cover/link evaluation may have migrated it first.
+            return isUsableBookFile(url) ? url : nil
         }
+    }
+
+    static func removeCachedBook(id: String) {
+        try? FileManager.default.removeItem(at: booksDirectory().appendingPathComponent("\(id).pdf"))
+        try? FileManager.default.removeItem(at: legacyCachedBook(id: id))
+    }
+
+    static func isUsableBookFile(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else {
+            return false
+        }
+        return values.isRegularFile == true && (values.fileSize ?? 0) > 0
     }
 
     func bookCover(_ book: Book) async throws -> Data {
@@ -66,6 +85,9 @@ extension BackendAPI {
             let mapped = await Self.noteOffline(error)
             throw mapped
         }
+        // Custom URLSession paths must restore the same global reachability
+        // signal as BackendAPI.request after any real server response.
+        await Connectivity.shared.noteReachable()
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
             throw APIError(message: "Buchcover nicht verfügbar (HTTP \(status)).")
@@ -90,32 +112,65 @@ extension BackendAPI {
             let mapped = await Self.noteOffline(error)
             throw mapped
         }
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try Task.checkCancellation()
+        await Connectivity.shared.noteReachable()
         let dest = Self.booksDirectory().appendingPathComponent("\(book.id).pdf")
-        try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.moveItem(at: tmp, to: dest)
-        return dest
+        do {
+            try FileManager.default.moveItem(at: tmp, to: dest)
+            return dest
+        } catch {
+            // Two quick opens can finish the same download together. Keep the
+            // first complete copy rather than deleting it so the second can
+            // replace it; if no valid winner exists, preserve the real error.
+            if let existing = Self.cachedBook(id: book.id) {
+                return existing
+            }
+            throw error
+        }
     }
 }
 
 /// Streams one authenticated download to a temp file with byte-level progress
 /// (the async `URLSession.download(for:)` offers no progress callback).
 private final class BookDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let lock = NSLock()
     private var continuation: CheckedContinuation<URL, Error>?
     private var progress: (@Sendable (Double) -> Void)?
     private var expectedBytes: Int64 = 0
+    private var activeSession: URLSession?
+    private var activeTask: URLSessionDownloadTask?
+    private var cancelled = false
 
     func download(
         _ request: URLRequest,
         expectedBytes: Int64,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
-        self.progress = progress
-        self.expectedBytes = expectedBytes
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-        defer { session.finishTasksAndInvalidate() }
-        return try await withCheckedThrowingContinuation { cont in
-            continuation = cont
-            session.downloadTask(with: request).resume()
+        lock.withLock {
+            self.progress = progress
+            self.expectedBytes = expectedBytes
+        }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+                let task = session.downloadTask(with: request)
+                let shouldStart = lock.withLock {
+                    guard !cancelled else { return false }
+                    self.continuation = continuation
+                    activeSession = session
+                    activeTask = task
+                    return true
+                }
+                if shouldStart {
+                    task.resume()
+                } else {
+                    session.invalidateAndCancel()
+                    continuation.resume(throwing: CancellationError())
+                }
+            }
+        } onCancel: {
+            self.cancelDownload()
         }
     }
 
@@ -127,9 +182,10 @@ private final class BookDownloader: NSObject, URLSessionDownloadDelegate, @unche
         totalBytesExpectedToWrite: Int64
     ) {
         // the server sends Content-Length, but fall back to the listed size
-        let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : expectedBytes
+        let state = lock.withLock { (progress, expectedBytes) }
+        let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : state.1
         guard total > 0 else { return }
-        progress?(min(1, Double(totalBytesWritten) / Double(total)))
+        state.0?(min(1, Double(totalBytesWritten) / Double(total)))
     }
 
     func urlSession(
@@ -139,10 +195,9 @@ private final class BookDownloader: NSObject, URLSessionDownloadDelegate, @unche
     ) {
         // the file at `location` is deleted when this method returns, so any
         // failure to move it aside must fail the download right here
-        defer { continuation = nil }
         let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
-            continuation?.resume(throwing: BackendAPI.APIError(message: "Buch nicht verfügbar (HTTP \(status))."))
+            finish(.failure(BackendAPI.APIError(message: "Buch nicht verfügbar (HTTP \(status)).")))
             return
         }
         do {
@@ -150,16 +205,52 @@ private final class BookDownloader: NSObject, URLSessionDownloadDelegate, @unche
                 .appendingPathComponent(UUID().uuidString)
                 .appendingPathExtension("pdf")
             try FileManager.default.moveItem(at: location, to: tmp)
-            continuation?.resume(returning: tmp)
+            if !finish(.success(tmp)) {
+                try? FileManager.default.removeItem(at: tmp)
+            }
         } catch {
-            continuation?.resume(throwing: error)
+            finish(.failure(error))
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
-            continuation?.resume(throwing: error)
-            continuation = nil
+            finish(.failure(error))
         }
+    }
+
+    private func cancelDownload() {
+        let state = lock.withLock {
+            cancelled = true
+            return self.takeCompletion()
+        }
+        guard let state else { return }
+        state.task?.cancel()
+        state.session?.invalidateAndCancel()
+        state.continuation.resume(throwing: CancellationError())
+    }
+
+    @discardableResult
+    private func finish(_ result: Result<URL, Error>) -> Bool {
+        let state = lock.withLock { self.takeCompletion() }
+        guard let state else { return false }
+        state.session?.finishTasksAndInvalidate()
+        state.continuation.resume(with: result)
+        return true
+    }
+
+    /// Called only while `lock` is held.
+    private func takeCompletion() -> (
+        continuation: CheckedContinuation<URL, Error>,
+        session: URLSession?,
+        task: URLSessionDownloadTask?
+    )? {
+        guard let continuation else { return nil }
+        let state = (continuation, activeSession, activeTask)
+        self.continuation = nil
+        activeSession = nil
+        activeTask = nil
+        progress = nil
+        return state
     }
 }
