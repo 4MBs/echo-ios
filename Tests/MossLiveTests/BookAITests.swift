@@ -142,7 +142,7 @@ final class BookReaderPresentationTests: XCTestCase {
             fileName: "fixture.pdf",
             sizeBytes: Int64(try Data(contentsOf: cachedURL).count)
         )
-        let probe = ReaderPathProbe(path: [id])
+        let probe = ReaderPresentationProbe()
         let model = AppModel()
         let root = ReaderNavigationHarness(
             probe: probe,
@@ -156,6 +156,12 @@ final class BookReaderPresentationTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
 
+        // Present only after the stack is mounted. Preloading a value path
+        // before UIHostingController enters a window creates a transient route
+        // that does not model the destination-owned link used by LibraryView.
+        host.view.layoutIfNeeded()
+        probe.isPresented = true
+
         var pdfView: PDFView?
         for _ in 0 ..< 50 where pdfView == nil {
             host.view.layoutIfNeeded()
@@ -165,13 +171,13 @@ final class BookReaderPresentationTests: XCTestCase {
 
         let opened = try XCTUnwrap(pdfView, "the loading phase must become a PDFView")
         XCTAssertTrue(opened.isUsingPageViewController)
-        XCTAssertEqual(probe.path, [id], "loading the document must not pop the active book")
+        XCTAssertTrue(probe.isPresented, "loading the document must not dismiss the active book")
 
         // Give PDFKit's initial visible-page notifications time to run; the
         // regression used to occur as soon as those notifications arrived.
         try await Task.sleep(for: .milliseconds(300))
         host.view.layoutIfNeeded()
-        XCTAssertEqual(probe.path, [id])
+        XCTAssertTrue(probe.isPresented)
         XCTAssertNotNil(firstPDFView(in: host.view))
     }
 
@@ -220,24 +226,20 @@ final class BookReaderPresentationTests: XCTestCase {
 }
 
 @MainActor
-private final class ReaderPathProbe: ObservableObject {
-    @Published var path: [String]
-
-    init(path: [String]) {
-        self.path = path
-    }
+private final class ReaderPresentationProbe: ObservableObject {
+    @Published var isPresented = false
 }
 
 @MainActor
 private struct ReaderNavigationHarness: View {
-    @ObservedObject var probe: ReaderPathProbe
+    @ObservedObject var probe: ReaderPresentationProbe
     let api: BackendAPI
     let book: BackendAPI.Book
 
     var body: some View {
-        NavigationStack(path: $probe.path) {
+        NavigationStack {
             Color.clear
-                .navigationDestination(for: String.self) { _ in
+                .navigationDestination(isPresented: $probe.isPresented) {
                     BookReaderView(api: api, book: book)
                 }
         }
