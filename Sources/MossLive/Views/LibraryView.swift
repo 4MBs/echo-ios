@@ -5,26 +5,13 @@ struct LibraryView: View {
     @State private var books: [BackendAPI.Book] = []
     @State private var loading = true
     @State private var loadError: Error?
-    @State private var path: [String] = []
 
     private var api: BackendAPI { model.api }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             content
                 .navigationTitle("Bibliothek")
-                .navigationDestination(for: String.self) { bookID in
-                    if let book = books.first(where: { $0.id == bookID }) {
-                        BookReaderView(api: api, book: book)
-                    } else {
-                        ContentUnavailableView(
-                            "Buch nicht mehr verfügbar",
-                            systemImage: "book.closed",
-                            description: Text("Aktualisiere die Bibliothek und versuche es erneut.")
-                        )
-                        .groupedScreen()
-                    }
-                }
         }
         .task { await load() }
     }
@@ -63,7 +50,12 @@ struct LibraryView: View {
     @ViewBuilder private func shelfItem(_ book: BackendAPI.Book) -> some View {
         let downloaded = BackendAPI.cachedBook(id: book.id) != nil
         let needsConnection = !downloaded && !model.connectivity.isOnline
-        NavigationLink(value: book.id) {
+        NavigationLink {
+            // The destination owns the exact book that was tapped. A shelf
+            // refresh can replace `books` while a large PDF is opening, but it
+            // must not invalidate the active navigation route.
+            BookReaderView(api: api, book: book)
+        } label: {
             BookCover(api: api, book: book, unavailable: needsConnection)
         }
         .buttonStyle(.plain)
