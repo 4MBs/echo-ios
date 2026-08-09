@@ -20,11 +20,7 @@ struct BookReaderView: View {
     @State private var invalidDownloadRecoveryAttempted = false
 
     var body: some View {
-        // Keep the task attached to one concrete container. `Group` is
-        // transparent, so changing its child from the loading view to the PDF
-        // can detach and restart `.task`, putting an already opened book back
-        // into the loading phase in a loop.
-        ZStack {
+        Group {
             switch phase {
             case .none, .downloading:
                 downloadProgress
@@ -58,10 +54,6 @@ struct BookReaderView: View {
 
     @MainActor
     private func open(ignoreCache: Bool = false) async {
-        // A navigation/layout pass may make this view appear again. Do not
-        // replace a live PDF with the loading screen when it is already open.
-        if case .some(.ready(_)) = phase { return }
-
         let url: URL
         do {
             if !ignoreCache, let cached = BackendAPI.cachedBook(id: book.id) {
