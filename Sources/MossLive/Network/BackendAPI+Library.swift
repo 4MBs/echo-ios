@@ -67,10 +67,18 @@ extension BackendAPI {
     }
 
     static func isUsableBookFile(_ url: URL) -> Bool {
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else {
+        // URL.resourceValues caches metadata on the URL value. A path checked
+        // while an interrupted download is still empty can therefore keep
+        // reporting a zero-byte size after the file has been replaced.
+        guard
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+            let fileType = attributes[.type] as? FileAttributeType,
+            fileType == .typeRegular,
+            let size = attributes[.size] as? NSNumber
+        else {
             return false
         }
-        return values.isRegularFile == true && (values.fileSize ?? 0) > 0
+        return size.int64Value > 0
     }
 
     func bookCover(_ book: Book) async throws -> Data {
