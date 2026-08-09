@@ -389,7 +389,11 @@ private struct WrappingRow: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.replacingUnspecifiedDimensions().width
+        let naturalWidth = subviews.reduce(CGFloat.zero) { result, subview in
+            result + subview.sizeThatFits(.unspecified).width
+        } + spacing * CGFloat(max(subviews.count - 1, 0))
+        let proposedWidth = proposal.width ?? naturalWidth
+        let width = proposedWidth.isFinite && proposedWidth > 0 ? proposedWidth : naturalWidth
         let rows = arrange(subviews: subviews, width: width)
         let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0))
         return CGSize(width: width, height: height)

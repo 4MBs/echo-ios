@@ -16,11 +16,7 @@ final class PageRegionGeometryTests: XCTestCase {
 
     private func region(_ text: String, _ box: [Double], label: String = "ListItem")
         -> BackendAPI.PageRegion {
-        let json = """
-        {"label": "\(label)", "bbox": \(box), "text": "\(text)"}
-        """
-        // decoded rather than constructed, so the wire format is under test too
-        return try! JSONDecoder().decode(BackendAPI.PageRegion.self, from: Data(json.utf8))
+        BackendAPI.PageRegion(label: label, bbox: box, text: text)
     }
 
     /// The server sends fractions of the page counting down from the top;
@@ -42,6 +38,15 @@ final class PageRegionGeometryTests: XCTestCase {
 
     func testAMalformedBoxIsHarmless() {
         XCTAssertEqual(region("x", [0.1, 0.2]).rect(in: pageBounds), .zero)
+        XCTAssertEqual(region("x", [0.7, 0.2, 0.3, 0.4]).rect(in: pageBounds), .zero)
+        XCTAssertEqual(region("x", [0.1, 0.2, .infinity, 0.4]).rect(in: pageBounds), .zero)
+    }
+
+    func testABoxSlightlyOutsideThePageIsClamped() {
+        let rect = region("x", [-0.1, 0.2, 1.1, 0.4]).rect(in: pageBounds)
+        XCTAssertEqual(rect.minX, pageBounds.minX, accuracy: 0.01)
+        XCTAssertEqual(rect.maxX, pageBounds.maxX, accuracy: 0.01)
+        XCTAssertGreaterThan(rect.height, 0)
     }
 
     /// A tap is matched against these rectangles, so a point inside one block
@@ -75,6 +80,16 @@ final class PageRegionGeometryTests: XCTestCase {
         )
         XCTAssertTrue(scanning.isScanning)
         XCTAssertEqual(scanning.fraction ?? 0, 0.31, accuracy: 0.001)
+
+        let partial = try JSONDecoder().decode(
+            BackendAPI.PageRegions.self,
+            from: Data(
+                #"{"status":"partial","fraction":0.31,"available_pages":[35],"pages":{"35":[],"36":[]}}"#.utf8
+            )
+        )
+        XCTAssertTrue(partial.isPartial)
+        XCTAssertTrue(partial.isAvailable(page: 35), "a completed blank page is still cached")
+        XCTAssertFalse(partial.isAvailable(page: 36), "a pending page must be retried later")
 
         let ready = try JSONDecoder().decode(
             BackendAPI.PageRegions.self,

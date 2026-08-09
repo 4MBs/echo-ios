@@ -30,11 +30,17 @@ final class BookTaskStore {
     private var loading: Set<Int> = []
 
     var isScanning: Bool { scanStatus == "scanning" }
+    var isPartial: Bool { scanStatus == "partial" }
+    var isUnavailable: Bool { scanStatus == "unavailable" }
     /// True once we know the server has nothing for this book.
     var needsScan: Bool { scanStatus == "none" }
 
     func tasks(onPages pages: [Int]) -> [BookPageTask] {
         pages.flatMap { found[$0] ?? [] }
+    }
+
+    func hasPendingPages(_ pages: [Int]) -> Bool {
+        pages.contains { found[$0] == nil }
     }
 
     /// Fetch the regions of the pages now on screen, once each.
@@ -48,14 +54,17 @@ final class BookTaskStore {
             scanStatus = response.status
             scanFraction = response.fraction
             for page in wanted {
+                guard response.isAvailable(page: page) else { continue }
                 let bounds = pageBounds[page] ?? .zero
-                found[page] = response.regions(onPage: page).enumerated().map { index, region in
-                    BookPageTask(
+                found[page] = response.regions(onPage: page).enumerated().compactMap { index, region in
+                    let rect = region.rect(in: bounds)
+                    guard rect.isUsableTaskBounds else { return nil }
+                    return BookPageTask(
                         pdfPage: page,
                         index: index,
                         label: region.label,
                         text: region.text,
-                        bounds: region.rect(in: bounds)
+                        bounds: rect
                     )
                 }
             }
@@ -83,6 +92,7 @@ final class BookTaskStore {
         if let index = selected.firstIndex(of: task) {
             selected.remove(at: index)
         } else {
+            guard selected.count < Self.maxSelectionCount else { return }
             selected.append(task)
         }
     }
@@ -105,8 +115,17 @@ final class BookTaskStore {
         scanStatus = "unknown"
         scanFraction = nil
     }
+
+    /// Keeps both the token row and the generated question bounded even if a
+    /// scanned page contains hundreds of tiny OCR regions.
+    private static let maxSelectionCount = 10
 }
 
 private extension CGRect {
     var area: CGFloat { width * height }
+
+    var isUsableTaskBounds: Bool {
+        minX.isFinite && minY.isFinite && width.isFinite && height.isFinite
+            && width >= 1 && height >= 1
+    }
 }

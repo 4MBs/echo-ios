@@ -144,13 +144,19 @@ private struct PDFReader: View {
             // Flicking through a chapter must not fire a request per page it
             // passes: the next turn cancels this task before the sleep is over.
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            await store.load(
-                pages: visiblePages,
-                bookID: book.id,
-                pageBounds: pageBounds(of: document, pages: visiblePages),
-                api: api
-            )
-            markTasks()
+            repeat {
+                await store.load(
+                    pages: visiblePages,
+                    bookID: book.id,
+                    pageBounds: pageBounds(of: document, pages: visiblePages),
+                    api: api
+                )
+                markTasks()
+                // If these pages are still being scanned, let their markers
+                // appear without requiring the student to turn away and back.
+                guard store.isScanning, store.hasPendingPages(visiblePages) else { return }
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            } while !Task.isCancelled
         }
         .onChange(of: tasks.selected) { was, now in
             markTasks()
@@ -282,6 +288,14 @@ private struct PDFReader: View {
         if tasks.needsScan {
             return "Dieses Buch wurde auf dem Server noch nicht eingelesen — tippbare Aufgaben "
                 + "gibt es erst danach. Frag solange hier."
+        }
+        if tasks.isPartial {
+            return "Das Buch ist nur teilweise eingelesen. Bereits fertige Seiten kannst du antippen; "
+                + "auf den übrigen Seiten kannst du weiterhin eine Frage schreiben."
+        }
+        if tasks.isUnavailable {
+            return "Die Markierungen sind gerade nicht erreichbar. Du kannst trotzdem eine Frage zu dieser Seite "
+                + "schreiben."
         }
         return "Tippe im Buch direkt auf eine Aufgabe. Mehrere nacheinander antippen geht auch — "
             + "nochmal tippen hebt sie wieder auf."
@@ -522,40 +536,54 @@ private final class PDFViewProxy {
     /// A tap that landed on a page: (PDF page number, point in that page's own
     /// coordinates). The reader turns it into a task.
     var onPageTap: ((Int, CGPoint) -> Void)?
-
-    /// The tint boxes drawn over the exercises on screen, so they can be taken
-    /// off again. They are annotations rather than a SwiftUI overlay because
-    /// PDFKit then does the zooming, scrolling and page-turning for us — a
-    /// box drawn on top would have to be re-projected on every gesture.
-    private var overlays: [PDFAnnotation] = []
+    private var overlays: [String: PDFAnnotation] = [:]
 
     /// Mark the text blocks on the visible pages. Unpicked ones are faint
     /// enough to read straight through and just visible enough to look
     /// tappable; picked ones are filled and outlined in the tint, so several
     /// held at once read as a set rather than as one highlight among many.
     func showTasks(_ tasks: [BookPageTask], selected: [BookPageTask]) {
-        clearTasks()
         guard let document = pdfView?.document else { return }
+        let wanted = Set(tasks.map(\.id))
+        for id in Array(overlays.keys) where !wanted.contains(id) {
+            removeOverlay(id: id)
+        }
+
         let picked = Set(selected)
         for task in tasks {
-            guard let page = document.page(at: task.pdfPage - 1) else { continue }
-            let annotation = PDFAnnotation(bounds: task.bounds, forType: .square, withProperties: nil)
-            let isPicked = picked.contains(task)
-            annotation.color = isPicked ? UIColor.tintColor.withAlphaComponent(0.9) : .clear
-            annotation.interiorColor = UIColor.tintColor.withAlphaComponent(isPicked ? 0.24 : 0.07)
-            annotation.border = PDFBorder()
-            annotation.border?.lineWidth = isPicked ? 2 : 0
-            annotation.isReadOnly = true
-            page.addAnnotation(annotation)
-            overlays.append(annotation)
+            guard task.pdfPage >= 1, task.pdfPage <= document.pageCount,
+                  task.bounds.hasFinitePositiveArea,
+                  let page = document.page(at: task.pdfPage - 1) else { continue }
+            let annotation: PDFAnnotation
+            if let existing = overlays[task.id] {
+                annotation = existing
+                annotation.bounds = task.bounds
+            } else {
+                annotation = PDFAnnotation(bounds: task.bounds, forType: .square, withProperties: nil)
+                annotation.border = PDFBorder()
+                annotation.isReadOnly = true
+                page.addAnnotation(annotation)
+                overlays[task.id] = annotation
+            }
+            style(annotation, selected: picked.contains(task))
         }
     }
 
     func clearTasks() {
-        for annotation in overlays {
-            annotation.page?.removeAnnotation(annotation)
+        for id in Array(overlays.keys) {
+            removeOverlay(id: id)
         }
-        overlays.removeAll()
+    }
+
+    private func style(_ annotation: PDFAnnotation, selected: Bool) {
+        annotation.color = selected ? UIColor.tintColor.withAlphaComponent(0.9) : .clear
+        annotation.interiorColor = UIColor.tintColor.withAlphaComponent(selected ? 0.24 : 0.07)
+        annotation.border?.lineWidth = selected ? 2 : 0
+    }
+
+    private func removeOverlay(id: String) {
+        guard let annotation = overlays.removeValue(forKey: id) else { return }
+        annotation.page?.removeAnnotation(annotation)
     }
 
     /// One page forward or back. `goToNextPage(_:)` is unreliable outside the
@@ -563,12 +591,14 @@ private final class PDFViewProxy {
     /// two-page spread that means stepping past the whole spread.
     func step(_ delta: Int) {
         guard let pdfView, let document = pdfView.document else { return }
-        let indices = pdfView.visiblePages.map { document.index(for: $0) }
+        let indices = pdfView.visiblePages.compactMap { document.validIndex(for: $0) }
         guard let first = indices.min(), let last = indices.max() else { return }
-        go(toIndex: delta > 0 ? last + 1 : first - 1)
+        let target = delta > 0 ? min(last + 1, document.pageCount - 1) : max(first - 1, 0)
+        go(toIndex: target)
     }
 
     func go(toPage number: Int) {
+        guard number >= 1 else { return }
         go(toIndex: number - 1)
     }
 
@@ -690,6 +720,7 @@ private struct PDFKitView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: PDFView, context: Context) {
+        proxy.pdfView = view
         context.coordinator.onPageChange = { updatePageState($0) }
     }
 
@@ -700,7 +731,9 @@ private struct PDFKitView: UIViewRepresentable {
         // A page of a different size needs its own floor, so re-fit on arrival.
         (view as? BookPDFView)?.applyScaleLimits()
         pageCount = document.pageCount
-        let visible = view.visiblePages.map { document.index(for: $0) + 1 }.sorted()
+        let visible = view.visiblePages.compactMap { page in
+            document.validIndex(for: page).map { $0 + 1 }
+        }.sorted()
         if let first = visible.first {
             currentPage = first
             visiblePages = visible
@@ -740,13 +773,22 @@ private struct PDFKitView: UIViewRepresentable {
             view.addGestureRecognizer(tap)
         }
 
+        func detach() {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observers.removeAll()
+            onPageChange = nil
+        }
+
         /// A tap on the page, reported in that page's own coordinates so the
         /// reader can look it up against the exercise boxes it knows about.
         @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
             guard let view = recognizer.view as? PDFView, let document = view.document else { return }
             let point = recognizer.location(in: view)
-            guard let page = view.page(for: point, nearest: false) else { return }
-            proxy?.onPageTap?(document.index(for: page) + 1, view.convert(point, to: page))
+            guard let page = view.page(for: point, nearest: false),
+                  let index = document.validIndex(for: page) else { return }
+            proxy?.onPageTap?(index + 1, view.convert(point, to: page))
         }
 
         @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
@@ -797,9 +839,22 @@ private struct PDFKitView: UIViewRepresentable {
         private static let edgeStrip: CGFloat = 40
 
         deinit {
-            for observer in observers {
-                NotificationCenter.default.removeObserver(observer)
-            }
+            detach()
         }
+    }
+}
+
+private extension PDFDocument {
+    func validIndex(for page: PDFPage) -> Int? {
+        let index = index(for: page)
+        guard index != NSNotFound, index >= 0, index < pageCount else { return nil }
+        return index
+    }
+}
+
+private extension CGRect {
+    var hasFinitePositiveArea: Bool {
+        minX.isFinite && minY.isFinite && width.isFinite && height.isFinite
+            && width > 0 && height > 0
     }
 }
