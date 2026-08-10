@@ -29,10 +29,6 @@ final class BookAIStore {
     /// The question of a failed attempt, so "Erneut versuchen" has something
     /// to retry.
     private(set) var lastFailed: (question: String, pages: [Int])?
-    /// Invalidates a response when the student clears the panel while its
-    /// request is still running. Without this, "Antwort leeren" can appear to
-    /// work and then the cleared answer comes back when the request finishes.
-    private var requestRevision = 0
 
     var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
@@ -41,19 +37,14 @@ final class BookAIStore {
     func ask(_ question: String, pages: [Int], bookID: String, api: BackendAPI) async {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !sending, !pages.isEmpty else { return }
-        requestRevision += 1
-        let revision = requestRevision
         errorMessage = nil
         lastFailed = nil
         exchange = nil
         draft = ""
         sending = true
-        defer {
-            if requestRevision == revision { sending = false }
-        }
+        defer { sending = false }
         do {
             let answer = try await api.askBook(id: bookID, question: trimmed, pages: pages)
-            guard requestRevision == revision else { return }
             exchange = Exchange(
                 question: trimmed,
                 pages: pages,
@@ -62,18 +53,12 @@ final class BookAIStore {
                 pagesRead: answer.pagesRead
             )
         } catch {
-            guard requestRevision == revision,
-                  !Task.isCancelled,
-                  (error as? URLError)?.code != .cancelled
-            else { return }
             errorMessage = error.localizedDescription
             lastFailed = (trimmed, pages)
         }
     }
 
     func clear() {
-        requestRevision += 1
-        sending = false
         exchange = nil
         errorMessage = nil
         lastFailed = nil

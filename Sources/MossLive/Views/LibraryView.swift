@@ -12,6 +12,9 @@ struct LibraryView: View {
         NavigationStack {
             content
                 .navigationTitle("Bibliothek")
+                .navigationDestination(for: BackendAPI.Book.self) { book in
+                    BookReaderView(api: api, book: book)
+                }
         }
         .task { await load() }
     }
@@ -43,24 +46,18 @@ struct LibraryView: View {
         }
     }
 
-    /// Every cover remains a navigation target. If a new book cannot be
-    /// downloaded, its reader shows a retryable error; disabling the link from
-    /// a shared connectivity flag can otherwise strand the entire shelf after
-    /// one unrelated request times out.
+    /// A downloaded book opens with or without a server; one that has never
+    /// been fetched cannot, so offline it is shown as what it is rather than
+    /// left to fail on tap.
     @ViewBuilder private func shelfItem(_ book: BackendAPI.Book) -> some View {
         let downloaded = BackendAPI.cachedBook(id: book.id) != nil
-        let needsConnection = !downloaded && !model.connectivity.isOnline
-        NavigationLink {
-            // The destination owns the exact book that was tapped. A shelf
-            // refresh can replace `books` while a large PDF is opening, but it
-            // must not invalidate the active navigation route.
-            BookReaderView(api: api, book: book)
-        } label: {
-            BookCover(api: api, book: book, unavailable: needsConnection)
+        let openable = downloaded || model.connectivity.isOnline
+        NavigationLink(value: book) {
+            BookCover(api: api, book: book, unavailable: !openable)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(needsConnection ? "\(book.title), Download benötigt" : book.title)
-        .accessibilityHint(needsConnection ? "Öffnet den Download mit einer Möglichkeit zum erneuten Versuch" : "")
+        .disabled(!openable)
+        .accessibilityLabel(openable ? book.title : "\(book.title), nicht geladen")
     }
 
     private func load() async {
