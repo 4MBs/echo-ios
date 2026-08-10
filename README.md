@@ -48,6 +48,18 @@ unless you press something that asks an AI a question.
 The transcript fills the page as it arrives. Everything else — the sidebar, the
 record control, the answer note — sits at the edges.
 
+After class, a lesson's transcript menu can explicitly start a higher-quality
+second pass from the local 48-kHz safety recording. The upload resumes after a
+connection failure and never starts automatically. The live transcript stays
+visible until the backend has completed the replacement; if it was manually
+edited in the meantime, the new result is saved only as another restorable
+version.
+
+The same menu opens the timestamp-preserving transcript editor and a per-subject
+vocabulary. Vocabulary can be maintained by hand or, on request, populated from
+corrections, timetable names, earlier lessons and matching books in the Echo
+library.
+
 ### It knows your timetable
 
 Connect WebUntis and recordings name themselves: subject, teacher, room. Record
@@ -81,15 +93,73 @@ before the lesson started is visible rather than something you drag to find, and
 tapping any line of the transcript plays from that moment while the page follows
 along.
 
+Each archived lesson can also import notes authored elsewhere: native
+Goodnotes documents, Notability `.note` files with an embedded PDF, PDFs,
+JPEGs and PNGs. PDF export is the dependable interchange route for Notability.
+Echo decodes searchable text, exact typed objects and Goodnotes' own
+handwriting index locally on the iPad. For scans and missing handwriting data,
+Apple Vision's accurate on-device text model is used as a conservative
+fallback. Visual page coordinates determine reading order. When Goodnotes
+includes a page-content timestamp inside the lesson, the imported page links
+to that point in the recording. It is labelled as the page's last edit, not
+presented as an exact timestamp for every Pencil stroke. Reimporting the same
+Goodnotes page updates it through the document's stable internal IDs.
+
+The original Goodnotes/Notability/PDF/image file and all rendered page images
+remain on the iPad. Echo sends only the locally extracted text, stable page ID,
+optional page timestamp and warnings to the user's own backend; new imports do
+not create server-side note attachments.
+
+Echo has no note editor or drawing canvas. Goodnotes and Notability remain the
+place where notes are written; Echo only imports, reads and links them.
+
+Echo also installs an iOS Share Extension. A page or document shared from
+Goodnotes, Notability or Files is placed in Echo's App Group inbox. Open the
+destination lesson, choose **Unterrichtsnotizen**, then tap the queued document
+under **Aus dem Teilen-Menü**. The extension never guesses which lesson a file
+belongs to and does not upload anything before that explicit choice.
+
 ### Lernen
 
 Each lesson becomes a quiz deck, scheduled on a Leitner ladder. A card you get
 wrong returns tomorrow; a card you get right returns after 1, 3, 7, 14 and 30
 days. Only exam-relevant material becomes cards.
 
-The tab opens as a dashboard: a greeting, the one tap that starts what is due
-today, and under it a card per subject in the subject's own colour. The name it
-greets is set in Einstellungen → Lernen.
+The tab is one screen and one button. It opens on today: the date, the number
+of cards due, roughly how long that takes, a bar showing which subjects the
+round is made of, and **Lernen starten**. Under it the same subjects as rows —
+each with its own colour and glyph, the ones the Stunden folders use — then the
+exams that are coming with the days left beside them, and at most three topics
+that are still wobbling. The daily budget sits next to the plan's heading, not
+in front of the work; it is one setting, shared with Einstellungen → Lernen.
+
+A round is a full-screen mode with one way out. Its header carries the subject
+and the lesson the current card came from; the question is the largest thing on
+the screen and stands on the background rather than in a box. One question at a
+time, two interactions for a multiple-choice card and three for a written one,
+pass/fail self-assessment with the finer grades one level down. After each
+answer the card says what it did — *kommt morgen wieder* or *kommt später
+wieder*. Progress survives locking the iPad, switching apps and being killed for
+memory: the round is written to disk after every answer and picked up again
+within half an hour.
+
+Every card knows which minute of which lesson it was written from, so an answer
+offers two ways back into the lesson: **Im Unterricht hören** plays the passage
+itself, with three seconds of run-up, stopping where the question stopped, and
+**Nachfragen** asks the AI about this card with that lesson's transcript already
+as its context. The follow-up is thrown away with the round; the Chat tab keeps
+its own conversation.
+
+The result is a count, one bar of right against open, what follows from it, and
+the cards that were missed — each opening to its answer and explanation without
+asking for another attempt.
+
+Cards, plan and exams are stored on the iPad. The Lernen screen renders from
+that store before any request is made, a round can be played through with no
+network at all, and answers wait in a queue until the server is back. Browsing
+lives in Stunden, where the lessons already are: a subject board says how many
+of its cards are waiting and starts them, a lesson row shows what is due in it,
+and a lesson page can have its cards written.
 
 ### Chat and the answer note
 
@@ -120,6 +190,17 @@ into a stamp in the middle of the screen.
 Schoolbooks rarely print page 1 on the first PDF page, so every book learns its
 own numbering once: turn to any page whose number you can read, type that number,
 and the rest of the book follows. It is remembered per book.
+
+**Buch-KI** sits in the reader's toolbar, only ever inside an open book. On an
+iPad it opens as a panel beside the page, so the answer is read against what it
+is about; on a phone it is a sheet. The question goes to the server with nothing
+but the PDF page numbers currently on screen — the server already has the book,
+so no page, picture or text is ever uploaded. It reads that page there, looks at
+the rendered image when the page is a diagram or a scan, and may follow the
+book's own references into neighbouring pages; it never leaves the book. The
+answer arrives with the pages it rests on attached, named with the book's printed
+numbers, and tapping one turns the reader to it. Reading a downloaded book stays
+offline; asking about it needs the server.
 
 <p align="center">
   <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">

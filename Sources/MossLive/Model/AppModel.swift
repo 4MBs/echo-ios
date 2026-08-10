@@ -39,9 +39,28 @@ final class AppModel {
     /// Rolling window of real microphone levels (0...1) for the live
     /// waveform; newest last.
     private(set) var micLevels: [Float] = []
+    private(set) var audioDiagnostics = AudioDiagnosticsSnapshot()
+    private(set) var audioEvents: [AudioDiagnosticEvent] = []
+    private(set) var localRecordings: [LocalRecordingSummary] = []
+    private(set) var serverTranscriptLagSeconds: Double?
     private(set) var sessionId: String?
     private(set) var recordingStartedAt: Date?
     var bannerMessage: String?
+
+    /// Which place of the app the sidebar is on. Held here rather than in the
+    /// shell so a screen can send the student somewhere that answers its empty
+    /// state ("Zur Aufnahme") instead of describing it.
+    var selectedTab: AppTab? = .aufnahme
+
+    // MARK: - Studying
+
+    /// The round on screen. Presented as a full-screen modal by the shell, so
+    /// studying is a mode with one way out rather than a page inside a tab.
+    private(set) var studySession: StudySession?
+    /// A round that was interrupted hard enough to lose its modal — killed for
+    /// memory, mostly. Heute offers to pick it up rather than reopening it
+    /// over whatever the student meant to do.
+    private(set) var resumableSession: StudySession?
 
     let settings = AppSettings()
     let timetable: TimetableStore
@@ -96,6 +115,16 @@ final class AppModel {
                 }
             }
         }
+        audio.onDiagnostics = { [weak self] snapshot in
+            Task { @MainActor in
+                self?.audioDiagnostics = snapshot
+            }
+        }
+        audio.onEvent = { [weak self] event in
+            Task { @MainActor in
+                self?.appendAudioEvent(event)
+            }
+        }
         eventPump = Task { [weak self] in
             guard let events = await self?.client.events() else { return }
             for await event in events {
@@ -117,6 +146,58 @@ final class AppModel {
             }
         }
         Task { [weak self] in await self?.syncTimetableNotifications() }
+        Task { [weak self] in await self?.recoverInterruptedRecordings() }
+        resumableSession = StudySession.restore()
+    }
+
+    // MARK: - Studying
+
+    func startStudy(_ session: StudySession) {
+        resumableSession = nil
+        studySession = session
+    }
+
+    /// Pick up the interrupted round exactly where it stopped.
+    func resumeStudy() {
+        guard let resumableSession else { return }
+        studySession = resumableSession
+        self.resumableSession = nil
+    }
+
+    /// Leave the round. Answers are already reported or queued, so there is
+    /// nothing here to save — only the resume point to throw away.
+    func endStudy() {
+        studySession?.discard()
+        studySession = nil
+        resumableSession = nil
+    }
+
+    /// Hand one answer to the schedule, or to the queue when there is no server.
+    ///
+    /// Practice never reports: the whole point of it is that going over Tuesday
+    /// again does not push Tuesday's cards up the ladder.
+    func record(
+        answer card: BackendAPI.LearnCard,
+        correct: Bool,
+        rating: Int,
+        responseMs: Int,
+        confidence: Int?,
+        in session: StudySession
+    ) {
+        guard session.mode.reportsResults else { return }
+        let client = api
+        let mode = session.mode.apiName
+        Task {
+            await self.reviews.record(
+                cardId: card.id,
+                correct: correct,
+                rating: rating,
+                responseMs: responseMs,
+                confidence: confidence,
+                mode: mode,
+                api: client
+            )
+        }
     }
 
     // MARK: - Timetable (tiers 2 + 4)
@@ -182,8 +263,10 @@ final class AppModel {
             return
         }
         do {
+            try await client.beginRecording()
             try audio.start(bitrate: settings.bitrate)
         } catch {
+            await client.cancelPreparedRecording()
             phase = .error(error.localizedDescription)
             return
         }
@@ -191,6 +274,9 @@ final class AppModel {
         segments = []
         partial = []
         micLevels = []
+        audioEvents = []
+        audioDiagnostics = AudioDiagnosticsSnapshot()
+        serverTranscriptLagSeconds = nil
         scheduleAutoStopIfNeeded()
         await client.connect(to: .init(url: url, token: settings.authToken))
     }
@@ -199,9 +285,25 @@ final class AppModel {
         wantsRecording = false
         recordingStartedAt = nil
         lastRoundTripMs = nil
+        serverTranscriptLagSeconds = nil
         bufferedSeconds = 0
-        audio.stop()
-        Task { await client.disconnect(sendStop: true) }
+        let manifestURL = audio.stop()
+        Task { [weak self] in
+            let pending = await client.disconnect(sendStop: true)
+            if let manifestURL {
+                if pending > 0 {
+                    LocalRecordingStorage.append(
+                        AudioDiagnosticEvent(
+                            kind: .transport,
+                            message: "\(pending) Netzwerkpakete waren beim Beenden noch nicht übertragen"
+                        ),
+                        to: manifestURL
+                    )
+                }
+                _ = await LocalRecordingRecovery.finalize(manifestURL: manifestURL, recovered: false)
+                await self?.refreshLocalRecordings()
+            }
+        }
         phase = .disconnected
         isTranscribing = false
     }
@@ -214,6 +316,7 @@ final class AppModel {
             applyConnectionState(state)
         case .helloAck(let ack):
             sessionId = ack.sessionId
+            audio.attachServerSession(ack.sessionId)
             if !ack.resumed {
                 audio.resetSequence()
                 segments = []
@@ -225,6 +328,10 @@ final class AppModel {
                 segments.removeFirst(segments.count - 500)
             }
             partial = update.partial
+            if let recordingStartedAt {
+                let elapsed = Date().timeIntervalSince(recordingStartedAt)
+                serverTranscriptLagSeconds = max(0, elapsed - update.committedUntil)
+            }
             pulseTranscribing()
         case .answerPending, .answerDelta, .answer:
             // In-app answers are gone; the widget's HTTP answers get mirrored
@@ -235,11 +342,16 @@ final class AppModel {
             if err.code == "session_limit" {
                 bannerMessage = "Maximale Sitzungslänge erreicht. Die Aufnahme wurde gestoppt."
                 stopRecording()
+            } else if err.code == "server_busy" {
+                bannerMessage =
+                    "Die manuelle 48-kHz-Neutranskription läuft noch. Audio wird lokal gepuffert."
             }
         case .roundTrip(let ms):
             lastRoundTripMs = ms
         case .buffered(let seconds):
             bufferedSeconds = seconds
+        case .audioEvent(let event):
+            audio.recordExternalEvent(event)
         }
     }
 
@@ -259,7 +371,23 @@ final class AppModel {
         case .failed(let reason):
             phase = .error(reason)
             wantsRecording = false
-            audio.stop()
+            let manifestURL = audio.stop()
+            Task { [weak self] in
+                let pending = await client.disconnect(sendStop: false)
+                if let manifestURL {
+                    if pending > 0 {
+                        LocalRecordingStorage.append(
+                            AudioDiagnosticEvent(
+                                kind: .transport,
+                                message: "\(pending) Netzwerkpakete nach Verbindungsfehler nicht übertragen"
+                            ),
+                            to: manifestURL
+                        )
+                    }
+                    _ = await LocalRecordingRecovery.finalize(manifestURL: manifestURL, recovered: false)
+                    await self?.refreshLocalRecordings()
+                }
+            }
         }
     }
 
@@ -271,6 +399,37 @@ final class AppModel {
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled else { return }
             self?.isTranscribing = false
+        }
+    }
+
+    func refreshLocalRecordings() async {
+        guard let root = try? LocalRecordingStorage.defaultRoot() else { return }
+        localRecordings = LocalRecordingStorage.summaries(root: root)
+    }
+
+    private func recoverInterruptedRecordings() async {
+        guard let root = try? LocalRecordingStorage.defaultRoot() else { return }
+        let recovered = await LocalRecordingRecovery.recoverPending(root: root)
+        localRecordings = LocalRecordingStorage.summaries(root: root)
+        if !recovered.isEmpty {
+            bannerMessage = recovered.count == 1
+                ? "Eine unterbrochene Sicherheitsaufnahme wurde wiederhergestellt."
+                : "\(recovered.count) unterbrochene Sicherheitsaufnahmen wurden wiederhergestellt."
+            for item in recovered {
+                appendAudioEvent(
+                    AudioDiagnosticEvent(
+                        kind: .recovered,
+                        message: "Sicherheitsaufnahme vom \(item.startedAt.formatted()) wiederhergestellt"
+                    )
+                )
+            }
+        }
+    }
+
+    private func appendAudioEvent(_ event: AudioDiagnosticEvent) {
+        audioEvents.insert(event, at: 0)
+        if audioEvents.count > 100 {
+            audioEvents.removeLast(audioEvents.count - 100)
         }
     }
 }

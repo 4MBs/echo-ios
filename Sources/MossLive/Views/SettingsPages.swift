@@ -78,6 +78,11 @@ struct RecordingSettingsView: View {
                     Text("32 kbit/s").tag(32000)
                 }
                 .pickerStyle(.navigationLink)
+                NavigationLink {
+                    RecordingDiagnosticsView()
+                } label: {
+                    Label("Aufnahmediagnose", systemImage: "waveform.badge.magnifyingglass")
+                }
             } header: {
                 Text("Audio")
             } footer: {
@@ -136,20 +141,14 @@ struct LearnSettingsView: View {
         @Bindable var settings = model.settings
         Form {
             Section {
-                LabeledContent("Name") {
-                    TextField(
-                        "Name",
-                        text: $settings.displayName,
-                        prompt: Text(AppSettings.defaultDisplayName)
-                    )
-                    .multilineTextAlignment(.trailing)
-                    .textContentType(.givenName)
-                    .submitLabel(.done)
+                Picker("Zeit am Tag", selection: $settings.dailyLearnMinutes) {
+                    ForEach(AppSettings.learnMinuteOptions, id: \.self) { minutes in
+                        Text("\(minutes) Minuten").tag(minutes)
+                    }
                 }
-            } header: {
-                Text("Begrüßung")
+                .pickerStyle(.navigationLink)
             } footer: {
-                Text("Steht oben im Lernen-Tab: „Hallo, \(model.settings.greetingName)“.")
+                Text("Darauf schneidet Echo deine Lernrunde zu. Änderbar auch direkt im Plan.")
             }
 
             Section {
@@ -158,7 +157,7 @@ struct LearnSettingsView: View {
                     DatePicker("Uhrzeit", selection: timeBinding, displayedComponents: .hourAndMinute)
                 }
             } footer: {
-                Text("Einmal am Tag, wenn Karten fällig sind.")
+                Text("Einmal am Tag ein Hinweis auf deine Lernrunde.")
             }
         }
         .navigationTitle("Lernen")

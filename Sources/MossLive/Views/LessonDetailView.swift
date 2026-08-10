@@ -39,6 +39,12 @@ struct LessonDetailView: View {
     @State private var summarizing = false
     @State private var errorMessage: String?
     @State private var player = LessonAudioPlayer()
+    @State private var safetyRecording: LocalRecordingSummary?
+    @State private var retranscriptionStatus: BackendAPI.RetranscriptionStatus?
+    @State private var retranscribing = false
+    @State private var showingRetranscriptionConfirmation = false
+    @State private var showingTranscriptEditor = false
+    @State private var showingImportedNotes = false
 
     /// Where two columns start being wider than a readable measure each. An
     /// iPad in landscape is well past it; in portrait it is not.
@@ -64,7 +70,35 @@ struct LessonDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let detail {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showingImportedNotes = true
+                    } label: {
+                        Label("Unterrichtsnotizen importieren", systemImage: "doc.badge.arrow.down")
+                    }
+                    Menu {
+                        Button {
+                            showingTranscriptEditor = true
+                        } label: {
+                            Label("Transkript bearbeiten", systemImage: "pencil")
+                        }
+                        NavigationLink {
+                            SubjectVocabularyView(
+                                api: api,
+                                subject: detail.subject ?? info.subject ?? "Sonstige"
+                            )
+                        } label: {
+                            Label("Fachwörterbuch", systemImage: "character.book.closed")
+                        }
+                        Button {
+                            requestManualRetranscription()
+                        } label: {
+                            Label("Aus 48-kHz-Datei neu transkribieren", systemImage: "waveform.badge.plus")
+                        }
+                        .disabled(retranscribing)
+                    } label: {
+                        Label("Transkriptoptionen", systemImage: "ellipsis.circle")
+                    }
                     // A Label, not a bare Image. The toolbar decides how a
                     // labelled item is drawn and optically centres the glyph
                     // inside it — `square.and.arrow.up` has an arrow poking out
@@ -76,6 +110,33 @@ struct LessonDetailView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showingTranscriptEditor) {
+            if let detail {
+                TranscriptEditorView(api: api, lesson: detail) { updated in
+                    applyAndCache(updated)
+                }
+            }
+        }
+        .sheet(isPresented: $showingImportedNotes, onDismiss: {
+            Task { await load() }
+        }) {
+            ImportedLessonNotesView(api: api, lesson: info, player: player)
+        }
+        .confirmationDialog(
+            "48-kHz-Aufnahme neu transkribieren?",
+            isPresented: $showingRetranscriptionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Upload und Neutranskription starten") {
+                Task { await runManualRetranscription() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text(
+                "Die lokale Sicherheitsaufnahme wird resumierbar an deinen Server übertragen. "
+                    + "Der Vorgang startet nur dieses eine Mal auf deine ausdrückliche Anforderung."
+            )
         }
         .onDisappear { player.stop() }
         .task { await load() }
@@ -105,6 +166,7 @@ struct LessonDetailView: View {
             VStack(spacing: 16) {
                 if info.hasAudio { playerCard }
                 summaryCard(ownsScrolling: true)
+                LessonCardsSection(api: api, lesson: info)
             }
             .frame(maxWidth: .infinity)
 
@@ -130,6 +192,7 @@ struct LessonDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     summaryCard(ownsScrolling: false)
+                    LessonCardsSection(api: api, lesson: info)
                     TranscriptCard(
                         segments: detail.segments,
                         player: player,
@@ -228,6 +291,9 @@ struct LessonDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
+            if retranscribing || retranscriptionStatus != nil {
+                retranscriptionNotice
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.smooth(duration: 0.3), value: summarizing)
@@ -272,6 +338,7 @@ struct LessonDetailView: View {
     /// The stored copy first, so a lesson opens instantly and opens at all
     /// without a server; the server's copy replaces it when there is one.
     private func load() async {
+        locateSafetyRecording()
         let key = OfflineCache.Key.lesson(info.id)
         if let stored = OfflineCache.load(BackendAPI.LessonDetail.self, key: key) {
             apply(stored)
@@ -308,6 +375,11 @@ struct LessonDetailView: View {
         player.track(loaded.segments)
     }
 
+    private func applyAndCache(_ loaded: BackendAPI.LessonDetail) {
+        apply(loaded)
+        OfflineCache.save(loaded, as: OfflineCache.Key.lesson(info.id))
+    }
+
     private func setSummary(_ text: String?) {
         summaryText = text
         summary = text.map(renderedMarkdown)
@@ -330,6 +402,92 @@ struct LessonDetailView: View {
             errorMessage = error.localizedDescription
         }
         summarizing = false
+    }
+
+    // MARK: - Manual high-quality transcription
+
+    private func locateSafetyRecording() {
+        guard let root = try? LocalRecordingStorage.defaultRoot() else { return }
+        safetyRecording = LocalRecordingStorage.matchingRecording(
+            root: root,
+            sessionId: info.id,
+            lessonStartedAt: info.startedAt
+        )
+    }
+
+    private func requestManualRetranscription() {
+        locateSafetyRecording()
+        guard let recording = safetyRecording else {
+            errorMessage = "Für diese Stunde wurde auf diesem iPad keine 48-kHz-Sicherheitsaufnahme gefunden."
+            return
+        }
+        if recording.state == .recording || recording.state == .finalizing {
+            errorMessage = "Die Sicherheitsaufnahme wird noch abgeschlossen. Bitte versuche es gleich noch einmal."
+            return
+        }
+        showingRetranscriptionConfirmation = true
+    }
+
+    private func runManualRetranscription() async {
+        guard let recording = safetyRecording else { return }
+        retranscribing = true
+        errorMessage = nil
+        do {
+            _ = try await api.manuallyRetranscribe(
+                lesson: info,
+                recording: recording
+            ) { status in
+                retranscriptionStatus = status
+            }
+            let fresh = try await api.lesson(id: info.id)
+            applyAndCache(fresh)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        retranscribing = false
+    }
+
+    @ViewBuilder
+    private var retranscriptionNotice: some View {
+        if let status = retranscriptionStatus {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    if retranscribing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: status.status == "failed" ? "exclamationmark.triangle" : "checkmark.circle")
+                    }
+                    Text(retranscriptionLabel(status))
+                        .font(.callout.weight(.medium))
+                }
+                if status.status == "uploading" {
+                    ProgressView(value: status.progress)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: .rect(cornerRadius: 12))
+        }
+    }
+
+    private func retranscriptionLabel(_ status: BackendAPI.RetranscriptionStatus) -> String {
+        switch status.status {
+        case "uploading":
+            "Sicherheitsaufnahme wird hochgeladen – \(Int(status.progress * 100)) %"
+        case "ready", "queued":
+            "Neutranskription wird vorbereitet…"
+        case "processing":
+            "48-kHz-Aufnahme wird vollständig transkribiert…"
+        case "completed":
+            "48-kHz-Neutranskription abgeschlossen"
+        case "completed_manual_edits_preserved":
+            "Neue Fassung gespeichert; manuelle Korrekturen beibehalten"
+        case "failed":
+            status.error ?? "Neutranskription fehlgeschlagen"
+        default:
+            "Neutranskription: \(status.status)"
+        }
     }
 }
 

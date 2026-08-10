@@ -59,25 +59,19 @@ final class AppSettings {
         didSet { defaults.set(quickSwitchURL, forKey: "quickSwitchURL") }
     }
 
-    /// The name the Lernen dashboard says hello to.
+    /// How much time a day the study plan is cut to.
     ///
-    /// Not an account and not a login — the app has neither. It is a name to be
-    /// called by, so the screen opens with a sentence addressed to someone
-    /// instead of a heading addressed to nobody. Blank falls back rather than
-    /// greeting an empty space, which is why every reader goes through
-    /// `greetingName`.
-    var displayName: String {
-        didSet { defaults.set(displayName, forKey: "displayName") }
+    /// One number for the whole app. It used to be asked on the Lernen screen
+    /// before anything could be started — a question in front of the task, with
+    /// a server round trip per tap and no memory of the answer — and a second
+    /// time per exam, so two competing budgets decided one round.
+    var dailyLearnMinutes: Int {
+        didSet { defaults.set(dailyLearnMinutes, forKey: "dailyLearnMinutes") }
     }
 
-    /// What to actually put after "Hallo," — the typed name, or the default
-    /// when the field has been emptied.
-    var greetingName: String {
-        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? Self.defaultDisplayName : trimmed
-    }
-
-    static let defaultDisplayName = "Bot"
+    /// The choices the plan line offers. Short enough to be honest about a bus
+    /// ride, long enough for the evening before an exam.
+    static let learnMinuteOptions = [10, 15, 20, 30, 45]
 
     /// Daily "Zeit zum Lernen" reminder for due spaced-repetition cards.
     var learnReminderEnabled: Bool {
@@ -115,14 +109,15 @@ final class AppSettings {
         contextSeconds = ctx == 0 ? 30 : ctx
         let rate = defaults.integer(forKey: "bitrate")
         bitrate = rate == 0 ? 24000 : rate
-        displayName = defaults.string(forKey: "displayName") ?? Self.defaultDisplayName
+        let dailyMinutes = defaults.integer(forKey: "dailyLearnMinutes")
+        dailyLearnMinutes = dailyMinutes == 0 ? 20 : dailyMinutes
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
         timetableConnected = defaults.bool(forKey: "timetableConnected")
         learnReminderEnabled = defaults.bool(forKey: "learnReminderEnabled")
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
-        recordButtonHue = defaults.double(forKey: "recordButtonHue")  // 0 = the red it was designed in
+        recordButtonHue = defaults.double(forKey: "recordButtonHue") // 0 = the red it was designed in
         let reminderMinutes = defaults.integer(forKey: "learnReminderMinutes")
         learnReminderMinutes = reminderMinutes == 0 ? 16 * 60 : reminderMinutes
         // migrate the old default: bare goodnotes:// lands in GoodNotes'

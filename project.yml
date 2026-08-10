@@ -16,6 +16,9 @@ options:
 packages:
   OpusShim:
     path: LocalPackages/OpusShim
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.20
 
 settings:
   base:
@@ -35,7 +38,11 @@ targets:
     dependencies:
       - package: OpusShim
         product: OpusShim
+      - package: ZIPFoundation
+        product: ZIPFoundation
       - target: MossLiveWidget
+        embed: true
+      - target: EchoShareExtension
         embed: true
     # The app group lets the widget read the app's server settings (zero
     # widget configuration). CI ad-hoc-signs the bundles with these
@@ -102,6 +109,38 @@ targets:
         # the link is WireGuard-encrypted by Tailscale
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+
+  EchoShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Sources/EchoShareExtension
+      - Sources/Shared
+    entitlements:
+      path: EchoShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.fourmbs.mosslive
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fourmbs.mosslive.share
+        APPLICATION_EXTENSION_API_ONLY: true
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        SKIP_INSTALL: true
+    info:
+      path: Sources/EchoShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Echo
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsAttachmentsWithMinCount: 1
+              NSExtensionActivationSupportsAttachmentsWithMaxCount: 1
+              NSExtensionActivationSupportsFileWithMaxCount: 1
+              NSExtensionActivationSupportsImageWithMaxCount: 1
 
   MossLiveTests:
     type: bundle.unit-test

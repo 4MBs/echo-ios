@@ -61,7 +61,7 @@ jobs:
       - name: Stamp build version
         run: |
           V="1.0.${{ github.run_number }}"
-          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist; do
+          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist Sources/EchoShareExtension/Info.plist; do
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST" \
               || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$PLIST"
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$PLIST" \
@@ -104,13 +104,24 @@ jobs:
       - name: Unit tests (iOS Simulator)
         run: |
           set -o pipefail
+          TEST_LOG=$(mktemp)
+          set +e
           xcodebuild test \
             -project MossLive.xcodeproj \
             -scheme MossLive \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
             -clonedSourcePackagesDirPath .spm-packages \
             -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO | tail -100
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$TEST_LOG" | tail -100
+          TEST_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "Failure diagnostics omitted from the final 100 lines:"
+            grep -Ei -B 3 -A 3 'test case .* failed|error:|XCTAssert|fatal error' "$TEST_LOG" \
+              | tail -200 || true
+          fi
+          rm -f "$TEST_LOG"
+          exit "$TEST_STATUS"
 
       - name: Upload test results
         if: always()
@@ -140,6 +151,8 @@ jobs:
       - name: Ad-hoc sign with entitlements
         run: |
           APP=build/dd/Build/Products/Release-iphoneos/MossLive.app
+          codesign --force --sign - --entitlements EchoShareExtension.entitlements \
+            "$APP/PlugIns/EchoShareExtension.appex"
           codesign --force --sign - --entitlements MossLiveWidget.entitlements \
             "$APP/PlugIns/MossLiveWidget.appex"
           codesign --force --sign - --entitlements MossLive.entitlements "$APP"

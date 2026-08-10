@@ -140,10 +140,10 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
     // unrecognised subject should not arrive looking like the timetable's most
     // recognisable one.
     let fallback = SubjectStyle(
-        icon: "ph.graduation-cap", color: .blue, tint: .init(0x00_B8_D4)
+        icon: "ph.graduation-cap", color: .blue, tint: .init(0x00B8D4)
     )
     let catchAll = SubjectStyle(
-        icon: "ph.tray", color: .gray, tint: .init(0x54_6E_7A)
+        icon: "ph.tray", color: .gray, tint: .init(0x546E7A)
     )
     guard let subject = subject?.lowercased(), !subject.isEmpty else {
         return catchAll
@@ -152,55 +152,146 @@ func subjectStyle(for subject: String?) -> SubjectStyle {
         ("sonstige", catchAll),
         // compounds first — each of these contains a keyword further down
         ("wirtschaft", .init(
-            icon: "ph.chart-line-up", color: .subjectAmber, tint: .init(0x00_BF_A5)
+            icon: "ph.chart-line-up", color: .subjectAmber, tint: .init(0x00BFA5)
         )),
-        ("mint", .init(icon: "ph.gear", color: .cyan, tint: .init(0x76_FF_03))),
-        ("förderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAE_EA_00))),
-        ("forderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAE_EA_00))),
-        ("hospitation", .init(icon: "ph.eye", color: .subjectSteel, tint: .init(0x6D_4C_41))),
-        ("mathe", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x29_79_FF))),
-        ("math", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x29_79_FF))),
-        ("physik", .init(icon: "ph.atom", color: .indigo, tint: .init(0x67_3A_B7))),
-        ("chemie", .init(icon: "ph.flask", color: .purple, tint: .init(0xF5_00_57))),
-        ("bio", .init(icon: "ph.plant", color: .green, tint: .init(0x64_DD_17))),
+        ("mint", .init(icon: "ph.gear", color: .cyan, tint: .init(0x76FF03))),
+        ("förderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAEEA00))),
+        ("forderband", .init(icon: "ph.sparkle", color: .yellow, tint: .init(0xAEEA00))),
+        ("hospitation", .init(icon: "ph.eye", color: .subjectSteel, tint: .init(0x6D4C41))),
+        ("mathe", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x2979FF))),
+        ("math", .init(icon: "ph.math-operations", color: .blue, tint: .init(0x2979FF))),
+        ("physik", .init(icon: "ph.atom", color: .indigo, tint: .init(0x673AB7))),
+        ("chemie", .init(icon: "ph.flask", color: .purple, tint: .init(0xF50057))),
+        ("bio", .init(icon: "ph.plant", color: .green, tint: .init(0x64DD17))),
         ("informatik", .init(
-            icon: "ph.code", color: .subjectSteel, tint: .init(0x1D_E9_B6)
+            icon: "ph.code", color: .subjectSteel, tint: .init(0x1DE9B6)
         )),
         ("deutsch", .init(
-            icon: "ph.book-open-text", color: .red, tint: .init(0xFF_17_44)
+            icon: "ph.book-open-text", color: .red, tint: .init(0xFF1744)
         )),
         ("englisch", .init(
-            icon: "ph.translate", color: .orange, tint: .init(0xFF_D6_00)
+            icon: "ph.translate", color: .orange, tint: .init(0xFFD600)
         )),
         ("franz", .init(
-            icon: "ph.chat-teardrop-text", color: .subjectPlum, tint: .init(0xFF_AB_00)
+            icon: "ph.chat-teardrop-text", color: .subjectPlum, tint: .init(0xFFAB00)
         )),
         ("latein", .init(
-            icon: "ph.scroll", color: .subjectTerracotta, tint: .init(0xAA_00_FF)
+            icon: "ph.scroll", color: .subjectTerracotta, tint: .init(0xAA00FF)
         )),
         ("spanisch", .init(
-            icon: "ph.chats-circle", color: .yellow, tint: .init(0xFF_3D_00)
+            icon: "ph.chats-circle", color: .yellow, tint: .init(0xFF3D00)
         )),
-        ("geschichte", .init(icon: "ph.hourglass", color: .brown, tint: .init(0xFF_6D_00))),
+        ("geschichte", .init(icon: "ph.hourglass", color: .brown, tint: .init(0xFF6D00))),
         ("erdkunde", .init(
-            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD_2C_00)
+            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD2C00)
         )),
         ("geo", .init(
-            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD_2C_00)
+            icon: "ph.globe-stand", color: .teal, tint: .init(0xDD2C00)
         )),
-        ("musik", .init(icon: "ph.music-notes", color: .subjectPlum, tint: .init(0x62_00_EA))),
-        ("kunst", .init(icon: "ph.palette", color: .pink, tint: .init(0xD5_00_F9))),
-        ("sport", .init(icon: "ph.person-simple-run", color: .mint, tint: .init(0x00_C8_53))),
-        ("religion", .init(icon: "ph.church", color: .indigo, tint: .init(0x3F_51_B5))),
-        ("ethik", .init(icon: "ph.scales", color: .subjectSteel, tint: .init(0x30_4F_FE))),
+        ("musik", .init(icon: "ph.music-notes", color: .subjectPlum, tint: .init(0x6200EA))),
+        ("kunst", .init(icon: "ph.palette", color: .pink, tint: .init(0xD500F9))),
+        ("sport", .init(icon: "ph.person-simple-run", color: .mint, tint: .init(0x00C853))),
+        ("religion", .init(icon: "ph.church", color: .indigo, tint: .init(0x3F51B5))),
+        ("ethik", .init(icon: "ph.scales", color: .subjectSteel, tint: .init(0x304FFE))),
         ("politik", .init(
-            icon: "ph.bank", color: .subjectAmber, tint: .init(0x00_91_EA)
+            icon: "ph.bank", color: .subjectAmber, tint: .init(0x0091EA)
         )),
     ]
     for (keyword, style) in map where subject.contains(keyword) {
         return style
     }
     return fallback
+}
+
+// MARK: - How solid something is
+
+/// How well a card is known, as a word.
+///
+/// The area used to print this as a percentage — "72 % bereit" — computed from
+/// `log2(stability + 2) / 6` minus a lapse deduction. Two decimal places of
+/// nothing: the student cannot derive it, cannot influence it directly and
+/// cannot tell 72 from 68. A word can be checked against how the last round
+/// actually felt, and it is never the only carrier of the meaning: every place
+/// that shows it shows a bar as well.
+enum Readiness: Equatable {
+    case fresh
+    case shaky
+    case nearly
+    case solid
+
+    init(_ value: Double) {
+        switch value {
+        case ..<0.01: self = .fresh
+        case ..<0.45: self = .shaky
+        case ..<0.75: self = .nearly
+        default: self = .solid
+        }
+    }
+
+    var word: String {
+        switch self {
+        case .fresh: "neu"
+        case .shaky: "wackelt"
+        case .nearly: "fast sicher"
+        case .solid: "sicher"
+        }
+    }
+}
+
+/// How solid one card is, 0…1.
+///
+/// **Provisional.** The server sends a readiness per exam but not per subject or
+/// topic, so this stands in for those two — which is why it is never printed as
+/// a number. One implementation, here, because there were two of it with
+/// different bracketing.
+func cardReadiness(_ card: BackendAPI.LearnCard) -> Double {
+    guard (card.reps ?? 0) > 0 else { return 0 }
+    let stability = max(0, card.stability ?? Double(card.box))
+    let strength = min(1, log2(stability + 2) / 6)
+    let lapsePenalty = min(0.25, Double(card.lapses ?? 0) * 0.03)
+    return max(0, strength - lapsePenalty)
+}
+
+/// A group of cards about one thing, and how solid it is.
+struct StudyTopic: Identifiable, Equatable {
+    let name: String
+    let subject: String?
+    let cards: [BackendAPI.LearnCard]
+    let readiness: Double
+
+    var id: String { "\(subject ?? "")|\(name)" }
+    var word: String { Readiness(readiness).word }
+}
+
+/// The deck grouped by what it is about, weakest first.
+///
+/// The concept the card generator wrote, falling back to the lesson it came
+/// from — one grouping for the whole app, where there were two with slightly
+/// different fallbacks.
+func studyTopics(_ cards: [BackendAPI.LearnCard]) -> [StudyTopic] {
+    Dictionary(grouping: cards) { card in
+        card.concept?.trimmingCharacters(in: .whitespacesAndNewlines).nilWhenEmpty
+            ?? card.lessonTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nilWhenEmpty
+            ?? "Allgemein"
+    }
+    .map { name, group in
+        let values = group.map(cardReadiness)
+        return StudyTopic(
+            name: name,
+            subject: group.first?.subject,
+            cards: group,
+            readiness: values.reduce(0, +) / Double(max(1, values.count))
+        )
+    }
+    .sorted { lhs, rhs in
+        lhs.readiness == rhs.readiness
+            ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            : lhs.readiness < rhs.readiness
+    }
+}
+
+extension String {
+    var nilWhenEmpty: String? { isEmpty ? nil : self }
 }
 
 extension View {
@@ -252,7 +343,7 @@ func lessonShareText(summary: String?, segments: [TranscriptSegment]) -> String 
     return parts.joined(separator: "\n")
 }
 
-// MARK: - Shared list states
+// MARK: - What a failed request looks like
 
 /// What a screen shows when a request did not work out.
 ///
@@ -316,84 +407,5 @@ struct ErrorState: View {
         // Server messages are written as fragments; they read as sentences here.
         let text = error.localizedDescription
         return text.prefix(1).uppercased() + String(text.dropFirst())
-    }
-}
-
-struct EmptyState: View {
-    let icon: String
-    let text: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Image(systemName: icon)
-        } description: {
-            Text(text)
-        }
-    }
-}
-
-/// One lesson as a row in the Lernen tab's subject list, where it sits beside
-/// the count of what is due and has to stay the height of one.
-///
-/// The date leads, because inside a list that already says "Mathematik" the
-/// date is the only thing that tells one recording from the next — everything
-/// the old row led with (the subject tile, the subject name, the room) was the
-/// same on every row down the page. What follows it is the opening of the
-/// summary, so the list can be read for what was taught rather than for when.
-///
-/// Stunden draws its own row (`SubjectView.swift`): that screen is nothing but
-/// lessons, so it can afford to lead with the topic and let the date follow.
-struct LessonRow: View {
-    let info: BackendAPI.LessonInfo
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(info.startedAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
-                    .font(.body)
-                    .lineLimit(1)
-                Text(timeLine)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if info.hasAudio {
-                    Image(systemName: "waveform")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            secondLine
-        }
-        .padding(.vertical, 3)
-    }
-
-    /// When it started and how long it ran. Not the room: inside a folder that
-    /// is the same on nearly every row, and the lesson's own page says it.
-    private var timeLine: String {
-        info.startedAt.formatted(date: .omitted, time: .shortened) + " · " + durationText
-    }
-
-    private var durationText: String {
-        let minutes = Int(info.durationSeconds) / 60
-        return minutes > 0 ? "\(minutes) Min" : "\(Int(info.durationSeconds)) s"
-    }
-
-    /// Two lines of the summary — or an honest word about there not being one,
-    /// which is a state worth seeing at a glance rather than a blank row.
-    @ViewBuilder
-    private var secondLine: some View {
-        if let excerpt = info.summaryExcerpt, !excerpt.isEmpty {
-            Text(excerpt)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-        } else {
-            Text(info.segmentCount > 0 ? "Noch keine Zusammenfassung" : "Kein Transkript")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-        }
     }
 }

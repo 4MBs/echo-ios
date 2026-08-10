@@ -13,8 +13,11 @@ workflows:
     triggering:
       events:
         - push
+        - pull_request
       branch_patterns:
         - pattern: main
+          include: true
+          source: false
       cancel_previous_builds: true
     scripts:
       - name: Versions
@@ -32,7 +35,7 @@ workflows:
         script: |
           BUILD=$((BUILD_NUMBER + 100))
           V="1.0.$BUILD"
-          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist; do
+          for PLIST in Sources/MossLive/Info.plist Sources/MossLiveWidget/Info.plist Sources/EchoShareExtension/Info.plist; do
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" "$PLIST" \
               || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $V" "$PLIST"
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" \
@@ -52,13 +55,24 @@ workflows:
             | sed -E 's/^ +//; s/ \([0-9A-Fa-f-]+\) \((Shutdown|Booted)\).*$//')
           [ -n "$DEVICE" ] || { echo "no iOS simulator on this image"; exit 1; }
           echo "picked simulator: $DEVICE"
+          TEST_LOG=$(mktemp)
+          set +e
           xcodebuild test \
             -project MossLive.xcodeproj \
             -scheme MossLive \
             -destination "platform=iOS Simulator,name=$DEVICE" \
             -clonedSourcePackagesDirPath .spm-packages \
             -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO | tail -100
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$TEST_LOG" | tail -100
+          TEST_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "Failure diagnostics omitted from the final 100 lines:"
+            grep -Ei -B 3 -A 3 'test case .* failed|error:|XCTAssert|fatal error' "$TEST_LOG" \
+              | tail -200 || true
+          fi
+          rm -f "$TEST_LOG"
+          exit "$TEST_STATUS"
 
       - name: Build unsigned device binary
         script: |
@@ -80,6 +94,8 @@ workflows:
       - name: Ad-hoc sign with entitlements
         script: |
           APP=build/dd/Build/Products/Release-iphoneos/MossLive.app
+          codesign --force --sign - --entitlements EchoShareExtension.entitlements \
+            "$APP/PlugIns/EchoShareExtension.appex"
           codesign --force --sign - --entitlements MossLiveWidget.entitlements \
             "$APP/PlugIns/MossLiveWidget.appex"
           codesign --force --sign - --entitlements MossLive.entitlements "$APP"

@@ -5,10 +5,8 @@ import os
 ///
 /// Responsibilities: handshake (hello/hello_ack), automatic reconnection with
 /// jittered exponential backoff, session resumption, keepalive pings, and a
-/// typed event stream for the UI layer. Audio frames are fire-and-forget: when
-/// the socket is down they are dropped (the sequence number keeps advancing at
-/// the encoder, so the server records the outage as silence and the session
-/// timeline stays aligned with wall time).
+/// typed event stream for the UI layer. Audio frames enter a disk-backed FIFO,
+/// so reconnecting never grows an in-memory array and packets remain ordered.
 actor WebSocketClient {
     enum ConnectionState: Equatable, Sendable {
         case disconnected
@@ -30,6 +28,7 @@ actor WebSocketClient {
         /// Seconds of recorded audio waiting in the offline backlog (0 once
         /// the replay has caught up) — drives the "wird gepuffert" banner.
         case buffered(seconds: Double)
+        case audioEvent(AudioDiagnosticEvent)
     }
 
     struct Endpoint: Sendable {
@@ -48,18 +47,22 @@ actor WebSocketClient {
     private var sessionId: String?
     private var userInitiatedClose = true
     private var closedAfterFatalError = false
+    private var handshakeComplete = false
     private var pingSentAt: [Int64: ContinuousClock.Instant] = [:]
 
     private var eventContinuation: AsyncStream<Event>.Continuation?
-    private let audioFrames: AsyncStream<Data>
-    private nonisolated let audioContinuation: AsyncStream<Data>.Continuation
-    private var audioSender: Task<Void, Never>?
-    // Bumped whenever a brand-new (non-resumed) server session begins, so the
-    // sender drops any frames buffered for the old session before replaying.
-    private var backlogGeneration = 0
+    private enum IngressSignal: Sendable {
+        case dataAvailable
+        case failed(String)
+    }
 
-    // Offline-safety tuning for the send backlog (see startAudioSender):
-    private static let backlogCapFrames = 300_000 // ~100 min at 50 fps; older frames drop
+    private nonisolated let spool = DiskAudioSpool()
+    private let ingressSignals: AsyncStream<IngressSignal>
+    private nonisolated let ingressContinuation: AsyncStream<IngressSignal>.Continuation
+    private var audioSender: Task<Void, Never>?
+    private var spoolID = UUID()
+
+    // Offline-safety tuning for the disk-backed send backlog.
     private static let pacingThresholdFrames = 250 // >5 s unsent ⇒ we're catching up
     private static let pacingBurst = 8 // send this many, then sleep ⇒ ~8× real time
     private static let pacingSleep = Duration.milliseconds(20)
@@ -69,11 +72,10 @@ actor WebSocketClient {
         config.waitsForConnectivity = false
         config.timeoutIntervalForRequest = 10
         session = URLSession(configuration: config)
-        // Unbounded: audio is never dropped at ingress. The sender holds a
-        // disk-free backlog while offline and replays it on reconnect, so a
-        // long dead-zone outage loses nothing (bounded by backlogCapFrames).
-        (audioFrames, audioContinuation) = AsyncStream.makeStream(
-            of: Data.self, bufferingPolicy: .unbounded
+        // Frames themselves live in a length-prefixed disk file. This stream is
+        // only a coalescing wake-up signal, so an outage cannot grow RAM use.
+        (ingressSignals, ingressContinuation) = AsyncStream.makeStream(
+            of: IngressSignal.self, bufferingPolicy: .bufferingNewest(8)
         )
     }
 
@@ -90,27 +92,65 @@ actor WebSocketClient {
 
     // MARK: - Lifecycle
 
+    /// Must run before the microphone starts so even the first Opus packet has
+    /// a durable destination.
+    func beginRecording() throws {
+        spoolID = UUID()
+        let orphaned = try spool.begin(id: spoolID)
+        if orphaned > 0 {
+            emit(
+                .audioEvent(
+                    AudioDiagnosticEvent(
+                        kind: .lostAudio,
+                        message: "\(orphaned) alte Netzwerkpakete konnten keiner neuen Sitzung zugeordnet werden"
+                    )
+                )
+            )
+        }
+        startAudioSender(ingressSignals)
+    }
+
+    func cancelPreparedRecording() {
+        spool.finish()
+    }
+
     func connect(to endpoint: Endpoint) {
         self.endpoint = endpoint
         userInitiatedClose = false
         closedAfterFatalError = false
         backoff.reset()
-        backlogGeneration += 1 // fresh recording: drop any stale buffered frames
-        startAudioSender(audioFrames)
         openSocket(resume: false)
     }
 
-    func disconnect(sendStop: Bool) async {
+    @discardableResult
+    func disconnect(sendStop: Bool) async -> Int {
         userInitiatedClose = true
         reconnectTask?.cancel()
+        // Preserve protocol order: all queued audio must precede the stop
+        // message. If the socket is down, drainSpool returns immediately and
+        // the remaining count is recorded below.
+        await drainSpool()
         if sendStop, let task, task.state == .running {
             try? await task.send(.string(encodeJSON(StopMessage())))
             // give the server a moment to finalize before the close frame
             try? await Task.sleep(for: .milliseconds(300))
         }
+        let pending = spool.status().pendingFrames
+        if pending > 0 {
+            emit(
+                .audioEvent(
+                    AudioDiagnosticEvent(
+                        kind: .transport,
+                        message: "Aufnahme beendet; \(pending) Netzwerkpakete verbleiben im Datei-Puffer"
+                    )
+                )
+            )
+        }
         teardownSocket(code: .normalClosure)
+        spool.finish()
         sessionId = nil
         emit(.state(.disconnected))
+        return pending
     }
 
     // MARK: - Sending
@@ -122,16 +162,20 @@ actor WebSocketClient {
     /// guarantee: packets arrived shuffled, the server logged them as
     /// lost/reordered, and the stateful Opus decoder degraded on every swap.)
     nonisolated func sendAudioFrame(_ frame: Data) {
-        audioContinuation.yield(frame)
+        do {
+            try spool.append(frame)
+            ingressContinuation.yield(.dataAvailable)
+        } catch {
+            ingressContinuation.yield(.failed(error.localizedDescription))
+        }
     }
-
-    private func currentGeneration() -> Int { backlogGeneration }
 
     private var lastReportedBufferedSeconds = 0.0
 
     /// Emits backlog progress, throttled to whole-second changes so the UI
     /// isn't updated 50× per second.
-    private func reportBuffered(frames: Int) {
+    private func reportBuffered() {
+        let frames = spool.status().pendingFrames
         let seconds = Double(frames) * Double(AudioPipelineConstants.frameMs) / 1000
         guard seconds.rounded(.down) != lastReportedBufferedSeconds.rounded(.down) else { return }
         lastReportedBufferedSeconds = seconds
@@ -142,7 +186,7 @@ actor WebSocketClient {
     /// caller keeps the frame buffered) or the send failed. Kept on the actor so
     /// the socket never crosses an isolation boundary.
     private func trySendFrame(_ data: Data) async -> Bool {
-        guard let task, task.state == .running else { return false }
+        guard handshakeComplete, let task, task.state == .running else { return false }
         do {
             try await task.send(.data(data))
             return true
@@ -151,53 +195,61 @@ actor WebSocketClient {
         }
     }
 
-    /// The single audio consumer. Owns the backlog as task-local state (no actor
-    /// reentrancy on it). Behavior:
-    /// * Online: frames are sent immediately in order.
-    /// * Offline (dead zone): frames accumulate in the backlog — nothing is
-    ///   dropped until backlogCapFrames (~100 min). Recording continues.
+    /// The single audio consumer. Frame bytes stay in DiskAudioSpool:
+    /// * Online: records are acknowledged in strict order after successful send.
+    /// * Offline: records remain in the spool file and RAM stays bounded.
     /// * On reconnect the server keeps the same session (long resume grace) and
     ///   the whole backlog is replayed. The replay is paced to ~8× real time so
     ///   the server's transcriber keeps up and never has to skip audio.
-    /// * A new (non-resumed) session bumps the generation, so orphaned frames
-    ///   from an expired session are discarded instead of corrupting the new one.
-    private func startAudioSender(_ frames: AsyncStream<Data>) {
+    private func startAudioSender(_ signals: AsyncStream<IngressSignal>) {
         guard audioSender == nil else { return }
         audioSender = Task { [weak self] in
-            var backlog: [Data] = []
-            var head = 0 // index of the first not-yet-sent frame
-            var generation = await self?.currentGeneration() ?? 0
-
-            for await frame in frames {
+            for await signal in signals {
                 guard let self else { return }
-                let gen = await self.currentGeneration()
-                if gen != generation {
-                    backlog.removeAll(keepingCapacity: true)
-                    head = 0
-                    generation = gen
+                switch signal {
+                case .dataAvailable:
+                    await self.drainSpool()
+                case .failed(let message):
+                    await self.emit(
+                        .audioEvent(
+                            AudioDiagnosticEvent(
+                                kind: .lostAudio,
+                                message: "Audio konnte nicht in den Datei-Puffer geschrieben werden: \(message)"
+                            )
+                        )
+                    )
                 }
-                backlog.append(frame)
-                let buffered = backlog.count - head
-                if buffered > Self.backlogCapFrames {
-                    head += buffered - Self.backlogCapFrames // drop the oldest frames
-                }
+                await self.reportBuffered()
+            }
+        }
+    }
 
-                var burst = 0
-                while head < backlog.count {
-                    guard await self.trySendFrame(backlog[head]) else { break }
-                    head += 1
-                    if backlog.count - head > Self.pacingThresholdFrames {
-                        burst += 1
-                        if burst >= Self.pacingBurst {
-                            burst = 0
-                            try? await Task.sleep(for: Self.pacingSleep)
-                        }
-                    }
-                }
-                await self.reportBuffered(frames: backlog.count - head)
-                if head > 8192 { // amortized compaction so removeFirst stays O(1)
-                    backlog.removeFirst(head)
-                    head = 0
+    private func drainSpool() async {
+        guard let task, task.state == .running else { return }
+        var burst = 0
+        while task.state == .running {
+            let frame: Data
+            do {
+                guard let next = try spool.peek() else { break }
+                frame = next
+            } catch {
+                emit(
+                    .audioEvent(
+                        AudioDiagnosticEvent(
+                            kind: .lostAudio,
+                            message: "Datei-Puffer ist beschädigt: \(error.localizedDescription)"
+                        )
+                    )
+                )
+                break
+            }
+            guard await trySendFrame(frame) else { break }
+            spool.acknowledge(frame)
+            if spool.status().pendingFrames > Self.pacingThresholdFrames {
+                burst += 1
+                if burst >= Self.pacingBurst {
+                    burst = 0
+                    try? await Task.sleep(for: Self.pacingSleep)
                 }
             }
         }
@@ -228,6 +280,7 @@ actor WebSocketClient {
         let task = session.webSocketTask(with: endpoint.url)
         task.maximumMessageSize = 64 * 1024
         self.task = task
+        handshakeComplete = false
         task.resume()
 
         let hello = HelloMessage(
@@ -279,14 +332,26 @@ actor WebSocketClient {
                 // expired after a very long outage): the backlog is for the old
                 // session's sequence space, so discard it before replaying.
                 if sessionId != nil {
-                    backlogGeneration += 1
+                    let discarded = (try? spool.discardAndRestart(id: UUID())) ?? 0
+                    if discarded > 0 {
+                        emit(
+                            .audioEvent(
+                                AudioDiagnosticEvent(
+                                    kind: .lostAudio,
+                                    message: "Server-Sitzung abgelaufen; \(discarded) gepufferte Pakete verworfen"
+                                )
+                            )
+                        )
+                    }
                 }
                 sessionId = ack.sessionId
             }
             backoff.reset()
+            handshakeComplete = true
             startKeepalive()
             emit(.helloAck(ack))
             emit(.state(.connected(sessionId: ack.sessionId)))
+            ingressContinuation.yield(.dataAvailable)
         case .transcript(let update):
             emit(.transcript(update))
         case .answerPending(let requestId):
@@ -357,6 +422,7 @@ actor WebSocketClient {
         keepaliveLoop?.cancel()
         keepaliveLoop = nil
         pingSentAt.removeAll()
+        handshakeComplete = false
         task?.cancel(with: code, reason: nil)
         task = nil
     }
