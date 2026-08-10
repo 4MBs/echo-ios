@@ -19,7 +19,11 @@ struct BookReaderView: View {
     @State private var phase: Phase?
 
     var body: some View {
-        Group {
+        // Keep the task attached to one concrete container. `Group` is
+        // transparent, so swapping its child from the loading view to the PDF
+        // can detach and restart `.task` — which puts an already opened book
+        // back into the loading phase, in a loop.
+        ZStack {
             switch phase {
             case .none, .downloading:
                 downloadProgress
@@ -32,7 +36,7 @@ struct BookReaderView: View {
         }
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await open() }
+        .task(id: book.id) { await open() }
     }
 
     private var downloadProgress: some View {
@@ -52,6 +56,10 @@ struct BookReaderView: View {
     }
 
     private func open() async {
+        // A navigation or layout pass can make this view appear again. Never
+        // replace a live PDF with the loading screen when it is already open.
+        if case .some(.ready) = phase { return }
+
         if let cached = BackendAPI.cachedBook(id: book.id) {
             phase = .ready(cached)
             return
@@ -109,37 +117,37 @@ private struct PDFReader: View {
     @FocusState private var numberingFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            reader
-            if showsSidePanel {
-                Divider().ignoresSafeArea(edges: .bottom)
+        reader
+            // Parsing a 300 MB schoolbook off the main thread keeps the push
+            // animation smooth, and reusing the document means flipping the
+            // layout does not re-read the file.
+            .task(id: url) {
+                document = await Task.detached(priority: .userInitiated) {
+                    LoadedDocument(document: PDFDocument(url: url))
+                }.value.document
+            }
+            .toolbar {
+                if model.settings.showPageNumberEditor {
+                    ToolbarItem(placement: .topBarTrailing) { readerMenu }
+                }
+            }
+            // One adaptive presentation, not a hand-switched HStack and sheet.
+            // SwiftUI keeps the panel as a trailing column on an iPad and adapts
+            // it to a sheet in compact width, and — this is the part that
+            // matters — it hosts it outside the navigation content.
+            //
+            // The panel is a NavigationStack, because that is what gives it a
+            // real bar. Placed inline in an HStack it was a navigation stack
+            // nested inside the pushed reader, which is unsupported: opening it
+            // popped the whole stack back to the shelf and left the shelf's
+            // route torn down behind it. An inspector is its own presentation,
+            // so nothing behind it moves.
+            .inspector(isPresented: $askingBookAI) {
                 bookAIPanel
-                    .frame(width: 380)
-                    .transition(.move(edge: .trailing))
+                    .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
-        }
-        .animation(.smooth(duration: 0.25), value: showsSidePanel)
-        // Parsing a 300 MB schoolbook off the main thread keeps the push
-        // animation smooth, and reusing the document means flipping the layout
-        // does not re-read the file.
-        .task(id: url) {
-            document = await Task.detached(priority: .userInitiated) {
-                LoadedDocument(document: PDFDocument(url: url))
-            }.value.document
-        }
-        .toolbar {
-            if model.settings.showPageNumberEditor {
-                ToolbarItem(placement: .topBarTrailing) { readerMenu }
-            }
-        }
-        // No room for both on a phone, so there the panel is a sheet — left at
-        // half height, where the top of the page is still in view behind it.
-        .sheet(isPresented: sheetPresented) {
-            bookAIPanel
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-        }
     }
 
     private var reader: some View {
@@ -189,19 +197,6 @@ private struct PDFReader: View {
         }
         .toggleStyle(.button)
         .buttonStyle(.glass)
-    }
-
-    /// A regular width (iPad, and a phone in landscape) keeps the panel beside
-    /// the book so the page stays readable while the answer is read.
-    private var showsSidePanel: Bool {
-        askingBookAI && sizeClass == .regular
-    }
-
-    private var sheetPresented: Binding<Bool> {
-        Binding(
-            get: { askingBookAI && sizeClass != .regular },
-            set: { askingBookAI = $0 }
-        )
     }
 
     private var bookAIPanel: some View {
