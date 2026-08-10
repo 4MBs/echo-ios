@@ -113,7 +113,7 @@ private struct PDFReader: View {
             reader
             if showsSidePanel {
                 Divider().ignoresSafeArea(edges: .bottom)
-                bookAIPanel(close: { askingBookAI = false })
+                bookAIPanel
                     .frame(width: 380)
                     .transition(.move(edge: .trailing))
             }
@@ -128,7 +128,6 @@ private struct PDFReader: View {
             }.value.document
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { bookAIButton }
             if model.settings.showPageNumberEditor {
                 ToolbarItem(placement: .topBarTrailing) { readerMenu }
             }
@@ -136,7 +135,7 @@ private struct PDFReader: View {
         // No room for both on a phone, so there the panel is a sheet — left at
         // half height, where the top of the page is still in view behind it.
         .sheet(isPresented: sheetPresented) {
-            bookAIPanel(close: nil)
+            bookAIPanel
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
@@ -170,16 +169,26 @@ private struct PDFReader: View {
 
     /// Only ever here, inside an open book: the question Buch-KI answers is
     /// "this page", which the shelf outside has no answer for.
+    ///
+    /// It sits in the control bar with the other things you do to a book, not
+    /// alone in the top corner — the page arrows, the layout switch and this
+    /// are one set of controls and belong within reach of the same thumb. A
+    /// `Toggle` rather than a `Button` because the panel it opens stays open:
+    /// the system draws the on state, and VoiceOver is told it is a switch
+    /// instead of being handed a label that changes underneath it.
     private var bookAIButton: some View {
-        Button {
-            askingBookAI.toggle()
-        } label: {
-            Label("Buch-KI", systemImage: "sparkles")
-                .labelStyle(.titleAndIcon)
-                .font(.subheadline.weight(.medium))
+        Toggle(isOn: $askingBookAI) {
+            if sizeClass == .regular {
+                Label("Buch-KI", systemImage: "sparkles")
+            } else {
+                // A phone's bar is not wide enough for the page controls and a
+                // word as well, and the page controls have to stay centred.
+                Label("Buch-KI", systemImage: "sparkles")
+                    .labelStyle(.iconOnly)
+            }
         }
+        .toggleStyle(.button)
         .buttonStyle(.glass)
-        .accessibilityLabel(askingBookAI ? "Buch-KI schließen" : "Buch-KI öffnen")
     }
 
     /// A regular width (iPad, and a phone in landscape) keeps the panel beside
@@ -195,10 +204,9 @@ private struct PDFReader: View {
         )
     }
 
-    private func bookAIPanel(close: (() -> Void)?) -> some View {
+    private var bookAIPanel: some View {
         BookAIPanel(
             bookID: book.id,
-            bookTitle: book.title,
             numbering: numbering,
             visiblePages: visiblePages,
             store: bookAI,
@@ -207,7 +215,7 @@ private struct PDFReader: View {
                 // On a phone the sheet covers the page it just turned to.
                 if sizeClass != .regular { askingBookAI = false }
             },
-            close: close
+            close: { askingBookAI = false }
         )
     }
 
@@ -293,12 +301,16 @@ private struct PDFReader: View {
         }
     }
 
+    /// Everything you do to an open book, in one bar: the layout on the left,
+    /// the page in the middle where it can stay centred whatever flanks it, and
+    /// Buch-KI on the right.
     private var controlBar: some View {
         ZStack {
             pageControls
             HStack {
                 modeToggle
                 Spacer()
+                bookAIButton
             }
         }
         .padding(.horizontal, 20)

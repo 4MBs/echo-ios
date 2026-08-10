@@ -63,6 +63,41 @@ final class BookPageNumberingTests: XCTestCase {
     }
 }
 
+/// `POST /library/{id}/ask` remembers nothing between calls, so a follow-up
+/// only means something if the turn before it travels with it.
+@MainActor
+final class BookAIFollowUpTests: XCTestCase {
+    private func turn(question: String, text: String) -> BookAIStore.Turn {
+        BookAIStore.Turn(question: question, pages: [16], text: text, citations: [], pagesRead: [16])
+    }
+
+    func testAFirstQuestionGoesUpAsTyped() {
+        XCTAssertEqual(BookAIStore.grounded("Erkläre diese Seite.", after: nil), "Erkläre diese Seite.")
+    }
+
+    /// "Erklär das nochmal einfacher" is unanswerable on its own — what "das"
+    /// was has to be in the request.
+    func testAFollowUpCarriesThePreviousTurn() {
+        let sent = BookAIStore.grounded(
+            "Erklär das nochmal einfacher.",
+            after: turn(question: "Was ist Zellatmung?", text: "Der Abbau von Glukose.")
+        )
+        XCTAssertTrue(sent.contains("Was ist Zellatmung?"))
+        XCTAssertTrue(sent.contains("Der Abbau von Glukose."))
+        XCTAssertTrue(sent.hasSuffix("Erklär das nochmal einfacher."))
+    }
+
+    /// The page is the context that matters; a long answer quoted back in full
+    /// would crowd it out of the prompt.
+    func testALongPreviousAnswerIsCutShort() {
+        let long = String(repeating: "a", count: 5000)
+        let sent = BookAIStore.grounded("Und weiter?", after: turn(question: "Fasse zusammen.", text: long))
+        XCTAssertFalse(sent.contains(long), "the whole answer must not be quoted back")
+        XCTAssertTrue(sent.contains("…"), "the quote is marked as cut")
+        XCTAssertLessThan(sent.count, 1500)
+    }
+}
+
 /// Decoding the server's answer: the panel only ever shows citations it can
 /// actually jump to, so the PDF page number has to survive intact.
 final class BookAnswerDecodingTests: XCTestCase {

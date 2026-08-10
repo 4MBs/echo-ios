@@ -9,21 +9,30 @@ import SwiftUI
 /// The panel sends the question and the PDF pages on screen, nothing else: the
 /// server has the book. What comes back is an answer plus the pages it rests
 /// on, and those are buttons — tapping one turns the book to that page.
+///
+/// It is built out of the system's own parts — a navigation stack with an
+/// inline title and a page subtitle, `ContentUnavailableView` before the first
+/// question, capsule chips for the openings, and a glass send button — so it
+/// reads as the same app as the reader beside it rather than as a panel with
+/// its own ideas. Its bar mirrors the reader's: leave on the left, more on the
+/// right.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
 
     let bookID: String
-    let bookTitle: String
     let numbering: BookPageNumbering
     /// The PDF pages on screen right now — one page, or both of a spread.
     let visiblePages: [Int]
     let store: BookAIStore
     /// Turn the book to a PDF page (a tapped citation).
     let goToPage: (Int) -> Void
-    /// nil in the sheet, where the sheet's own dismissal is the way out.
-    let close: (() -> Void)?
+    /// Close the panel — the side panel on an iPad, the sheet on a phone.
+    let close: () -> Void
 
     @FocusState private var inputFocused: Bool
+
+    /// Anchor the thread scrolls to when a turn arrives.
+    private static let bottomID = "buch-ki-bottom"
 
     private var api: BackendAPI {
         BackendAPI(
@@ -33,112 +42,149 @@ struct BookAIPanel: View {
         )
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-            Divider()
-            inputBar
-        }
-        .background(Color(.systemGroupedBackground))
+    private var pageLabel: String {
+        numbering.printedLabel(forVisible: visiblePages)
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Buch-KI")
-                    .font(.headline)
-                // What the answer will be about, said the way the reader says
-                // it: the printed page number, not the PDF page sent to the
-                // server.
-                Text("\(bookTitle) · Seite \(numbering.printedLabel(forVisible: visiblePages))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: 8)
-            if store.exchange != nil || store.errorMessage != nil {
-                Button("Leeren") { store.clear() }
-                    .font(.footnote)
-            }
-            if let close {
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.footnote.weight(.semibold))
-                }
-                .buttonStyle(.glass)
-                .accessibilityLabel("Buch-KI schließen")
-            }
+    var body: some View {
+        NavigationStack {
+            content
+                .groupedScreen()
+                .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+                .navigationTitle("Buch-KI")
+                .navigationSubtitle("Seite \(pageLabel)")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { toolbar }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+    }
+
+    // MARK: - Bar
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button("Fertig", action: close)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button("Verlauf leeren", systemImage: "eraser") { store.clear() }
+                    .disabled(!store.hasContent)
+            } label: {
+                // the same glyph the reader's own menu uses, one bar over
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("Mehr")
+        }
     }
 
     // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let exchange = store.exchange {
-                    answer(exchange)
-                } else if store.sending {
-                    working
-                } else if let error = store.errorMessage {
-                    failure(error)
-                } else {
-                    suggestions
+        if store.turns.isEmpty, store.pending == nil, store.errorMessage == nil {
+            empty
+        } else {
+            thread
+        }
+    }
+
+    /// Before the first question: say what the thing is for, in the same shape
+    /// the shelf uses when it has no books.
+    private var empty: some View {
+        ContentUnavailableView {
+            Label("Frag zu dieser Seite", systemImage: "sparkles")
+        } description: {
+            Text(emptyDescription)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyDescription: String {
+        "Die KI liest Seite \(pageLabel) auf dem Server — samt Abbildungen — und sagt dazu, worauf sie sich stützt."
+    }
+
+    private var thread: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Theme.Space.inset) {
+                    ForEach(store.turns) { turn in
+                        answer(turn)
+                            .id(turn.id)
+                    }
+                    if let pending = store.pending {
+                        working(pending.question)
+                    }
+                    if let error = store.errorMessage {
+                        failure(error)
+                    }
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomID)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Theme.Space.inset)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: store.turns.count) { scrollToEnd(proxy) }
+            .onChange(of: store.sending) { scrollToEnd(proxy) }
         }
-        .frame(maxHeight: .infinity)
-        .scrollDismissesKeyboard(.interactively)
     }
 
-    private var working: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-            Text("Liest im Buch…")
-                .font(.callout)
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(Self.bottomID, anchor: .bottom)
+        }
+    }
+
+    /// The question is on screen while it is being answered, so a follow-up
+    /// never leaves the panel looking like it forgot what was asked.
+    private func working(_ question: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.row) {
+            Text(question)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Liest im Buch…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .padding(Theme.Space.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface(cornerRadius: Theme.Radius.surface)
     }
 
-    private func answer(_ exchange: BookAIStore.Exchange) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+    private func answer(_ turn: BookAIStore.Turn) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.row) {
             // Turning the page while an answer is up must not make it look
             // like the answer is about the page now on screen.
-            if exchange.pages != visiblePages {
+            if turn.pages != visiblePages {
                 Label(
-                    "Zu Seite \(numbering.printedLabel(forVisible: exchange.pages))",
+                    "Zu Seite \(numbering.printedLabel(forVisible: turn.pages))",
                     systemImage: "text.book.closed"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
 
-            Text(exchange.question)
-                .font(.subheadline.weight(.medium))
+            Text(turn.question)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(exchange.text)
+            Text(renderedMarkdown(turn.text))
                 .font(.callout)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !exchange.citations.isEmpty {
-                citations(exchange.citations)
+            if !turn.citations.isEmpty {
+                citations(turn.citations)
             }
         }
-        .padding(16)
+        .padding(Theme.Space.inset)
         .cardSurface(cornerRadius: Theme.Radius.surface)
     }
 
@@ -149,19 +195,19 @@ struct BookAIPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             Text("Quellen im Buch")
-                .font(.caption.weight(.semibold))
+                .font(.footnote)
                 .foregroundStyle(.secondary)
             ForEach(list) { citation in
                 Button {
                     goToPage(citation.pdfPage)
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc.text")
-                            .font(.caption)
-                            .foregroundStyle(Theme.accent)
+                    HStack(spacing: 10) {
+                        Image(systemName: "text.book.closed")
+                            .font(.footnote)
+                            .foregroundStyle(.tint)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(numbering.citationLabel(pdfPage: citation.pdfPage))
-                                .font(.subheadline.weight(.medium))
+                                .font(.subheadline)
                             if !citation.note.isEmpty {
                                 Text(citation.note)
                                     .font(.caption)
@@ -170,8 +216,8 @@ struct BookAIPanel: View {
                             }
                         }
                         Spacer(minLength: 4)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
+                        Image(systemName: "chevron.forward")
+                            .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                     .contentShape(Rectangle())
@@ -184,7 +230,7 @@ struct BookAIPanel: View {
     }
 
     private func failure(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Space.row) {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.footnote)
                 .foregroundStyle(.red)
@@ -194,111 +240,134 @@ struct BookAIPanel: View {
                     Task { await store.ask(failed.question, pages: failed.pages, bookID: bookID, api: api) }
                 }
                 .buttonStyle(.bordered)
-                .font(.footnote)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
             }
         }
-        .padding(16)
+        .padding(Theme.Space.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface(cornerRadius: Theme.Radius.surface)
     }
 
-    /// Four openings for the four things a schoolbook page is usually about.
-    /// They fill the field rather than sending straight away, so the question
-    /// can still be aimed at one exercise before it goes.
-    private var suggestions: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Fragen zu dieser Seite — die KI liest sie auf dem Server, samt Abbildungen.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+    // MARK: - Chips
 
-            ForEach(Self.prompts) { prompt in
-                Button {
-                    store.draft = prompt.text
-                    inputFocused = true
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: prompt.symbol)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.accent)
-                            .frame(width: 20)
-                        Text(prompt.label)
-                            .font(.subheadline)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardSurface(cornerRadius: Theme.Radius.control)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private struct Prompt: Identifiable {
+    /// One tap, one question. A chip is a thing you say, not a thing you fill
+    /// in — the only one that does not send is "Aufgabe …", where the point is
+    /// that you finish the sentence with the number printed on the page.
+    private struct Chip: Identifiable {
         let label: String
-        let symbol: String
         let text: String
+        /// Put the text in the field and wait, instead of sending it.
+        var completes = false
 
         var id: String { label }
     }
 
-    private static let prompts: [Prompt] = [
-        Prompt(label: "Seite erklären", symbol: "text.book.closed", text: "Erkläre diese Seite verständlich."),
-        Prompt(
-            label: "Aufgabe lösen",
-            symbol: "function",
-            text: "Löse die Aufgaben auf dieser Seite Schritt für Schritt."
-        ),
-        Prompt(
-            label: "Zusammenfassen",
-            symbol: "list.bullet.rectangle",
-            text: "Fasse diese Seite in wenigen Sätzen zusammen."
-        ),
-        Prompt(label: "Abbildung erklären", symbol: "photo", text: "Erkläre die Abbildung auf dieser Seite."),
+    /// Openings for a page nothing has been asked about yet. Pointing at one
+    /// exercise comes first: it is the most common thing a student wants and
+    /// the one thing prose cannot do briefly.
+    private static let starters: [Chip] = [
+        Chip(label: "Aufgabe …", text: "Löse Aufgabe ", completes: true),
+        Chip(label: "Seite erklären", text: "Erkläre diese Seite verständlich."),
+        Chip(label: "Zusammenfassen", text: "Fasse diese Seite in wenigen Sätzen zusammen."),
+        Chip(label: "Aufgaben lösen", text: "Löse die Aufgaben auf dieser Seite Schritt für Schritt."),
+        Chip(label: "Abbildung erklären", text: "Erkläre die Abbildung auf dieser Seite."),
     ]
 
-    // MARK: - Input
+    /// What you say to an answer you have just read. These send: there is an
+    /// answer above them, so what "das" refers to is not in doubt.
+    private static let followUps: [Chip] = [
+        Chip(label: "Einfacher erklären", text: "Erklär das nochmal einfacher."),
+        Chip(label: "Schritt für Schritt", text: "Zeig den Rechenweg Schritt für Schritt."),
+        Chip(label: "Beispiel geben", text: "Gib mir ein Beispiel dazu."),
+        Chip(label: "Warum?", text: "Warum ist das so?"),
+    ]
+
+    private var chips: [Chip] {
+        store.turns.isEmpty ? Self.starters : Self.followUps
+    }
+
+    private var chipRow: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(chips) { chip in
+                    Button(chip.label) { tap(chip) }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .disabled(!canAsk)
+                }
+            }
+            .padding(.horizontal, Theme.Space.inset)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func tap(_ chip: Chip) {
+        if chip.completes {
+            store.draft = chip.text
+            inputFocused = true
+        } else {
+            Task { await store.ask(chip.text, pages: visiblePages, bookID: bookID, api: api) }
+        }
+    }
+
+    // MARK: - Composer
 
     @ViewBuilder
-    private var inputBar: some View {
+    private var composer: some View {
         // the field writes straight into the store, so a half-typed question
-        // survives the panel being scrolled or the answer arriving
+        // survives the panel being scrolled or an answer arriving
         @Bindable var store = self.store
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if !model.connectivity.isOnline {
                 Label("Ohne Serververbindung — Lesen geht weiter, Fragen nicht.", systemImage: "wifi.slash")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Space.inset)
             }
-            HStack(spacing: 10) {
-                TextField("Frage zu dieser Seite…", text: $store.draft, axis: .vertical)
-                    .lineLimit(1 ... 4)
+            if !store.sending {
+                chipRow
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(fieldPrompt, text: $store.draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1 ... 5)
                     .focused($inputFocused)
                     .onSubmit(send)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .cardSurface(cornerRadius: 22)
+                    .padding(.vertical, 9)
+                    .background(Color(.secondarySystemGroupedBackground), in: Capsule())
                 Button(action: send) {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(canSend ? Theme.accent : Color.secondary.opacity(0.4), in: Circle())
+                    Image(systemName: "arrow.up")
+                        .font(.subheadline.weight(.semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.circle)
+                .controlSize(.large)
                 .disabled(!canSend)
                 .accessibilityLabel("Frage senden")
             }
+            .padding(.horizontal, Theme.Space.inset)
         }
-        .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 12)
         .background(.bar)
     }
 
+    /// The field says what the next question would be about, which is where a
+    /// follow-up differs from a first question.
+    private var fieldPrompt: String {
+        store.turns.isEmpty ? "Frage zu Seite \(pageLabel)…" : "Nachfragen…"
+    }
+
+    /// Whether the server can be asked at all right now.
+    private var canAsk: Bool {
+        !store.sending && model.connectivity.isOnline && !visiblePages.isEmpty
+    }
+
     private var canSend: Bool {
-        store.canSend && model.connectivity.isOnline && !visiblePages.isEmpty
+        store.canSend && canAsk
     }
 
     private func send() {
