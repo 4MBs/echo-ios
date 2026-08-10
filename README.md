@@ -202,23 +202,6 @@ answer arrives with the pages it rests on attached, named with the book's printe
 numbers, and tapping one turns the reader to it. Reading a downloaded book stays
 offline; asking about it needs the server.
 
-**Tap the exercise itself.** Every block of text on the open pages gets a faint
-box: tapping one picks it, Buch-KI opens with it already attached, and sending
-needs nothing typed. The number *and* the wording go with the question, so
-"Aufgabe 1" is never the wrong Aufgabe 1 when two pages are on screen, and
-typing alongside a picked block adds to it rather than replacing it. Blocks that
-are not exercises — a paragraph, a table, an info box — are tappable too; those
-get explained rather than solved.
-
-Nothing is recognised on the device. A schoolbook scan has no text layer to
-hit-test, and working the exercises out from the numbering does not survive
-contact with real books: a line-number ruler down the margin of a literary text
-counts exactly like a task list, a running head numbered "1" is not Aufgabe 1,
-and a spread's list runs 8, 9 on one page and 1 … 8 on the other. So the server
-reads each book once with a layout-aware OCR model and the app just draws what
-it found. A book the server has not read yet simply has nothing to tap, and the
-panel says so.
-
 <p align="center">
   <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">
 </p>
