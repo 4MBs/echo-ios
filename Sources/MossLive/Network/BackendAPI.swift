@@ -333,25 +333,70 @@ struct BackendAPI {
         let text: String
     }
 
+    /// Optional rich context from the SwiftChat-style composer. Text is always
+    /// included in the question as a compatibility fallback; capable servers
+    /// can additionally consume the original image data from `attachments`.
+    struct ChatAttachment: Sendable {
+        let kind: String
+        let fileName: String
+        let mimeType: String
+        let dataBase64: String?
+        let extractedText: String
+    }
+
     /// Ask the AI a free-form question, optionally grounded in the live
     /// session's transcript or a stored lesson.
     func chat(
         question: String,
         history: [ChatTurn],
         sessionId: String? = nil,
-        useLive: Bool = false
+        useLive: Bool = false,
+        attachments: [ChatAttachment] = [],
+        webSearch: Bool = false
     ) async throws -> String {
+        let extractedContext = attachments.compactMap { attachment -> String? in
+            let text = attachment.extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return "Anhang \(attachment.fileName):\n\(text.prefix(12_000))"
+        }.joined(separator: "\n\n")
+        let serverQuestion = extractedContext.isEmpty
+            ? question
+            : "\(question)\n\n\(extractedContext)"
         var body: [String: Any] = [
-            "question": question,
+            "question": serverQuestion,
             "use_live": useLive,
             "history": history.map { ["role": $0.role, "text": $0.text] },
         ]
+        if webSearch { body["web_search"] = true }
+        if !attachments.isEmpty {
+            body["attachments"] = attachments.map { attachment in
+                var value: [String: Any] = [
+                    "type": attachment.kind,
+                    "file_name": attachment.fileName,
+                    "mime_type": attachment.mimeType,
+                    "text": attachment.extractedText,
+                ]
+                if let data = attachment.dataBase64 { value["data"] = data }
+                return value
+            }
+        }
         if let sessionId { body["session_id"] = sessionId }
         struct Response: Decodable {
             let ok: Bool
             let text: String?
         }
-        let data = try await request("/chat", method: "POST", jsonBody: body)
+        let data: Data
+        do {
+            data = try await request("/chat", method: "POST", jsonBody: body)
+        } catch let error as APIError
+            where (error.status == 400 || error.status == 422) && (webSearch || !attachments.isEmpty) {
+            // Older Echo servers know only question/history/session context.
+            // Extracted document text is already part of `serverQuestion`, so
+            // retrying the established payload preserves useful attachments.
+            body["web_search"] = nil
+            body["attachments"] = nil
+            data = try await request("/chat", method: "POST", jsonBody: body)
+        }
         let response = try JSONDecoder().decode(Response.self, from: data)
         guard response.ok, let text = response.text else {
             throw APIError(message: "Der Server hat keine Antwort geliefert.")

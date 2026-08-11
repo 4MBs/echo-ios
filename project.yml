@@ -73,7 +73,14 @@ targets:
           NSAllowsArbitraryLoads: true
         NSMicrophoneUsageDescription: >-
           Echo streams microphone audio to your own private computer for
-          live transcription. Audio never goes to a third-party service.
+          live transcription and lets you dictate questions in AI chat.
+          Audio never goes to a third-party service.
+        NSSpeechRecognitionUsageDescription: >-
+          Echo uses Apple's on-device speech recognition so you can dictate
+          questions in AI chat.
+        NSCameraUsageDescription: >-
+          Echo lets you photograph notes and add their locally recognized text
+          to an AI chat.
         UIBackgroundModes: [audio]
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
