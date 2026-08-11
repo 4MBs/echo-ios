@@ -52,17 +52,17 @@ final class ChatVoiceInput {
         recognitionRequest.requiresOnDeviceRecognition = true
         request = recognitionRequest
 
-        let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
-            recognitionRequest.append(buffer)
-        }
-        hasInputTap = true
-
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            try session.setActive(true)
+
+            let input = audioEngine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                recognitionRequest.append(buffer)
+            }
+            hasInputTap = true
             audioEngine.prepare()
             try audioEngine.start()
             isRecording = true

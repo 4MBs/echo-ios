@@ -432,7 +432,7 @@ struct ChatView: View {
                         throw ChatAttachmentProcessor.ProcessingError.unreadable
                     }
                     let name = items.count == 1 ? "Foto.jpg" : "Foto \(index + 1).jpg"
-                    pendingAttachments.append(try await ChatAttachmentProcessor.image(data: data, fileName: name))
+                    try await pendingAttachments.append(ChatAttachmentProcessor.image(data: data, fileName: name))
                 } catch {
                     localError = error.localizedDescription
                 }
@@ -445,8 +445,8 @@ struct ChatView: View {
         Task {
             defer { processingAttachmentCount -= 1 }
             do {
-                pendingAttachments.append(
-                    try await ChatAttachmentProcessor.image(data: data, fileName: fileName)
+                try await pendingAttachments.append(
+                    ChatAttachmentProcessor.image(data: data, fileName: fileName)
                 )
             } catch {
                 localError = error.localizedDescription
@@ -462,7 +462,7 @@ struct ChatView: View {
                 Task {
                     defer { processingAttachmentCount -= 1 }
                     do {
-                        pendingAttachments.append(try await ChatAttachmentProcessor.document(url: url))
+                        try await pendingAttachments.append(ChatAttachmentProcessor.document(url: url))
                     } catch {
                         localError = error.localizedDescription
                     }
@@ -513,7 +513,7 @@ private struct ChatMessageRow: View {
                 if !message.attachments.isEmpty {
                     ChatSentAttachments(attachments: message.attachments)
                 }
-                if message.text.count >= 1_200 {
+                if message.text.count >= 1200 {
                     Button { showLongMessage = true } label: {
                         ChatLongMessageCard(text: message.text)
                     }

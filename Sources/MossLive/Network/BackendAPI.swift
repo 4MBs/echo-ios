@@ -357,7 +357,7 @@ struct BackendAPI {
         let extractedContext = attachments.compactMap { attachment -> String? in
             let text = attachment.extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
-            return "Anhang \(attachment.fileName):\n\(text.prefix(12_000))"
+            return "Anhang \(attachment.fileName):\n\(text.prefix(12000))"
         }.joined(separator: "\n\n")
         let serverQuestion = extractedContext.isEmpty
             ? question

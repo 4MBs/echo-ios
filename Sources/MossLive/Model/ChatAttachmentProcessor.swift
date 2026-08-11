@@ -30,8 +30,8 @@ enum ChatAttachmentProcessor {
         UTType(filenameExtension: "md") ?? .plainText,
     ]
 
-    private static let maximumBytes = 12 * 1_024 * 1_024
-    private static let maximumExtractedCharacters = 36_000
+    private static let maximumBytes = 12 * 1024 * 1024
+    private static let maximumExtractedCharacters = 36000
 
     static func image(data: Data, fileName: String) async throws -> ChatStore.Attachment {
         guard data.count <= maximumBytes else { throw ProcessingError.tooLarge }
@@ -70,7 +70,7 @@ enum ChatAttachmentProcessor {
                 var pageText = page.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 if pageText.filter(\.isLetter).count < 8 {
                     let bounds = page.bounds(for: .mediaBox)
-                    let width: CGFloat = 1_800
+                    let width: CGFloat = 1800
                     let image = page.thumbnail(
                         of: CGSize(width: width, height: max(1, width * bounds.height / max(1, bounds.width))),
                         for: .mediaBox

@@ -247,7 +247,7 @@ final class ChatStore {
         api: BackendAPI
     ) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (!trimmed.isEmpty || !attachments.isEmpty), !sending else { return }
+        guard !trimmed.isEmpty || !attachments.isEmpty, !sending else { return }
 
         let visibleQuestion = trimmed.isEmpty ? "Analysiere die Anhänge." : trimmed
         let history = backendHistory(from: messages)
@@ -260,6 +260,7 @@ final class ChatStore {
         append(user)
         if conversations[currentIndex].messages.count == 1 {
             conversations[currentIndex].title = Self.title(for: visibleQuestion, attachments: attachments)
+            persist()
         }
         startRequest(for: user, history: history, api: api)
     }
@@ -419,7 +420,7 @@ final class ChatStore {
         let attachmentText = message.attachments.compactMap { attachment -> String? in
             let text = attachment.extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
-            return "Anhang \(attachment.fileName):\n\(text.prefix(12_000))"
+            return "Anhang \(attachment.fileName):\n\(text.prefix(12000))"
         }.joined(separator: "\n\n")
         guard !attachmentText.isEmpty else { return message.text }
         return "\(message.text)\n\n\(attachmentText)"
