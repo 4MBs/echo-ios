@@ -123,7 +123,18 @@ struct BookAIAnswerDocument: Equatable {
     private static func isSectionLabel(_ line: String) -> Bool {
         guard line.hasSuffix(":"), line.count < 60 else { return false }
         let label = line.dropLast().lowercased()
-        return ["antwort", "ergebnis", "lösung", "lösungsweg", "schritte", "erklärung", "begründung", "wichtig", "merksatz", "prüfung"].contains(label)
+        return [
+            "antwort",
+            "ergebnis",
+            "lösung",
+            "lösungsweg",
+            "schritte",
+            "erklärung",
+            "begründung",
+            "wichtig",
+            "merksatz",
+            "prüfung"
+        ].contains(label)
     }
 }
 

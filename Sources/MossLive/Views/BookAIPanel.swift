@@ -216,9 +216,12 @@ struct BookAIPanel: View {
 
             if !model.connectivity.isOnline {
                 Section {
-                    Label("Fragen benötigen eine Serververbindung. Das Buch bleibt verfügbar.", systemImage: "wifi.slash")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Label(
+                        "Fragen benötigen eine Serververbindung. Das Buch bleibt verfügbar.",
+                        systemImage: "wifi.slash"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
             }
         }

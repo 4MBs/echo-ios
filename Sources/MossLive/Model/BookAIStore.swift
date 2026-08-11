@@ -77,10 +77,12 @@ final class BookAIStore {
         get { drafts[context] ?? "" }
         set { drafts[context] = newValue }
     }
+
     var sending: Bool { requestIDs[context] != nil }
     var pending: (question: String, pages: [Int])? {
         pendingByContext[context].map { ($0, context.pages) }
     }
+
     var errorMessage: String? { errors[context] }
     var lastFailed: (question: String, pages: [Int])? {
         failedQuestions[context].map { ($0, context.pages) }
@@ -110,7 +112,8 @@ final class BookAIStore {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         let preparedRequest = (request ?? trimmed).trimmingCharacters(in: .whitespacesAndNewlines)
         let target = context
-        guard !trimmed.isEmpty, !preparedRequest.isEmpty, requestIDs[target] == nil, !target.pages.isEmpty else { return }
+        guard !trimmed.isEmpty, !preparedRequest.isEmpty, requestIDs[target] == nil,
+              !target.pages.isEmpty else { return }
         errors[target] = nil
         failedQuestions[target] = nil
         failedRequests[target] = nil
@@ -120,13 +123,12 @@ final class BookAIStore {
         requestIDs[target] = operationID
 
         let thread = threads[target] ?? []
-        let previous: Turn?
-        if let contextTurn {
-            previous = contextTurn
+        let previous: Turn? = if let contextTurn {
+            contextTurn
         } else if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
-            previous = index > 0 ? thread[index - 1] : nil
+            index > 0 ? thread[index - 1] : nil
         } else {
-            previous = thread.last
+            thread.last
         }
         requestTasks[target] = Task { [weak self] in
             guard let self else { return }
