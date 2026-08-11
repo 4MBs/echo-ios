@@ -349,10 +349,12 @@ struct BackendAPI {
     func chat(
         question: String,
         history: [ChatTurn],
+        conversationId: UUID,
         sessionId: String? = nil,
         useLive: Bool = false,
         attachments: [ChatAttachment] = [],
-        webSearch: Bool = false
+        webSearch: Bool = false,
+        resetNativeThread: Bool = false
     ) async throws -> String {
         let extractedContext = attachments.compactMap { attachment -> String? in
             let text = attachment.extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -366,8 +368,10 @@ struct BackendAPI {
             "question": serverQuestion,
             "use_live": useLive,
             "history": history.map { ["role": $0.role, "text": $0.text] },
+            "conversation_id": conversationId.uuidString.lowercased(),
         ]
         if webSearch { body["web_search"] = true }
+        if resetNativeThread { body["reset_native_thread"] = true }
         if !attachments.isEmpty {
             body["attachments"] = attachments.map { attachment in
                 var value: [String: Any] = [

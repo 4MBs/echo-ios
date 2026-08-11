@@ -275,7 +275,7 @@ final class ChatStore {
         let history = backendHistory(from: Array(messages[..<index]))
         conversations[currentIndex].messages = Array(messages[...index])
         touchCurrentConversation()
-        startRequest(for: user, history: history, api: api)
+        startRequest(for: user, history: history, resetNativeThread: true, api: api)
     }
 
     func editAndResend(_ userMessageID: UUID, text: String, api: BackendAPI) {
@@ -291,7 +291,7 @@ final class ChatStore {
             conversations[currentIndex].title = Self.title(for: trimmed, attachments: user.attachments)
         }
         touchCurrentConversation()
-        startRequest(for: user, history: history, api: api)
+        startRequest(for: user, history: history, resetNativeThread: true, api: api)
     }
 
     func regenerate(after assistantMessageID: UUID, api: BackendAPI) {
@@ -305,7 +305,7 @@ final class ChatStore {
         let history = backendHistory(from: Array(messages[..<userIndex]))
         conversations[currentIndex].messages = Array(messages[...userIndex])
         touchCurrentConversation()
-        startRequest(for: user, history: history, api: api)
+        startRequest(for: user, history: history, resetNativeThread: true, api: api)
     }
 
     func cancel() {
@@ -318,6 +318,7 @@ final class ChatStore {
     private func startRequest(
         for user: Message,
         history: [BackendAPI.ChatTurn],
+        resetNativeThread: Bool = false,
         api: BackendAPI
     ) {
         errorMessage = nil
@@ -344,24 +345,30 @@ final class ChatStore {
                     try await api.chat(
                         question: user.text,
                         history: history,
+                        conversationId: selectedID,
                         useLive: true,
                         attachments: payloads,
-                        webSearch: user.usedWebSearch
+                        webSearch: user.usedWebSearch,
+                        resetNativeThread: resetNativeThread
                     )
                 case .lesson(let id, _):
                     try await api.chat(
                         question: user.text,
                         history: history,
+                        conversationId: selectedID,
                         sessionId: id,
                         attachments: payloads,
-                        webSearch: user.usedWebSearch
+                        webSearch: user.usedWebSearch,
+                        resetNativeThread: resetNativeThread
                     )
                 case .none:
                     try await api.chat(
                         question: user.text,
                         history: history,
+                        conversationId: selectedID,
                         attachments: payloads,
-                        webSearch: user.usedWebSearch
+                        webSearch: user.usedWebSearch,
+                        resetNativeThread: resetNativeThread
                     )
                 }
                 guard !Task.isCancelled,
