@@ -64,8 +64,6 @@ struct MainTabView: View {
                     .badge(tab == .stunden ? pendingNoteImportCount : 0)
             }
             .listStyle(.sidebar)
-            .navigationTitle("Echo")
-            .navigationBarTitleDisplayMode(.inline)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 sidebarFooter

@@ -87,10 +87,9 @@ struct BookAIPanel: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             Button(action: close) {
-                Label("Seite fragen", systemImage: "sparkles")
-                    .labelStyle(.titleAndIcon)
+                Image(systemName: "xmark")
             }
-            .accessibilityLabel("Seite fragen schließen")
+            .accessibilityLabel("Schließen")
         }
         if store.hasContent {
             ToolbarItem(placement: .topBarTrailing) {
