@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 import os
+import SwiftUI
+
+extension Notification.Name {
+    /// Sent synchronously before the system split view starts changing width.
+    static let readerContainerWillResize = Notification.Name("MossLive.readerContainerWillResize")
+}
 
 /// Central state machine + orchestration: audio engine -> WebSocket -> UI.
 @MainActor
@@ -51,6 +57,10 @@ final class AppModel {
     /// shell so a screen can send the student somewhere that answers its empty
     /// state ("Zur Aufnahme") instead of describing it.
     var selectedTab: AppTab? = .aufnahme
+
+    /// Kept on the shared model so a pushed reader can prepare its expensive
+    /// PDF surface before the system starts resizing the split view.
+    var columnVisibility: NavigationSplitViewVisibility = .all
 
     let settings = AppSettings()
     let timetable: TimetableStore

@@ -1,3 +1,4 @@
+import Combine
 import PDFKit
 import SwiftUI
 
@@ -278,6 +279,14 @@ private struct PDFReader: View {
                 guard let selectedRegion, !pages.contains(selectedRegion.pdfPage) else { return }
                 self.selectedRegion = nil
                 proxy.clearRegionSelection()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .readerContainerWillResize)) { _ in
+                guard !reduceMotion else { return }
+                proxy.prepareForAnimatedResize(duration: 0.45)
+            }
+            .onChange(of: askingBookAI) {
+                guard horizontalSizeClass != .compact, !reduceMotion else { return }
+                proxy.prepareForAnimatedResize(duration: 0.48)
             }
     }
 
@@ -686,6 +695,10 @@ private final class PDFViewProxy {
         pdfView?.display(region: nil)
     }
 
+    func prepareForAnimatedResize(duration: TimeInterval) {
+        pdfView?.prepareForAnimatedResize(duration: duration)
+    }
+
     private func go(toIndex index: Int) {
         guard let pdfView, let document = pdfView.document, document.pageCount > 0 else { return }
         let clamped = min(max(index, 0), document.pageCount - 1)
@@ -735,8 +748,10 @@ private final class BookPDFView: PDFView {
     private var selectionOverlay: BookRegionSelectionOverlay?
     private var adjustmentOverlay: BookRegionAdjustmentOverlay?
     private var displayedRegion: BackendAPI.BookPageRegion?
-    private var lastLayoutSize = CGSize.zero
-    private var pendingScaleUpdate: DispatchWorkItem?
+    private var resizeSnapshot: UIView?
+    private var resizeCompletion: DispatchWorkItem?
+    private var hiddenDuringResize: [UIView] = []
+    private var holdsPDFLayout = false
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
     private lazy var deselectionTap = UITapGestureRecognizer(
@@ -762,14 +777,16 @@ private final class BookPDFView: PDFView {
     }
 
     override func layoutSubviews() {
-        super.layoutSubviews()
-        let sizeChanged = bounds.size != lastLayoutSize
-        lastLayoutSize = bounds.size
-        if restingScale == 0 {
-            applyScaleLimits()
-        } else if sizeChanged {
-            scheduleScaleUpdate()
+        // PDFKit rebuilds page tiles synchronously for every intermediate width
+        // of a split-view animation. Keep its hierarchy at the last stable
+        // layout while a lightweight snapshot follows the system animation.
+        if holdsPDFLayout {
+            resizeSnapshot?.frame = bounds
+            if let resizeSnapshot { bringSubviewToFront(resizeSnapshot) }
+            return
         }
+        super.layoutSubviews()
+        applyScaleLimits()
         selectionOverlay?.frame = bounds
         observeScrollingIfNeeded()
         updateDisplayedRegion()
@@ -1000,21 +1017,57 @@ private final class BookPDFView: PDFView {
         restingScale = fit
     }
 
-    /// Split-view and assistant animations can resize the reader dozens of
-    /// times in a fraction of a second. Re-fitting PDFKit on every intermediate
-    /// width invalidates its page tiles repeatedly and blocks the animation.
-    /// Coalesce those bounds changes and fit once at the settled size.
-    func scheduleScaleUpdate() {
-        pendingScaleUpdate?.cancel()
-        let update = DispatchWorkItem { [weak self] in
-            self?.applyScaleLimits()
+    /// Freeze only PDFKit's expensive internal layout during a known animated
+    /// container resize. The snapshot remains inside this view, so SwiftUI and
+    /// the system sidebar animate normally; the live PDF is laid out once at
+    /// the final size and cross-faded back in.
+    func prepareForAnimatedResize(duration: TimeInterval) {
+        resizeCompletion?.cancel()
+        if !holdsPDFLayout, let snapshot = snapshotView(afterScreenUpdates: false) {
+            hiddenDuringResize = subviews.filter { !$0.isHidden }
+            hiddenDuringResize.forEach { $0.isHidden = true }
+            snapshot.frame = bounds
+            snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            snapshot.isUserInteractionEnabled = false
+            addSubview(snapshot)
+            resizeSnapshot = snapshot
+            holdsPDFLayout = true
         }
-        pendingScaleUpdate = update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: update)
+        guard holdsPDFLayout else { return }
+
+        let completion = DispatchWorkItem { [weak self] in
+            self?.finishAnimatedResize()
+        }
+        resizeCompletion = completion
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: completion)
+    }
+
+    private func finishAnimatedResize() {
+        guard holdsPDFLayout else { return }
+        resizeCompletion = nil
+        holdsPDFLayout = false
+        hiddenDuringResize.forEach { $0.isHidden = false }
+        hiddenDuringResize.removeAll(keepingCapacity: true)
+        setNeedsLayout()
+        layoutIfNeeded()
+        guard let snapshot = resizeSnapshot else { return }
+        bringSubviewToFront(snapshot)
+        // Give PDFKit one display pass to populate its final tiles behind the
+        // snapshot, then reveal them without flashing an empty page.
+        DispatchQueue.main.async { [weak self] in
+            UIView.animate(withDuration: 0.12, animations: {
+                snapshot.alpha = 0
+            }, completion: { _ in
+                snapshot.removeFromSuperview()
+                if self?.resizeSnapshot === snapshot {
+                    self?.resizeSnapshot = nil
+                }
+            })
+        }
     }
 
     deinit {
-        pendingScaleUpdate?.cancel()
+        resizeCompletion?.cancel()
     }
 }
 
@@ -1085,7 +1138,7 @@ private struct PDFKitView: UIViewRepresentable {
     private func updatePageState(_ view: PDFView) {
         guard let document = view.document else { return }
         // A page of a different size needs its own floor, so re-fit on arrival.
-        (view as? BookPDFView)?.scheduleScaleUpdate()
+        (view as? BookPDFView)?.applyScaleLimits()
         if pageCount != document.pageCount {
             pageCount = document.pageCount
         }

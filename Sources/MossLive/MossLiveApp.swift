@@ -26,7 +26,6 @@ struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingNoteImportCount = 0
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     /// Which place the sidebar is on. It lives on the model rather than in this
     /// view so screens can change the selected destination directly.
@@ -34,8 +33,21 @@ struct MainTabView: View {
         Binding(get: { model.selectedTab }, set: { model.selectedTab = $0 })
     }
 
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { model.columnVisibility },
+            set: { visibility in
+                guard visibility != model.columnVisibility else { return }
+                // NotificationCenter publishes synchronously, so the open
+                // reader can snapshot its PDF before the first resize frame.
+                NotificationCenter.default.post(name: .readerContainerWillResize, object: nil)
+                model.columnVisibility = visibility
+            }
+        )
+    }
+
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: columnVisibility) {
             List(AppTab.navigation, selection: selection) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
