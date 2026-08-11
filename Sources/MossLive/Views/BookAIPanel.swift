@@ -9,7 +9,6 @@ struct BookAIPanel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let bookID: String
-    let bookTitle: String
     let numbering: BookPageNumbering
     let visiblePages: [Int]
     let region: BackendAPI.BookPageRegion?
@@ -56,7 +55,9 @@ struct BookAIPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            panelHeader
+            if store.hasConversation {
+                panelHeader
+            }
 
             messagesArea
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
@@ -90,36 +91,27 @@ struct BookAIPanel: View {
     // MARK: - Header
 
     private var panelHeader: some View {
-        ZStack {
-            Text(bookTitle)
-                .font(.headline)
-                .lineLimit(1)
-                .padding(.horizontal, store.hasConversation ? 88 : 12)
+        HStack(spacing: 4) {
+            Spacer()
 
-            if store.hasConversation {
-                HStack(spacing: 4) {
-                    Spacer()
-
-                    Button {
-                        store.clear()
-                    } label: {
-                        Image(systemName: "plus")
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Neue Unterhaltung")
-
-                    Menu {
-                        Button("Unterhaltung leeren", systemImage: "eraser", role: .destructive) {
-                            store.clear()
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 36, height: 36)
-                    }
-                    .accessibilityLabel("Chatoptionen")
-                }
+            Button {
+                store.clear()
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: 36, height: 36)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Neue Unterhaltung")
+
+            Menu {
+                Button("Unterhaltung leeren", systemImage: "eraser", role: .destructive) {
+                    store.clear()
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("Chatoptionen")
         }
         .foregroundStyle(.white)
         .frame(height: 50)

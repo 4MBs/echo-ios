@@ -48,7 +48,6 @@ struct BookReaderView: View {
                 PDFReader(
                     url: url,
                     book: book,
-                    bookTitle: displayedTitle,
                     askingBookAI: $askingBookAI,
                     bookAIDetent: $bookAIDetent
                 )
@@ -63,17 +62,11 @@ struct BookReaderView: View {
         // Without it, iPadOS briefly lays out the previous screen's title and
         // then collapses it to a chevron, which looks like a sideways jump.
         .toolbarRole(.editor)
-        // The split view's default toggle recalculates its position when a
-        // destination also gains a back button. Replace it with one stable
-        // navigation item that occupies the same slot for the reader's entire
-        // lifetime.
-        .toolbar(removing: .sidebarToggle)
         // Install the assistant control for the destination's full lifetime.
         // It now participates in the navigation push instead of popping into
         // place after the PDF loads, and the leading slot remains available
         // for iPadOS' back and collapsed-sidebar controls.
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { sidebarButton }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 bookAIButton
                 if model.settings.showBookRenaming {
@@ -105,22 +98,6 @@ struct BookReaderView: View {
 
     private var assistantAnimation: Animation? {
         reduceMotion ? nil : .smooth(duration: 0.42)
-    }
-
-    private var sidebarCollapsed: Bool {
-        if case .detailOnly = model.columnVisibility { return true }
-        return false
-    }
-
-    private var sidebarButton: some View {
-        Button {
-            withAnimation(assistantAnimation) {
-                model.columnVisibility = sidebarCollapsed ? .all : .detailOnly
-            }
-        } label: {
-            Image(systemName: "sidebar.leading")
-        }
-        .accessibilityLabel(sidebarCollapsed ? "Seitenleiste einblenden" : "Seitenleiste ausblenden")
     }
 
     private var bookAIButton: some View {
@@ -220,7 +197,6 @@ private struct PDFReader: View {
 
     let url: URL
     let book: BackendAPI.Book
-    let bookTitle: String
     @Binding var askingBookAI: Bool
     @Binding var bookAIDetent: PresentationDetent
 
@@ -232,13 +208,11 @@ private struct PDFReader: View {
     init(
         url: URL,
         book: BackendAPI.Book,
-        bookTitle: String,
         askingBookAI: Binding<Bool>,
         bookAIDetent: Binding<PresentationDetent>
     ) {
         self.url = url
         self.book = book
-        self.bookTitle = bookTitle
         _askingBookAI = askingBookAI
         _bookAIDetent = bookAIDetent
         _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(book.id)")
@@ -377,7 +351,6 @@ private struct PDFReader: View {
     private var bookAIPanel: some View {
         BookAIPanel(
             bookID: book.id,
-            bookTitle: bookTitle,
             numbering: numbering,
             visiblePages: visiblePages,
             region: selectedRegion,
