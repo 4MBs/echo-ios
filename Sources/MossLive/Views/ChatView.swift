@@ -109,59 +109,30 @@ struct ChatView: View {
 
     // MARK: - Input
 
-    /// A direct SwiftUI translation of T3's pill-to-card composer. The same
-    /// field remains mounted during expansion so focus and selection survive.
+    /// Echo only needs one context selector, so it stays inside T3's compact
+    /// composer rather than expanding into an 174pt agent toolbar on focus.
     private var inputBar: some View {
         VStack(spacing: 8) {
             composerStatus
 
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Stelle eine Frage zum Unterricht…", text: $draft, axis: .vertical)
-                        .lineLimit(1 ... 5)
-                        .focused($inputFocused)
-                        .submitLabel(.send)
-                        .onSubmit(send)
-                        .padding(.leading, composerExpanded ? 4 : 13)
-                        .frame(
-                            minHeight: composerExpanded ? 80 : 36,
-                            maxHeight: composerExpanded ? 160 : 36,
-                            alignment: composerExpanded ? .topLeading : .leading
-                        )
-
-                    if !composerExpanded {
-                        sendButton
-                    }
-                }
-
-                if composerExpanded {
-                    HStack(spacing: 8) {
-                        contextChip
-                        Spacer(minLength: 8)
-                        sendButton
-                    }
-                    .padding(.top, 8)
-                    .transition(.opacity)
-                }
+            HStack(alignment: .bottom, spacing: 6) {
+                contextControl
+                TextField("Stelle eine Frage zum Unterricht…", text: $draft, axis: .vertical)
+                    .lineLimit(1 ... 4)
+                    .focused($inputFocused)
+                    .submitLabel(.send)
+                    .onSubmit(send)
+                    .padding(.vertical, 9)
+                    .frame(minHeight: 44, maxHeight: 96, alignment: .leading)
+                sendButton
             }
-            .padding(.horizontal, composerExpanded ? 14 : 5)
-            .padding(.vertical, composerExpanded ? 12 : 5)
-            .floatingComposerSurface(
-                cornerRadius: composerExpanded
-                    ? Theme.Conversation.expandedComposerRadius
-                    : Theme.Conversation.collapsedComposerRadius
-            )
-            .animation(reduceMotion ? nil : .snappy, value: composerExpanded)
+            .padding(5)
+            .floatingComposerSurface(cornerRadius: 28)
         }
         .frame(maxWidth: Theme.Width.readable)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
-        .padding(.top, composerExpanded ? 8 : 6)
-        .padding(.bottom, composerExpanded ? 8 : 6)
-    }
-
-    private var composerExpanded: Bool {
-        inputFocused || !draft.isEmpty
+        .padding(.vertical, 6)
     }
 
     private var sendButton: some View {
@@ -169,9 +140,7 @@ struct ChatView: View {
             Image(systemName: "arrow.up")
                 .font(.subheadline.weight(.semibold))
         }
-        .buttonStyle(.glassProminent)
-        .buttonBorderShape(.circle)
-        .controlSize(.large)
+        .buttonStyle(ConversationPrimaryButtonStyle())
         .disabled(!canSend)
         .accessibilityLabel("Frage senden")
     }
@@ -203,13 +172,13 @@ struct ChatView: View {
         }
     }
 
-    @ViewBuilder
-    private var contextChip: some View {
+    @ViewBuilder private var contextControl: some View {
         if model.phase == .recording {
-            Label("Aktuelle Aufnahme", systemImage: "record.circle")
-                .font(.footnote.weight(.medium))
+            Image(systemName: "record.circle")
+                .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(Theme.accent)
-                .frame(minHeight: 36)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Kontext: Aktuelle Aufnahme")
         } else {
             Menu {
                 Button("Ohne Kontext") { chat.context = .none }
@@ -219,15 +188,10 @@ struct ChatView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "text.book.closed")
-                    Text(chat.context.label)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down").font(.caption2)
-                }
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(minHeight: 36)
+                Image(systemName: "text.book.closed")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("Kontext: \(chat.context.label)")
         }

@@ -1,12 +1,11 @@
 import AVFoundation
 import SwiftUI
 
-/// A page-scoped assistant presented by the book reader's adaptive inspector.
-/// Navigation, bars, menus and controls are intentionally system components so
-/// iOS can provide the appropriate Liquid Glass appearance and transitions.
+/// A page-scoped assistant presented as a flat sibling pane on wide screens and
+/// a native sheet on compact screens. Its custom header avoids nesting another
+/// navigation stack inside the book reader.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let bookID: String
     let bookTitle: String
@@ -18,7 +17,6 @@ struct BookAIPanel: View {
     let goToPage: (Int) -> Void
     let requestRegion: () -> Void
     let clearRegion: () -> Void
-    let close: () -> Void
 
     @FocusState private var inputFocused: Bool
     @FocusState private var exerciseFocused: Bool
@@ -56,14 +54,13 @@ struct BookAIPanel: View {
     }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            panelHeader
+            Divider()
             rootContent
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-                .navigationTitle(contextLabel)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { toolbar }
         }
-        .background(Color(.systemBackground))
+        .background(Color(.systemBackground).ignoresSafeArea())
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
@@ -79,33 +76,38 @@ struct BookAIPanel: View {
         }
     }
 
-    // MARK: - Navigation
+    // MARK: - Header
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button(action: close) {
-                Image(systemName: "xmark")
-            }
-            .accessibilityLabel("Schließen")
-        }
-        if store.hasContent {
-            ToolbarItem(placement: .topBarTrailing) {
-                newQuestionMenu
-            }
-        }
-        if store.hasConversation {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
-                        store.clear()
-                    }
-                } label: {
-                    Image(systemName: "eraser")
+    private var panelHeader: some View {
+        HStack(spacing: 6) {
+            Text(contextLabel)
+                .font(.headline)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            GlassEffectContainer(spacing: 6) {
+                if store.hasContent {
+                    newQuestionMenu
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: Circle())
                 }
-                .accessibilityLabel("Verlauf dieser Seite leeren")
+                if store.hasConversation {
+                    Menu {
+                        Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
+                            store.clear()
+                        }
+                    } label: {
+                        Image(systemName: "eraser")
+                            .frame(width: 44, height: 44)
+                    }
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .accessibilityLabel("Verlauf dieser Seite leeren")
+                }
             }
         }
+        .padding(.horizontal, 12)
+        .frame(height: 56)
     }
 
     private var newQuestionMenu: some View {
@@ -131,7 +133,8 @@ struct BookAIPanel: View {
                 action: requestRegion
             )
         } label: {
-            Label("Neue Frage", systemImage: "square.and.pencil")
+            Image(systemName: "square.and.pencil")
+                .frame(width: 44, height: 44)
         }
         .accessibilityLabel("Neue Frage oder Aktion")
     }
@@ -584,52 +587,23 @@ struct BookAIPanel: View {
                 followUps
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    TextField(fieldPrompt, text: draftBinding, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(1 ... 5)
-                        .focused($inputFocused)
-                        .submitLabel(.send)
-                        .onSubmit(sendDraft)
-                        .padding(.leading, composerExpanded ? 4 : 13)
-                        .frame(
-                            minHeight: composerExpanded ? 80 : 36,
-                            maxHeight: composerExpanded ? 160 : 36,
-                            alignment: composerExpanded ? .topLeading : .leading
-                        )
-
-                    if !composerExpanded {
-                        bookSendButton
-                    }
-                }
-
-                if composerExpanded {
-                    HStack(spacing: 8) {
-                        contextMenu
-                        Spacer(minLength: 8)
-                        bookSendButton
-                    }
-                    .padding(.top, 8)
-                    .transition(.opacity)
-                }
+            HStack(alignment: .bottom, spacing: 6) {
+                contextMenu
+                TextField(fieldPrompt, text: draftBinding, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1 ... 4)
+                    .focused($inputFocused)
+                    .submitLabel(.send)
+                    .onSubmit(sendDraft)
+                    .padding(.vertical, 9)
+                    .frame(minHeight: 44, maxHeight: 96, alignment: .leading)
+                bookSendButton
             }
-            .padding(.horizontal, composerExpanded ? 14 : 5)
-            .padding(.vertical, composerExpanded ? 12 : 5)
-            .floatingComposerSurface(
-                cornerRadius: composerExpanded
-                    ? Theme.Conversation.expandedComposerRadius
-                    : Theme.Conversation.collapsedComposerRadius
-            )
+            .padding(5)
+            .floatingComposerSurface(cornerRadius: 28)
         }
         .padding(.horizontal, 16)
-        .padding(.top, composerExpanded ? 8 : 6)
-        .padding(.bottom, composerExpanded ? 8 : 6)
-        .animation(reduceMotion ? nil : .snappy, value: composerExpanded)
-    }
-
-    private var composerExpanded: Bool {
-        inputFocused || !store.draft.isEmpty
+        .padding(.vertical, 6)
     }
 
     private var contextMenu: some View {
@@ -638,16 +612,12 @@ struct BookAIPanel: View {
                 .disabled(activeRegion == nil && context.pages == visiblePages)
             Button("Bereich markieren", systemImage: "rectangle.dashed") { requestRegion() }
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: activeRegion == nil ? "doc" : "rectangle.dashed")
-                Text(contextLabel)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down").font(.caption2)
-            }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(.tint)
-            .frame(minHeight: 36)
+            Image(systemName: activeRegion == nil ? "doc" : "rectangle.dashed")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
         }
+        .accessibilityLabel("Kontext: \(contextLabel)")
     }
 
     private var bookSendButton: some View {
@@ -657,9 +627,7 @@ struct BookAIPanel: View {
             Image(systemName: store.sending ? "stop.fill" : "arrow.up")
                 .font(.subheadline.weight(.semibold))
         }
-        .buttonStyle(.glassProminent)
-        .buttonBorderShape(.circle)
-        .controlSize(.large)
+        .buttonStyle(ConversationPrimaryButtonStyle())
         .disabled(!store.sending && !canSend)
         .accessibilityLabel(store.sending ? "Antwort stoppen" : "Frage senden")
     }

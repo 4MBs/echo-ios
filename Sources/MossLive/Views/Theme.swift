@@ -65,8 +65,6 @@ enum Theme {
         static let userHorizontalInset: CGFloat = 14
         static let userVerticalInset: CGFloat = 10
         static let turnSpacing: CGFloat = 20
-        static let collapsedComposerRadius: CGFloat = 999
-        static let expandedComposerRadius: CGFloat = 20
     }
 }
 
@@ -166,10 +164,6 @@ extension View {
             .regular.interactive(),
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(.primary.opacity(0.08), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 28, y: 14)
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
     }
 }

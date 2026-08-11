@@ -198,53 +198,27 @@ struct AskAboutCardSheet: View {
                 }
                 .scrollIndicators(.hidden)
             }
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Frag zu dieser Karte", text: $question, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(1 ... 5)
-                        .focused($writing)
-                        .submitLabel(.send)
-                        .onSubmit { send(question) }
-                        .padding(.leading, composerExpanded ? 4 : 13)
-                        .frame(
-                            minHeight: composerExpanded ? 80 : 36,
-                            maxHeight: composerExpanded ? 160 : 36,
-                            alignment: composerExpanded ? .topLeading : .leading
-                        )
-                    if !composerExpanded {
-                        sendButton
-                    }
-                }
-
-                if composerExpanded {
-                    HStack(spacing: 8) {
-                        Label("Diese Karte", systemImage: "rectangle.on.rectangle")
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .frame(minHeight: 36)
-                        Spacer(minLength: 8)
-                        sendButton
-                    }
-                    .padding(.top, 8)
-                    .transition(.opacity)
-                }
+            HStack(alignment: .bottom, spacing: 6) {
+                Image(systemName: "rectangle.on.rectangle")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel("Kontext: Diese Karte")
+                TextField("Frag zu dieser Karte", text: $question, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1 ... 4)
+                    .focused($writing)
+                    .submitLabel(.send)
+                    .onSubmit { send(question) }
+                    .padding(.vertical, 9)
+                    .frame(minHeight: 44, maxHeight: 96, alignment: .leading)
+                sendButton
             }
-            .padding(.horizontal, composerExpanded ? 14 : 5)
-            .padding(.vertical, composerExpanded ? 12 : 5)
-            .floatingComposerSurface(
-                cornerRadius: composerExpanded
-                    ? Theme.Conversation.expandedComposerRadius
-                    : Theme.Conversation.collapsedComposerRadius
-            )
+            .padding(5)
+            .floatingComposerSurface(cornerRadius: 28)
             .padding(.horizontal, 16)
-            .animation(reduceMotion ? nil : .snappy, value: composerExpanded)
         }
-        .padding(.vertical, composerExpanded ? 8 : 6)
-    }
-
-    private var composerExpanded: Bool {
-        writing || !question.isEmpty
+        .padding(.vertical, 6)
     }
 
     private var sendButton: some View {
@@ -254,9 +228,7 @@ struct AskAboutCardSheet: View {
             Image(systemName: "arrow.up")
                 .font(.subheadline.weight(.semibold))
         }
-        .buttonStyle(.glassProminent)
-        .buttonBorderShape(.circle)
-        .controlSize(.large)
+        .buttonStyle(ConversationPrimaryButtonStyle())
         .disabled(sending || question.trimmingCharacters(in: .whitespaces).isEmpty)
         .accessibilityLabel("Frage senden")
     }

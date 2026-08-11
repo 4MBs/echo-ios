@@ -17,6 +17,23 @@ struct ConversationThinkingDots: View {
     }
 }
 
+/// T3's composer uses a solid semantic primary circle inside the glass field,
+/// not a second prominent-glass bubble.
+struct ConversationPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? Color(.systemBackground) : Color(.secondaryLabel))
+            .frame(width: 44, height: 44)
+            .background(
+                isEnabled ? Color.primary : Color(.tertiarySystemFill),
+                in: Circle()
+            )
+            .opacity(configuration.isPressed ? 0.65 : 1)
+    }
+}
+
 /// A quiet copy action with the same immediate confirmation everywhere a
 /// generated answer appears. The state belongs to the button, so copying one
 /// message never changes another message's controls.

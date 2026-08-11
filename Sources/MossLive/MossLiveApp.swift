@@ -34,52 +34,24 @@ struct MossLiveApp: App {
     }
 }
 
-/// iPad shell: a dedicated, collapsible sidebar using T3 Code mobile's iPad
-/// metrics. The content is still Echo's six places, but the column now has the
-/// same inset rows, 12pt continuous selection, blue selected state, quiet
-/// toolbar settings action and near-opaque system surface as T3's thread pane.
+/// T3 Code does not use `NavigationSplitView` for its iPad workspace. It lays
+/// out a rectangular drawer and content pane as siblings, separated by one
+/// hairline. Echo follows that structure here so iOS 26 cannot turn the whole
+/// sidebar into a rounded floating glass card. Only the header control is glass.
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @Environment(\.colorScheme) private var colorScheme
     @State private var pendingNoteImportCount = 0
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            VStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(AppTab.navigation) { tab in
-                            sidebarRow(tab)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.top, 6)
-                }
-                .scrollIndicators(.hidden)
-
-                sidebarFooter
+        GeometryReader { geometry in
+            if usesSidebar(geometry.size) {
+                wideShell(width: geometry.size.width)
+            } else {
+                compactShell
             }
-            .background(Color(.systemBackground))
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        model.selectedTab = .einstellungen
-                    } label: {
-                        Image(systemName: model.selectedTab == .einstellungen
-                            ? "gearshape.fill"
-                            : "gearshape")
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Einstellungen")
-                    .accessibilityAddTraits(model.selectedTab == .einstellungen ? .isSelected : [])
-                }
-            }
-        } detail: {
-            selectedView
         }
-        .navigationSplitViewStyle(.balanced)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
         // Studying covers the whole window, from wherever it was started: the
         // Lernen screen, a subject board or a single lesson. It is a mode, not a
@@ -109,6 +81,97 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pendingNoteImportsChanged)) { _ in
             pendingNoteImportCount = PendingNoteImports.all().count
         }
+    }
+
+    private func usesSidebar(_ size: CGSize) -> Bool {
+        size.width >= 720 && size.height >= 600
+    }
+
+    private func wideShell(width: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            sidebar
+                .frame(width: min(380, max(280, (width * 0.32).rounded())))
+
+            Rectangle()
+                .fill(Color(.separator).opacity(0.7))
+                .frame(width: 0.5)
+                .accessibilityHidden(true)
+
+            selectedView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(detailBackground)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var compactShell: some View {
+        TabView(selection: compactSelection) {
+            ForEach(AppTab.allCases) { tab in
+                tabContent(tab)
+                    .tabItem {
+                        Label(tab.title, systemImage: tab.systemImage)
+                    }
+                    .badge(tab == .stunden ? pendingNoteImportCount : 0)
+                    .tag(tab)
+            }
+        }
+    }
+
+    private var compactSelection: Binding<AppTab> {
+        Binding(
+            get: { model.selectedTab ?? .aufnahme },
+            set: { model.selectedTab = $0 }
+        )
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                GlassEffectContainer(spacing: 2) {
+                    Button {
+                        model.selectedTab = .einstellungen
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 20, weight: .regular))
+                            .frame(width: 50, height: 44)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+                    .accessibilityLabel("Einstellungen")
+                    .accessibilityAddTraits(model.selectedTab == .einstellungen ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 52)
+
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(AppTab.navigation) { tab in
+                        sidebarRow(tab)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 6)
+            }
+            .scrollIndicators(.hidden)
+
+            sidebarFooter
+        }
+        .background(sidebarBackground.ignoresSafeArea())
+    }
+
+    private var sidebarBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 14.0 / 255.0, green: 14.0 / 255.0, blue: 14.0 / 255.0)
+            : .white
+    }
+
+    private var detailBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 10.0 / 255.0, green: 10.0 / 255.0, blue: 10.0 / 255.0)
+            : Color(red: 242.0 / 255.0, green: 242.0 / 255.0, blue: 247.0 / 255.0)
     }
 
     private var sidebarFooter: some View {
@@ -157,9 +220,12 @@ struct MainTabView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    @ViewBuilder
-    private var selectedView: some View {
-        switch model.selectedTab ?? .aufnahme {
+    @ViewBuilder private var selectedView: some View {
+        tabContent(model.selectedTab ?? .aufnahme)
+    }
+
+    @ViewBuilder private func tabContent(_ tab: AppTab) -> some View {
+        switch tab {
         case .aufnahme: LiveView()
         case .stunden: LessonsView()
         case .lernen: TodayView()
