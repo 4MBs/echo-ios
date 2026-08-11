@@ -166,7 +166,6 @@ struct LessonDetailView: View {
             VStack(spacing: 16) {
                 if info.hasAudio { playerCard }
                 summaryCard(ownsScrolling: true)
-                LessonCardsSection(api: api, lesson: info)
             }
             .frame(maxWidth: .infinity)
 
@@ -192,7 +191,6 @@ struct LessonDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     summaryCard(ownsScrolling: false)
-                    LessonCardsSection(api: api, lesson: info)
                     TranscriptCard(
                         segments: detail.segments,
                         player: player,

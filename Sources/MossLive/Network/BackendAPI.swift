@@ -177,7 +177,7 @@ struct BackendAPI {
         var isOffline = false
         /// The HTTP status, when the server did answer. This is how a screen
         /// tells a refusal it should explain ("this lesson is too short for a
-        /// quiz") from a fault it should offer to retry.
+        /// request") from a fault it should offer to retry.
         var status: Int?
         var errorDescription: String? { message }
     }
@@ -402,129 +402,6 @@ struct BackendAPI {
             throw APIError(message: "Der Server hat keine Antwort geliefert.")
         }
         return text
-    }
-
-    // MARK: - Lernen (spaced repetition)
-
-    struct LearnCard: Codable, Sendable, Identifiable, Equatable {
-        let id: String
-        let sessionId: String
-        let subject: String?
-        let lessonTitle: String?
-        let question: String
-        let options: [String]
-        let answer: Int
-        let explanation: String
-        let kind: String?
-        let expectedAnswer: String?
-        let concept: String?
-        let difficulty: Int?
-        let sourceLabel: String?
-        let sourceStartMs: Int64?
-        let sourceEndMs: Int64?
-        let sourceRevision: Int?
-        let stability: Double?
-        let difficultyScore: Double?
-        let reps: Int?
-        let lapses: Int?
-        let box: Int
-        let dueDate: String
-
-        enum CodingKeys: String, CodingKey {
-            case id, subject, question, options, answer, explanation, box, kind, concept, difficulty
-            case sessionId = "session_id"
-            case lessonTitle = "lesson_title"
-            case expectedAnswer = "expected_answer"
-            case sourceLabel = "source_label"
-            case sourceStartMs = "source_start_ms"
-            case sourceEndMs = "source_end_ms"
-            case sourceRevision = "source_revision"
-            case stability
-            case difficultyScore = "difficulty_score"
-            case reps, lapses
-            case dueDate = "due_date"
-        }
-    }
-
-    struct LearnSubject: Codable, Sendable, Identifiable, Equatable {
-        let subject: String?
-        let due: Int
-        let total: Int
-
-        var id: String { subject ?? "" }
-    }
-
-    struct LearnOverview: Codable, Sendable, Equatable {
-        let dueTotal: Int
-        let cardTotal: Int
-        let subjects: [LearnSubject]
-        let sessionsWithCards: [String]
-
-        enum CodingKeys: String, CodingKey {
-            case subjects
-            case dueTotal = "due_total"
-            case cardTotal = "card_total"
-            case sessionsWithCards = "sessions_with_cards"
-        }
-    }
-
-    /// Generate a lesson's card deck (once; later calls return the stored
-    /// deck). The backend asks Gemini for exam-relevant questions only.
-    func generateCards(sessionId: String) async throws -> [LearnCard] {
-        struct Response: Decodable {
-            let ok: Bool
-            let cards: [LearnCard]?
-        }
-        let data = try await request("/learn/generate", method: "POST", jsonBody: ["session_id": sessionId])
-        let response = try JSONDecoder().decode(Response.self, from: data)
-        guard response.ok, let cards = response.cards, !cards.isEmpty else {
-            throw APIError(message: "Quiz konnte nicht erstellt werden.")
-        }
-        return cards
-    }
-
-    func learnOverview() async throws -> LearnOverview {
-        try await JSONDecoder().decode(LearnOverview.self, from: request("/learn/overview"))
-    }
-
-    private func cardList(_ path: String, subject: String?) async throws -> [LearnCard] {
-        struct Response: Decodable {
-            let cards: [LearnCard]
-        }
-        let query = subject.map { [URLQueryItem(name: "subject", value: $0)] }
-        return try await JSONDecoder().decode(Response.self, from: request(path, query: query)).cards
-    }
-
-    /// Cards due today (or earlier), optionally for one subject.
-    func dueCards(subject: String? = nil) async throws -> [LearnCard] {
-        try await cardList("/learn/due", subject: subject)
-    }
-
-    /// The whole deck, for practice runs that don't touch the schedule.
-    func allCards(subject: String? = nil) async throws -> [LearnCard] {
-        try await cardList("/learn/cards", subject: subject)
-    }
-
-    /// Report one review result; the server reschedules the card.
-    func reviewCard(
-        id: String,
-        correct: Bool,
-        rating: Int? = nil,
-        responseMs: Int? = nil,
-        confidence: Int? = nil,
-        hintsUsed: Int = 0,
-        mode: String = "review"
-    ) async throws {
-        var body: [String: Any] = [
-            "card_id": id,
-            "correct": correct,
-            "hints_used": hintsUsed,
-            "mode": mode,
-        ]
-        if let rating { body["rating"] = rating }
-        if let responseMs { body["response_ms"] = responseMs }
-        if let confidence { body["confidence"] = confidence }
-        _ = try await request("/learn/review", method: "POST", jsonBody: body)
     }
 
     func deleteLesson(id: String) async throws {

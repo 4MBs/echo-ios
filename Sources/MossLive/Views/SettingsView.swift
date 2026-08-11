@@ -50,16 +50,6 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
-                        LearnSettingsView()
-                    } label: {
-                        SettingsRow(
-                            title: "Lernen",
-                            systemImage: "brain.head.profile",
-                            tint: .orange,
-                            value: learnValue
-                        )
-                    }
-                    NavigationLink {
                         LibrarySettingsView()
                     } label: {
                         SettingsRow(title: "Bibliothek", systemImage: "book.closed", tint: .brown)
@@ -101,22 +91,6 @@ struct SettingsView: View {
         let host = model.settings.serverHost.trimmingCharacters(in: .whitespaces)
         guard model.settings.isConfigured, !host.isEmpty else { return "Nicht eingerichtet" }
         return host
-    }
-
-    /// The daily goal leads, because that is what the row now mostly holds; the
-    /// reminder time follows it only when there is one.
-    private var learnValue: String {
-        let settings = model.settings
-        let goal = "\(settings.dailyLearnMinutes) Min"
-        guard settings.learnReminderEnabled else { return goal }
-        let date = Calendar.current.date(
-            bySettingHour: settings.learnReminderMinutes / 60,
-            minute: settings.learnReminderMinutes % 60,
-            second: 0,
-            of: .now
-        )
-        guard let time = date?.formatted(date: .omitted, time: .shortened) else { return goal }
-        return "\(goal) · \(time)"
     }
 }
 

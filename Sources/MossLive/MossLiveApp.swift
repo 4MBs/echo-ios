@@ -29,8 +29,7 @@ struct MainTabView: View {
     @State private var pendingNoteImportCount = 0
 
     /// Which place the sidebar is on. It lives on the model rather than in this
-    /// view so a screen can send the student somewhere — Lernen with no cards
-    /// yet offers "Zur Aufnahme", and that has to actually go there.
+    /// view so screens can change the selected destination directly.
     private var selection: Binding<AppTab?> {
         Binding(get: { model.selectedTab }, set: { model.selectedTab = $0 })
     }
@@ -52,20 +51,6 @@ struct MainTabView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
-        // Studying covers the whole window, from wherever it was started: the
-        // Lernen screen, a subject board or a single lesson. It is a mode, not a
-        // place, so it hides the sidebar and has exactly one way out.
-        .fullScreenCover(
-            isPresented: Binding(
-                get: { model.studySession != nil },
-                set: { if !$0 { model.endStudy() } }
-            )
-        ) {
-            if let session = model.studySession {
-                StudySessionView(session: session)
-                    .environment(model)
-            }
-        }
         .onAppear {
             pendingNoteImportCount = PendingNoteImports.all().count
             if !model.settings.isConfigured {
@@ -114,7 +99,6 @@ struct MainTabView: View {
         switch model.selectedTab ?? .aufnahme {
         case .aufnahme: LiveView()
         case .stunden: LessonsView()
-        case .lernen: TodayView()
         case .bibliothek: LibraryView()
         case .chat: ChatView()
         case .einstellungen: SettingsView()
@@ -123,7 +107,7 @@ struct MainTabView: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case aufnahme, stunden, lernen, bibliothek, chat, einstellungen
+    case aufnahme, stunden, bibliothek, chat, einstellungen
 
     var id: Self { self }
 
@@ -137,7 +121,6 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .aufnahme: "Aufnahme"
         case .stunden: "Stunden"
-        case .lernen: "Lernen"
         case .bibliothek: "Bibliothek"
         case .chat: "Chat mit KI"
         case .einstellungen: "Einstellungen"
@@ -151,7 +134,6 @@ enum AppTab: String, CaseIterable, Identifiable {
         // The shelf read as books, and Bibliothek two rows below is books —
         // two book glyphs in a list of five is one too many.
         case .stunden: "folder"
-        case .lernen: "brain.head.profile"
         case .bibliothek: "book.closed"
         case .chat: "bubble.left.and.text.bubble.right"
         case .einstellungen: "gearshape"

@@ -147,7 +147,7 @@ struct AIModelSection: View {
             return "Wird vom Server geladen."
         }
         if settings.provider == "chatgpt" {
-            return "Gilt für Antworten, Zusammenfassungen, Chat und Quiz — sofort."
+            return "Gilt für Antworten, Zusammenfassungen und Chat — sofort."
         }
         return "Den Anbieter wählt der Server (answer.provider in config.toml)."
     }
