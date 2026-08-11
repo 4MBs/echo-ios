@@ -21,14 +21,9 @@ struct BookAIPanel: View {
     let clearRegion: () -> Void
     let close: () -> Void
 
-    private enum Route: Hashable {
-        case actions
-        case exercise
-    }
-
     @FocusState private var inputFocused: Bool
     @FocusState private var exerciseFocused: Bool
-    @State private var path: [Route] = []
+    @State private var showingExercise = false
     @State private var exerciseNumber = ""
     @State private var expandedCitations: Set<UUID> = []
     @State private var copiedTurn: UUID?
@@ -63,25 +58,20 @@ struct BookAIPanel: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             rootContent
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
                 .navigationTitle("Seite fragen")
                 .navigationSubtitle(contextLabel)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
-                .navigationDestination(for: Route.self) { route in
-                    switch route {
-                    case .actions:
-                        actionList(showIntroduction: false)
-                            .navigationTitle("Neue Frage")
-                            .navigationBarTitleDisplayMode(.inline)
-                    case .exercise:
-                        exerciseView
-                    }
-                }
         }
         .background(Color(.systemBackground))
+        .sheet(isPresented: $showingExercise) {
+            exerciseView
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
@@ -101,31 +91,54 @@ struct BookAIPanel: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if path.isEmpty {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: close) { Image(systemName: "xmark") }
-                    .accessibilityLabel("Schließen")
-            }
-            if store.hasContent {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { path.append(.actions) } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Neue Frage")
-                }
-            }
+        ToolbarItem(placement: .topBarLeading) {
+            Button(action: close) { Image(systemName: "xmark") }
+                .accessibilityLabel("Schließen")
+        }
+        if store.hasContent {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
-                        store.clear()
-                    }
-                    .disabled(!store.hasContent)
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .accessibilityLabel("Mehr")
+                newQuestionMenu
             }
         }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
+                    store.clear()
+                }
+                .disabled(!store.hasContent)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .accessibilityLabel("Mehr")
+        }
+    }
+
+    private var newQuestionMenu: some View {
+        Menu {
+            Button("Aufgabe lösen", systemImage: "function", action: presentExercise)
+                .disabled(!canAsk)
+            Button("Seite erklären", systemImage: "text.book.closed") {
+                send("Seite erklären", request: BookAIPrompts.explainPage)
+            }
+            .disabled(!canAsk)
+            Button("Kurz zusammenfassen", systemImage: "text.alignleft") {
+                send("Kurz zusammenfassen", request: BookAIPrompts.summarizePage)
+            }
+            .disabled(!canAsk)
+            Button("Abbildung erklären", systemImage: "photo") {
+                send("Abbildung erklären", request: BookAIPrompts.explainFigure)
+            }
+            .disabled(!canAsk)
+            Divider()
+            Button(
+                activeRegion == nil ? "Bereich markieren" : "Anderen Bereich markieren",
+                systemImage: "rectangle.dashed",
+                action: requestRegion
+            )
+        } label: {
+            Label("Neue Frage", systemImage: "square.and.pencil")
+        }
+        .accessibilityLabel("Neue Frage oder Aktion")
     }
 
     // MARK: - Start and actions
@@ -133,38 +146,37 @@ struct BookAIPanel: View {
     @ViewBuilder
     private var rootContent: some View {
         if store.turns.isEmpty, store.pending == nil, store.errorMessage == nil {
-            actionList(showIntroduction: true)
+            actionList
         } else {
             thread
         }
     }
 
-    private func actionList(showIntroduction: Bool) -> some View {
+    private var actionList: some View {
         List {
-            if showIntroduction {
-                Section {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Wobei soll ich helfen?")
-                            .font(.title3.weight(.semibold))
-                        Text(activeRegion == nil
-                            ? "Wähle eine Aktion oder stelle unten eine eigene Frage."
-                            : "Die nächste Frage bezieht sich auf den markierten Bereich.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .listRowSeparator(.hidden)
-                    .padding(.vertical, 6)
+            Section {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Wobei soll ich helfen?")
+                        .font(.title3.weight(.semibold))
+                    Text(activeRegion == nil
+                        ? "Wähle eine Aktion oder stelle unten eine eigene Frage."
+                        : "Die nächste Frage bezieht sich auf den markierten Bereich.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
+                .listRowSeparator(.hidden)
+                .padding(.vertical, 6)
             }
 
             Section {
-                NavigationLink(value: Route.exercise) {
+                Button(action: presentExercise) {
                     actionLabel(
                         "Aufgabe lösen",
                         detail: "Aufgabennummer eingeben",
                         symbol: "function"
                     )
                 }
+                .foregroundStyle(.primary)
                 .disabled(!canAsk)
 
                 actionButton(
@@ -202,7 +214,6 @@ struct BookAIPanel: View {
                 if activeRegion != nil {
                     Button {
                         useCurrentPage()
-                        path.removeAll()
                     } label: {
                         actionLabel(
                             "Ganze Seite verwenden",
@@ -265,31 +276,38 @@ struct BookAIPanel: View {
     }
 
     private var exerciseView: some View {
-        Form {
-            Section {
-                TextField("z. B. 4b", text: $exerciseNumber)
-                    .focused($exerciseFocused)
-                    .submitLabel(.send)
-                    .onSubmit(sendExercise)
-            } header: {
-                Text("Aufgabennummer")
-            } footer: {
-                Text("Die Aufgabe muss auf \(contextLabel.lowercased()) zu sehen sein.")
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("z. B. 4b", text: $exerciseNumber)
+                        .focused($exerciseFocused)
+                        .submitLabel(.send)
+                        .onSubmit(sendExercise)
+                } header: {
+                    Text("Aufgabennummer")
+                } footer: {
+                    Text("Die Aufgabe muss auf \(contextLabel.lowercased()) zu sehen sein.")
+                }
             }
-        }
-        .navigationTitle("Aufgabe lösen")
-        .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button("Aufgabe lösen", action: sendExercise)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.bar)
-                .disabled(exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canAsk)
-        }
-        .onAppear {
-            DispatchQueue.main.async { exerciseFocused = true }
+            .navigationTitle("Aufgabe lösen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { showingExercise = false }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Button("Aufgabe lösen", action: sendExercise)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(.bar)
+                    .disabled(exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canAsk)
+            }
+            .onAppear {
+                DispatchQueue.main.async { exerciseFocused = true }
+            }
         }
     }
 
@@ -627,7 +645,6 @@ struct BookAIPanel: View {
     private func send(_ question: String, request: String? = nil) {
         guard canAsk else { return }
         inputFocused = false
-        path.removeAll()
         withAnimation(reduceMotion ? nil : .default) { detent = .large }
         store.ask(question, bookID: bookID, api: api, request: request)
     }
@@ -641,8 +658,15 @@ struct BookAIPanel: View {
         let number = exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !number.isEmpty, canAsk else { return }
         exerciseFocused = false
+        showingExercise = false
         exerciseNumber = ""
         send("Aufgabe \(number) lösen", request: BookAIPrompts.solveExercise(number))
+    }
+
+    private func presentExercise() {
+        guard canAsk else { return }
+        exerciseNumber = ""
+        showingExercise = true
     }
 
     private func useCurrentPage() {

@@ -169,7 +169,7 @@ private struct PDFReader: View {
                     currentPage: $currentPage,
                     visiblePages: $visiblePages,
                     pageCount: $pageCount,
-                    selectedRegion: selectedRegion
+                    selectedRegion: $selectedRegion
                 )
                 // Switching layout needs a freshly built PDFView: PDFKit does not
                 // relayout an existing one when displayMode changes.
@@ -183,6 +183,9 @@ private struct PDFReader: View {
         .overlay(alignment: .top) {
             if selectingRegion {
                 regionSelectionBanner
+                    .padding(.top, 12)
+            } else if selectedRegion != nil {
+                selectedRegionBanner
                     .padding(.top, 12)
             }
         }
@@ -257,6 +260,28 @@ private struct PDFReader: View {
         }
         .padding(.leading, 14)
         .padding(.trailing, 8)
+        .frame(minHeight: 48)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+    }
+
+    private var selectedRegionBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "rectangle.dashed")
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Bereich ausgewählt")
+                    .font(.subheadline.weight(.medium))
+                Text("Ziehen oder an den Eckpunkten anpassen")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button("Aufheben", systemImage: "xmark", action: clearRegionSelection)
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityHint("Verwendet wieder die ganze Seite")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
         .frame(minHeight: 48)
         .background(.regularMaterial, in: Capsule())
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
@@ -576,49 +601,53 @@ private final class PageSwipeGestureRecognizer: UISwipeGestureRecognizer {
 /// its own. The margin around the page is what stays constant, in points, so
 /// the spread never sits edge to edge but never floats in the middle of the
 /// screen either.
-private final class BookPDFView: PDFView {
+private final class BookPDFView: PDFView, UIGestureRecognizerDelegate {
     /// Breathing room left around the page at its smallest, in points.
     private let margin: CGFloat = 14
     /// The scale the page rests at: its natural size on this screen, and the
     /// point below which zooming out stops.
     private(set) var restingScale: CGFloat = 0
-    private let selectedRegionLayer = CAShapeLayer()
     private var selectionOverlay: BookRegionSelectionOverlay?
+    private var adjustmentOverlay: BookRegionAdjustmentOverlay?
     private var displayedRegion: BackendAPI.BookPageRegion?
+    private weak var observedScrollView: UIScrollView?
+    private var scrollObservations: [NSKeyValueObservation] = []
+    var onRegionChanged: ((BackendAPI.BookPageRegion?) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        configureRegionLayer()
+        configureRegionInteraction()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        configureRegionLayer()
+        configureRegionInteraction()
     }
 
-    private func configureRegionLayer() {
-        selectedRegionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.12).cgColor
-        selectedRegionLayer.strokeColor = UIColor.systemBlue.cgColor
-        selectedRegionLayer.lineWidth = 2
-        selectedRegionLayer.lineDashPattern = [7, 5]
-        selectedRegionLayer.lineJoin = .round
-        layer.addSublayer(selectedRegionLayer)
+    private func configureRegionInteraction() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tappedOutsideSelection))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        addGestureRecognizer(tap)
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         applyScaleLimits()
         selectionOverlay?.frame = bounds
+        observeScrollingIfNeeded()
         updateDisplayedRegion()
+        if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
     }
 
     func beginRegionSelection(onSelected: @escaping (BackendAPI.BookPageRegion) -> Void) {
         cancelRegionSelection()
         let overlay = BookRegionSelectionOverlay(frame: bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        overlay.onFinished = { [weak self] rect in
+        overlay.onFinished = { [weak self, weak overlay] rect in
             guard let self else { return }
-            if let region = normalizedRegion(from: rect) {
+            let converted = overlay?.convert(rect, to: self) ?? rect
+            if let region = normalizedRegion(from: converted) {
                 display(region: region)
                 onSelected(region)
                 cancelRegionSelection()
@@ -635,13 +664,22 @@ private final class BookPDFView: PDFView {
 
     func display(region: BackendAPI.BookPageRegion?) {
         displayedRegion = region
+        if region == nil {
+            adjustmentOverlay?.removeFromSuperview()
+            adjustmentOverlay = nil
+        } else {
+            installAdjustmentOverlayIfNeeded()
+        }
         updateDisplayedRegion()
     }
 
-    private func normalizedRegion(from selection: CGRect) -> BackendAPI.BookPageRegion? {
+    private func normalizedRegion(
+        from selection: CGRect,
+        on preferredPage: PDFPage? = nil
+    ) -> BackendAPI.BookPageRegion? {
         guard selection.width >= 18, selection.height >= 18,
               let document,
-              let page = page(for: CGPoint(x: selection.midX, y: selection.midY), nearest: true)
+              let page = preferredPage ?? page(for: CGPoint(x: selection.midX, y: selection.midY), nearest: true)
         else { return nil }
 
         let pageFrame = convert(page.bounds(for: .cropBox), from: page)
@@ -663,26 +701,106 @@ private final class BookPDFView: PDFView {
     }
 
     private func updateDisplayedRegion() {
-        // PDFKit installs its page-hosting subviews after initialization. Move
-        // the highlight to the end whenever it changes so it remains above the
-        // rendered page instead of disappearing behind that host view.
-        selectedRegionLayer.removeFromSuperlayer()
-        layer.addSublayer(selectedRegionLayer)
         guard let region = displayedRegion,
               let document,
               let page = document.page(at: region.pdfPage - 1)
         else {
-            selectedRegionLayer.path = nil
+            adjustmentOverlay?.isHidden = true
             return
         }
-        let bounds = page.bounds(for: .cropBox)
+        installAdjustmentOverlayIfNeeded()
+        let pageBounds = page.bounds(for: .cropBox)
         let pdfRect = CGRect(
-            x: bounds.minX + bounds.width * CGFloat(region.x),
-            y: bounds.minY + bounds.height * CGFloat(region.y),
-            width: bounds.width * CGFloat(region.width),
-            height: bounds.height * CGFloat(region.height)
+            x: pageBounds.minX + pageBounds.width * CGFloat(region.x),
+            y: pageBounds.minY + pageBounds.height * CGFloat(region.y),
+            width: pageBounds.width * CGFloat(region.width),
+            height: pageBounds.height * CGFloat(region.height)
         )
-        selectedRegionLayer.path = UIBezierPath(roundedRect: convert(pdfRect, from: page), cornerRadius: 6).cgPath
+        let pageFrame = convert(pageBounds, from: page)
+        let selectionFrame = convert(pdfRect, from: page).standardized.intersection(pageFrame)
+        guard !selectionFrame.isNull, selectionFrame.width > 0, selectionFrame.height > 0 else {
+            adjustmentOverlay?.isHidden = true
+            return
+        }
+        adjustmentOverlay?.isHidden = false
+        adjustmentOverlay?.allowedFrame = pageFrame
+        adjustmentOverlay?.setSelectionFrame(selectionFrame)
+        if let adjustmentOverlay { bringSubviewToFront(adjustmentOverlay) }
+        if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
+    }
+
+    private func installAdjustmentOverlayIfNeeded() {
+        guard adjustmentOverlay == nil else { return }
+        let overlay = BookRegionAdjustmentOverlay(frame: .zero)
+        overlay.onFrameChanged = { [weak self] frame in
+            guard let self,
+                  let current = displayedRegion,
+                  let page = document?.page(at: current.pdfPage - 1),
+                  let updated = normalizedRegion(from: frame, on: page)
+            else { return }
+            displayedRegion = updated
+        }
+        overlay.onFrameCommitted = { [weak self] frame in
+            guard let self,
+                  let current = displayedRegion,
+                  let page = document?.page(at: current.pdfPage - 1),
+                  let updated = normalizedRegion(from: frame, on: page)
+            else { return }
+            displayedRegion = updated
+            onRegionChanged?(updated)
+        }
+        overlay.onClear = { [weak self] in
+            guard let self else { return }
+            display(region: nil)
+            onRegionChanged?(nil)
+        }
+        addSubview(overlay)
+        adjustmentOverlay = overlay
+    }
+
+    /// PDFKit scrolls and zooms an internal scroll view, so PDFView itself does
+    /// not reliably receive a layout pass while the page moves. Tracking those
+    /// values keeps the editable rectangle attached to the exact PDF
+    /// coordinates through zooming, panning and orientation changes.
+    private func observeScrollingIfNeeded() {
+        guard observedScrollView == nil,
+              let scrollView = descendantScrollView(in: self)
+        else { return }
+        observedScrollView = scrollView
+        scrollObservations = [
+            scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
+                self?.updateDisplayedRegion()
+            },
+            scrollView.observe(\.zoomScale, options: [.new]) { [weak self] _, _ in
+                self?.updateDisplayedRegion()
+            },
+            scrollView.observe(\.contentSize, options: [.new]) { [weak self] _, _ in
+                self?.updateDisplayedRegion()
+            },
+        ]
+    }
+
+    private func descendantScrollView(in view: UIView) -> UIScrollView? {
+        for subview in view.subviews {
+            if let scrollView = subview as? UIScrollView { return scrollView }
+            if let nested = descendantScrollView(in: subview) { return nested }
+        }
+        return nil
+    }
+
+    @objc private func tappedOutsideSelection(_ recognizer: UITapGestureRecognizer) {
+        guard let overlay = adjustmentOverlay, !overlay.isHidden else { return }
+        let point = recognizer.location(in: self)
+        guard !overlay.frame.insetBy(dx: -24, dy: -24).contains(point) else { return }
+        display(region: nil)
+        onRegionChanged?(nil)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 
     func applyScaleLimits() {
@@ -727,7 +845,7 @@ private struct PDFKitView: UIViewRepresentable {
     /// about exactly these.
     @Binding var visiblePages: [Int]
     @Binding var pageCount: Int
-    let selectedRegion: BackendAPI.BookPageRegion?
+    @Binding var selectedRegion: BackendAPI.BookPageRegion?
 
     func makeUIView(context: Context) -> PDFView {
         let pdfView = BookPDFView(frame: .zero)
@@ -744,6 +862,7 @@ private struct PDFKitView: UIViewRepresentable {
         pdfView.autoScales = false
         pdfView.backgroundColor = .clear
         pdfView.document = document
+        pdfView.onRegionChanged = { selectedRegion = $0 }
         pdfView.display(region: selectedRegion)
 
         context.coordinator.proxy = proxy
@@ -760,7 +879,9 @@ private struct PDFKitView: UIViewRepresentable {
 
     func updateUIView(_ view: PDFView, context: Context) {
         context.coordinator.onPageChange = { updatePageState($0) }
-        (view as? BookPDFView)?.display(region: selectedRegion)
+        guard let bookView = view as? BookPDFView else { return }
+        bookView.onRegionChanged = { selectedRegion = $0 }
+        bookView.display(region: selectedRegion)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -880,6 +1001,7 @@ private final class BookRegionSelectionOverlay: UIView {
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(dragged)))
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -908,6 +1030,257 @@ private final class BookRegionSelectionOverlay: UIView {
             width: abs(point.x - start.x),
             height: abs(point.y - start.y)
         )
+    }
+}
+
+/// An editable, page-anchored selection. The entire rectangle is draggable and
+/// each corner has a generous touch target with a small visible handle, which
+/// mirrors the way system crop and text-selection controls separate visual
+/// weight from hit-target size.
+private final class BookRegionAdjustmentOverlay: UIView, UIGestureRecognizerDelegate {
+    var onFrameChanged: ((CGRect) -> Void)?
+    var onFrameCommitted: ((CGRect) -> Void)?
+    var onClear: (() -> Void)?
+    var allowedFrame = CGRect.zero
+
+    private enum Corner: CaseIterable, Hashable {
+        case topLeft
+        case topRight
+        case bottomLeft
+        case bottomRight
+
+        var isLeft: Bool { self == .topLeft || self == .bottomLeft }
+        var isTop: Bool { self == .topLeft || self == .topRight }
+    }
+
+    private let border = CAShapeLayer()
+    private var handles: [Corner: BookRegionHandleView] = [:]
+    private var startingFrame = CGRect.zero
+    private var isInteracting = false
+    private let minimumSide: CGFloat = 36
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = false
+        backgroundColor = .clear
+
+        border.fillColor = UIColor.systemBlue.withAlphaComponent(0.11).cgColor
+        border.strokeColor = UIColor.systemBlue.cgColor
+        border.lineWidth = 2
+        border.lineJoin = .round
+        layer.addSublayer(border)
+
+        let move = UIPanGestureRecognizer(target: self, action: #selector(moved))
+        move.delegate = self
+        addGestureRecognizer(move)
+
+        for corner in Corner.allCases {
+            let handle = BookRegionHandleView(frame: .zero)
+            handle.accessibilityLabel = accessibilityLabel(for: corner)
+            let resize = UIPanGestureRecognizer(target: self, action: #selector(resized(_:)))
+            resize.name = gestureName(for: corner)
+            handle.addGestureRecognizer(resize)
+            addSubview(handle)
+            handles[corner] = handle
+        }
+
+        isAccessibilityElement = true
+        accessibilityLabel = "Ausgewählter Buchbereich"
+        accessibilityHint = "Zum Verschieben ziehen oder die Eckpunkte zum Ändern der Größe verwenden."
+        accessibilityTraits = [.adjustable]
+        accessibilityCustomActions = [
+            UIAccessibilityCustomAction(
+                name: "Auswahl aufheben",
+                target: self,
+                selector: #selector(clearSelection)
+            ),
+        ]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        border.frame = bounds
+        border.path = UIBezierPath(
+            roundedRect: bounds.insetBy(dx: 1, dy: 1),
+            cornerRadius: 7
+        ).cgPath
+
+        let target: CGFloat = 44
+        for (corner, handle) in handles {
+            handle.bounds = CGRect(x: 0, y: 0, width: target, height: target)
+            handle.center = CGPoint(
+                x: corner.isLeft ? 0 : bounds.width,
+                y: corner.isTop ? 0 : bounds.height
+            )
+        }
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if super.point(inside: point, with: event) { return true }
+        return handles.values.contains { handle in
+            handle.point(inside: convert(point, to: handle), with: event)
+        }
+    }
+
+    func setSelectionFrame(_ newFrame: CGRect) {
+        guard !isInteracting else { return }
+        frame = newFrame.standardized
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        !handles.values.contains { handle in
+            guard let touchedView = touch.view else { return false }
+            return touchedView === handle || touchedView.isDescendant(of: handle)
+        }
+    }
+
+    @objc private func moved(_ recognizer: UIPanGestureRecognizer) {
+        guard let container = superview else { return }
+        switch recognizer.state {
+        case .began:
+            isInteracting = true
+            startingFrame = frame
+            UISelectionFeedbackGenerator().selectionChanged()
+        case .changed:
+            let translation = recognizer.translation(in: container)
+            frame = clampedMovedFrame(
+                startingFrame.offsetBy(dx: translation.x, dy: translation.y)
+            )
+            onFrameChanged?(frame)
+        case .ended:
+            isInteracting = false
+            onFrameCommitted?(frame)
+        case .cancelled, .failed:
+            frame = startingFrame
+            isInteracting = false
+            onFrameCommitted?(frame)
+        default:
+            break
+        }
+    }
+
+    @objc private func resized(_ recognizer: UIPanGestureRecognizer) {
+        guard let container = superview,
+              let name = recognizer.name,
+              let corner = corner(for: name)
+        else { return }
+
+        switch recognizer.state {
+        case .began:
+            isInteracting = true
+            startingFrame = frame
+            UISelectionFeedbackGenerator().selectionChanged()
+        case .changed:
+            let translation = recognizer.translation(in: container)
+            frame = resizedFrame(from: startingFrame, corner: corner, translation: translation)
+            onFrameChanged?(frame)
+        case .ended:
+            isInteracting = false
+            onFrameCommitted?(frame)
+        case .cancelled, .failed:
+            frame = startingFrame
+            isInteracting = false
+            onFrameCommitted?(frame)
+        default:
+            break
+        }
+    }
+
+    private func clampedMovedFrame(_ proposed: CGRect) -> CGRect {
+        guard !allowedFrame.isEmpty else { return proposed }
+        let width = min(proposed.width, allowedFrame.width)
+        let height = min(proposed.height, allowedFrame.height)
+        let x = min(max(proposed.minX, allowedFrame.minX), allowedFrame.maxX - width)
+        let y = min(max(proposed.minY, allowedFrame.minY), allowedFrame.maxY - height)
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func resizedFrame(
+        from initial: CGRect,
+        corner: Corner,
+        translation: CGPoint
+    ) -> CGRect {
+        var minX = initial.minX
+        var maxX = initial.maxX
+        var minY = initial.minY
+        var maxY = initial.maxY
+        let minimumWidth = min(minimumSide, initial.width)
+        let minimumHeight = min(minimumSide, initial.height)
+
+        if corner.isLeft {
+            minX = min(max(initial.minX + translation.x, allowedFrame.minX), maxX - minimumWidth)
+        } else {
+            maxX = max(min(initial.maxX + translation.x, allowedFrame.maxX), minX + minimumWidth)
+        }
+        if corner.isTop {
+            minY = min(max(initial.minY + translation.y, allowedFrame.minY), maxY - minimumHeight)
+        } else {
+            maxY = max(min(initial.maxY + translation.y, allowedFrame.maxY), minY + minimumHeight)
+        }
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private func gestureName(for corner: Corner) -> String {
+        switch corner {
+        case .topLeft: "book-region-top-left"
+        case .topRight: "book-region-top-right"
+        case .bottomLeft: "book-region-bottom-left"
+        case .bottomRight: "book-region-bottom-right"
+        }
+    }
+
+    private func corner(for name: String) -> Corner? {
+        Corner.allCases.first { gestureName(for: $0) == name }
+    }
+
+    private func accessibilityLabel(for corner: Corner) -> String {
+        switch corner {
+        case .topLeft: "Auswahl oben links anpassen"
+        case .topRight: "Auswahl oben rechts anpassen"
+        case .bottomLeft: "Auswahl unten links anpassen"
+        case .bottomRight: "Auswahl unten rechts anpassen"
+        }
+    }
+
+    @objc private func clearSelection() -> Bool {
+        onClear?()
+        return true
+    }
+}
+
+/// Keeps a 44-point native touch target while drawing only the compact handle
+/// users expect at the corner of a crop or selection rectangle.
+private final class BookRegionHandleView: UIView {
+    private let dot = CAShapeLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = true
+        backgroundColor = .clear
+        dot.fillColor = UIColor.systemBlue.cgColor
+        dot.strokeColor = UIColor.white.cgColor
+        dot.lineWidth = 2
+        layer.addSublayer(dot)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        dot.frame = bounds
+        dot.path = UIBezierPath(ovalIn: bounds.insetBy(dx: 14, dy: 14)).cgPath
     }
 }
 
