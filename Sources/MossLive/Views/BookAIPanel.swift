@@ -61,17 +61,11 @@ struct BookAIPanel: View {
         NavigationStack {
             rootContent
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-                .navigationTitle("Seite fragen")
-                .navigationSubtitle(contextLabel)
+                .navigationTitle(contextLabel)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
         }
         .background(Color(.systemBackground))
-        .sheet(isPresented: $showingExercise) {
-            exerciseView
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-        }
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
@@ -92,8 +86,11 @@ struct BookAIPanel: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Button(action: close) { Image(systemName: "xmark") }
-                .accessibilityLabel("Schließen")
+            Button(action: close) {
+                Label("Seite fragen", systemImage: "sparkles")
+                    .labelStyle(.titleAndIcon)
+            }
+            .accessibilityLabel("Seite fragen schließen")
         }
         if store.hasContent {
             ToolbarItem(placement: .topBarTrailing) {
@@ -178,6 +175,11 @@ struct BookAIPanel: View {
                 }
                 .foregroundStyle(.primary)
                 .disabled(!canAsk)
+
+                if showingExercise {
+                    exerciseEditor
+                        .listRowSeparator(.hidden)
+                }
 
                 actionButton(
                     "Seite erklären",
@@ -275,40 +277,46 @@ struct BookAIPanel: View {
         .contentShape(Rectangle())
     }
 
-    private var exerciseView: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("z. B. 4b", text: $exerciseNumber)
-                        .focused($exerciseFocused)
-                        .submitLabel(.send)
-                        .onSubmit(sendExercise)
-                } header: {
-                    Text("Aufgabennummer")
-                } footer: {
-                    Text("Die Aufgabe muss auf \(contextLabel.lowercased()) zu sehen sein.")
-                }
+    private var exerciseEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Label("Aufgabe lösen", systemImage: "function")
+                    .font(.headline)
+                Spacer()
+                Button("Abbrechen", systemImage: "xmark", action: dismissExercise)
+                    .labelStyle(.iconOnly)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityHint("Schließt die Aufgabeneingabe")
             }
-            .navigationTitle("Aufgabe lösen")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { showingExercise = false }
-                }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Button("Aufgabe lösen", action: sendExercise)
+
+            Text("Gib die Nummer der Aufgabe auf \(contextLabel.lowercased()) ein.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                TextField("z. B. 4b", text: $exerciseNumber)
+                    .focused($exerciseFocused)
+                    .submitLabel(.send)
+                    .onSubmit(sendExercise)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .background(
+                        Color(.tertiarySystemFill),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+
+                Button("Lösen", systemImage: "arrow.up", action: sendExercise)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(.bar)
                     .disabled(exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canAsk)
             }
-            .onAppear {
-                DispatchQueue.main.async { exerciseFocused = true }
-            }
         }
+        .padding(14)
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     // MARK: - Conversation
@@ -320,6 +328,9 @@ struct BookAIPanel: View {
                     ForEach(store.turns) { turn in
                         exchange(turn)
                             .id(turn.id)
+                    }
+                    if showingExercise {
+                        exerciseEditor
                     }
                     if let pending = store.pending {
                         working(pending.question)
@@ -336,6 +347,10 @@ struct BookAIPanel: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: store.turns.count) { _, _ in scrollToEnd(proxy) }
             .onChange(of: store.sending) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: showingExercise) { _, visible in
+                guard visible else { return }
+                DispatchQueue.main.async { scrollToEnd(proxy) }
+            }
         }
     }
 
@@ -645,7 +660,11 @@ struct BookAIPanel: View {
     private func send(_ question: String, request: String? = nil) {
         guard canAsk else { return }
         inputFocused = false
-        withAnimation(reduceMotion ? nil : .default) { detent = .large }
+        exerciseFocused = false
+        withAnimation(reduceMotion ? nil : .default) {
+            showingExercise = false
+            detent = .large
+        }
         store.ask(question, bookID: bookID, api: api, request: request)
     }
 
@@ -657,8 +676,6 @@ struct BookAIPanel: View {
     private func sendExercise() {
         let number = exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !number.isEmpty, canAsk else { return }
-        exerciseFocused = false
-        showingExercise = false
         exerciseNumber = ""
         send("Aufgabe \(number) lösen", request: BookAIPrompts.solveExercise(number))
     }
@@ -666,7 +683,18 @@ struct BookAIPanel: View {
     private func presentExercise() {
         guard canAsk else { return }
         exerciseNumber = ""
-        showingExercise = true
+        withAnimation(reduceMotion ? nil : .snappy) {
+            showingExercise = true
+            detent = .large
+        }
+        DispatchQueue.main.async { exerciseFocused = true }
+    }
+
+    private func dismissExercise() {
+        exerciseFocused = false
+        withAnimation(reduceMotion ? nil : .snappy) {
+            showingExercise = false
+        }
     }
 
     private func useCurrentPage() {

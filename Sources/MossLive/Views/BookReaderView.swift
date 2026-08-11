@@ -197,22 +197,13 @@ private struct PDFReader: View {
     /// Only ever here, inside an open book: the assistant answers questions on
     /// "this page", which the shelf outside has no answer for.
     ///
-    /// It sits in the control bar with the other things you do to a book, not
-    /// alone in the top corner — the page arrows, the layout switch and this
-    /// are one set of controls and belong within reach of the same thumb. The
-    /// prominent style while open communicates the persistent state, but
-    /// this remains a button semantically: its action is to present a panel,
-    /// not to change a setting.
-    @ViewBuilder private var bookAIButton: some View {
-        if askingBookAI {
-            Button(action: toggleBookAI) { bookAIButtonLabel }
-                .buttonStyle(.glassProminent)
-                .accessibilityLabel("Seite fragen schließen")
-        } else {
-            Button(action: toggleBookAI) { bookAIButtonLabel }
-                .buttonStyle(.glass)
-                .accessibilityLabel("Seite fragen")
-        }
+    /// Opens the assistant from the reading controls. While the assistant is
+    /// visible, its matching leading toolbar control takes over, so the action
+    /// has one clear location instead of appearing twice on iPad.
+    private var bookAIButton: some View {
+        Button(action: openBookAI) { bookAIButtonLabel }
+            .buttonStyle(.glass)
+            .accessibilityLabel("Seite fragen")
     }
 
     @ViewBuilder private var bookAIButtonLabel: some View {
@@ -224,9 +215,9 @@ private struct PDFReader: View {
         }
     }
 
-    private func toggleBookAI() {
+    private func openBookAI() {
         bookAIDetent = .medium
-        askingBookAI.toggle()
+        askingBookAI = true
     }
 
     private var bookAIPanel: some View {
@@ -395,16 +386,17 @@ private struct PDFReader: View {
         }
     }
 
-    /// Everything you do to an open book, in one bar: the layout on the left,
-    /// the page in the middle where it can stay centred whatever flanks it, and
-    /// "Seite fragen" on the right.
+    /// Everything you do to an open book, in one bar. The page stays centred
+    /// while the assistant's entry point hands off to its top-leading control.
     private var controlBar: some View {
         ZStack {
             pageControls
             HStack {
                 modeToggle
                 Spacer()
-                bookAIButton
+                if !askingBookAI {
+                    bookAIButton
+                }
             }
         }
         .padding(.horizontal, 20)
@@ -578,18 +570,18 @@ private final class PDFViewProxy {
 /// only reports where the flick ended, which is no use for telling a page turn
 /// apart from a back swipe that started at the screen edge.
 private final class PageSwipeGestureRecognizer: UISwipeGestureRecognizer {
-    private(set) var startX: CGFloat = .greatestFiniteMagnitude
+    private(set) var startPoint = CGPoint(x: .greatestFiniteMagnitude, y: .greatestFiniteMagnitude)
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if let touch = touches.first, let view {
-            startX = touch.location(in: view).x
+            startPoint = touch.location(in: view)
         }
         super.touchesBegan(touches, with: event)
     }
 
     override func reset() {
         super.reset()
-        startX = .greatestFiniteMagnitude
+        startPoint = CGPoint(x: .greatestFiniteMagnitude, y: .greatestFiniteMagnitude)
     }
 }
 
@@ -658,6 +650,7 @@ private final class BookPDFView: PDFView {
         }
         addSubview(overlay)
         selectionOverlay = overlay
+        prioritizeRegionGestures(overlay.gestureRecognizers ?? [])
     }
 
     func cancelRegionSelection() {
@@ -759,6 +752,7 @@ private final class BookPDFView: PDFView {
         }
         addSubview(overlay)
         adjustmentOverlay = overlay
+        prioritizeRegionGestures(overlay.interactionRecognizers)
     }
 
     /// PDFKit scrolls and zooms an internal scroll view, so PDFView itself does
@@ -770,6 +764,9 @@ private final class BookPDFView: PDFView {
               let scrollView = descendantScrollView(in: self)
         else { return }
         observedScrollView = scrollView
+        if let adjustmentOverlay {
+            prioritizeRegionGestures(adjustmentOverlay.interactionRecognizers)
+        }
         scrollObservations = [
             scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
                 self?.updateDisplayedRegion()
@@ -792,11 +789,30 @@ private final class BookPDFView: PDFView {
     }
 
     @objc private func tappedOutsideSelection(_ recognizer: UITapGestureRecognizer) {
-        guard let overlay = adjustmentOverlay, !overlay.isHidden else { return }
+        guard let overlay = adjustmentOverlay, !overlay.isHidden, !overlay.isInteracting else { return }
         let point = recognizer.location(in: self)
-        guard !overlay.frame.insetBy(dx: -24, dy: -24).contains(point) else { return }
+        guard !regionControlsContain(point) else { return }
         display(region: nil)
         onRegionChanged?(nil)
+    }
+
+    func regionControlsContain(_ point: CGPoint) -> Bool {
+        guard let overlay = adjustmentOverlay, !overlay.isHidden else { return false }
+        return overlay.frame.insetBy(dx: -24, dy: -24).contains(point)
+    }
+
+    private func prioritizeRegionGestures(_ recognizers: [UIGestureRecognizer]) {
+        guard !recognizers.isEmpty else { return }
+        let pageSwipes = gestureRecognizers?.compactMap { $0 as? PageSwipeGestureRecognizer } ?? []
+        let scrollPan = descendantScrollView(in: self)?.panGestureRecognizer
+
+        for recognizer in recognizers {
+            deselectionTap.require(toFail: recognizer)
+            scrollPan?.require(toFail: recognizer)
+            for swipe in pageSwipes {
+                swipe.require(toFail: recognizer)
+            }
+        }
     }
 
     override func gestureRecognizer(
@@ -946,8 +962,10 @@ private struct PDFKitView: UIViewRepresentable {
         /// Everywhere else it turns the page.
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let swipe = gestureRecognizer as? PageSwipeGestureRecognizer,
-                  swipe.direction == .right else { return true }
-            return swipe.startX > Self.edgeStrip
+                  let view = swipe.view as? BookPDFView
+            else { return true }
+            guard !view.regionControlsContain(swipe.startPoint) else { return false }
+            return swipe.direction != .right || swipe.startPoint.x > Self.edgeStrip
         }
 
         /// The PDF's own scroll view keeps its pan recognizer, and the flick has
@@ -1065,7 +1083,7 @@ private final class BookRegionAdjustmentOverlay: UIView, UIGestureRecognizerDele
     private let border = CAShapeLayer()
     private var handles: [Corner: BookRegionHandleView] = [:]
     private var startingFrame = CGRect.zero
-    private var isInteracting = false
+    private(set) var isInteracting = false
     private let minimumSide: CGFloat = 36
 
     override init(frame: CGRect) {
@@ -1139,6 +1157,12 @@ private final class BookRegionAdjustmentOverlay: UIView, UIGestureRecognizerDele
     func setSelectionFrame(_ newFrame: CGRect) {
         guard !isInteracting else { return }
         frame = newFrame.standardized
+    }
+
+    var interactionRecognizers: [UIGestureRecognizer] {
+        let move = gestureRecognizers ?? []
+        let resize = handles.values.flatMap { $0.gestureRecognizers ?? [] }
+        return move + resize
     }
 
     func gestureRecognizer(
