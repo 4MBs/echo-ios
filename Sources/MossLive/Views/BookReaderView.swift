@@ -1,7 +1,7 @@
 import PDFKit
 import SwiftUI
 
-private let bookTitleCharacterLimit = 32
+private let bookTitleCharacterLimit = 96
 
 /// One book, presented like the web reader the schoolbooks come from: a page —
 /// or a spread — fills the screen, you flick sideways to turn, and a bottom bar
@@ -59,17 +59,26 @@ struct BookReaderView: View {
         }
         .navigationTitle(displayedTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // The editor role keeps the back control compact from its first frame.
+        // Without it, iPadOS briefly lays out the previous screen's title and
+        // then collapses it to a chevron, which looks like a sideways jump.
+        .toolbarRole(.editor)
+        // The split view's default toggle recalculates its position when a
+        // destination also gains a back button. Replace it with one stable
+        // navigation item that occupies the same slot for the reader's entire
+        // lifetime.
+        .toolbar(removing: .sidebarToggle)
         // Install the assistant control for the destination's full lifetime.
         // It now participates in the navigation push instead of popping into
         // place after the PDF loads, and the leading slot remains available
         // for iPadOS' back and collapsed-sidebar controls.
         .toolbar {
-            if sidebarCollapsed {
-                ToolbarItem(placement: .topBarLeading) { revealSidebarButton }
-            }
+            ToolbarItem(placement: .topBarLeading) { sidebarButton }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 bookAIButton
-                bookMenu
+                if model.settings.showBookRenaming {
+                    bookMenu
+                }
             }
         }
         .task(id: book.id) { await open() }
@@ -103,15 +112,15 @@ struct BookReaderView: View {
         return false
     }
 
-    private var revealSidebarButton: some View {
+    private var sidebarButton: some View {
         Button {
             withAnimation(assistantAnimation) {
-                model.columnVisibility = .all
+                model.columnVisibility = sidebarCollapsed ? .all : .detailOnly
             }
         } label: {
             Image(systemName: "sidebar.leading")
         }
-        .accessibilityLabel("Seitenleiste einblenden")
+        .accessibilityLabel(sidebarCollapsed ? "Seitenleiste einblenden" : "Seitenleiste ausblenden")
     }
 
     private var bookAIButton: some View {
@@ -207,6 +216,7 @@ struct BookReaderView: View {
 private struct PDFReader: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let url: URL
     let book: BackendAPI.Book
@@ -253,17 +263,14 @@ private struct PDFReader: View {
     @FocusState private var pageFieldFocused: Bool
     @FocusState private var numberingFocused: Bool
 
-    /// One transaction drives the inspector and every part of the reader whose
-    /// available width changes with it. Without an explicit transaction the
-    /// native inspector appears correctly, but PDFKit and the controls receive
-    /// their final frames in a single layout pass and visibly jump sideways.
+    /// One transaction drives the panel and every part of the reader whose
+    /// available width changes with it.
     private var assistantAnimation: Animation? {
         reduceMotion ? nil : .smooth(duration: 0.42)
     }
 
-    /// System-driven dismissal (dragging the compact sheet down or closing the
-    /// inspector) comes back through this binding, so it uses the same layout
-    /// transaction as taps on the toolbar button.
+    /// Dragging the compact sheet down comes back through this binding, so it
+    /// uses the same transaction as taps on the toolbar button.
     private var assistantPresentation: Binding<Bool> {
         Binding(
             get: { askingBookAI },
@@ -276,8 +283,7 @@ private struct PDFReader: View {
     }
 
     var body: some View {
-        reader
-            .animation(assistantAnimation, value: askingBookAI)
+        adaptiveReader
             // Parsing a 300 MB schoolbook off the main thread keeps the push
             // animation smooth, and reusing the document means flipping the
             // layout does not re-read the file.
@@ -286,30 +292,51 @@ private struct PDFReader: View {
                     LoadedDocument(document: PDFDocument(url: url))
                 }.value.document
             }
-            // One adaptive presentation, not a hand-switched HStack and sheet.
-            // SwiftUI keeps the panel as a trailing column on an iPad and adapts
-            // it to a sheet in compact width, and — this is the part that
-            // matters — it hosts it outside the navigation content.
-            //
-            // The panel is a NavigationStack, because that is what gives it a
-            // real bar. Placed inline in an HStack it was a navigation stack
-            // nested inside the pushed reader, which is unsupported: opening it
-            // popped the whole stack back to the shelf and left the shelf's
-            // route torn down behind it. An inspector owns that presentation
-            // while the coordinated animation above narrows the reader safely.
-            .inspector(isPresented: assistantPresentation) {
-                bookAIPanel
-                    .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
-                    .presentationDetents([.medium, .large], selection: $bookAIDetent)
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(Color.black)
-                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-            }
             .onChange(of: visiblePages) { _, pages in
                 guard let selectedRegion, !pages.contains(selectedRegion.pdfPage) else { return }
                 self.selectedRegion = nil
                 proxy.clearRegionSelection()
             }
+    }
+
+    /// On iPad the panel and reader share one animatable layout. A native
+    /// inspector changes its presenting column outside SwiftUI's transaction,
+    /// which made the PDF and its bottom controls jump directly to their final
+    /// positions even while the panel itself was moving. Compact devices keep
+    /// the familiar sheet and therefore do not resize the book at all.
+    @ViewBuilder private var adaptiveReader: some View {
+        if horizontalSizeClass == .compact {
+            reader
+                .sheet(isPresented: assistantPresentation) {
+                    bookAIPanel
+                        .presentationDetents([.medium, .large], selection: $bookAIDetent)
+                        .presentationDragIndicator(.visible)
+                        .presentationBackground(Color.black)
+                        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                }
+        } else {
+            GeometryReader { geometry in
+                let panelWidth = min(max(geometry.size.width * 0.32, 320), 480)
+                HStack(spacing: 0) {
+                    reader
+                        .frame(
+                            width: max(
+                                geometry.size.width - (askingBookAI ? panelWidth : 0),
+                                0
+                            )
+                        )
+
+                    if askingBookAI {
+                        bookAIPanel
+                            .frame(width: panelWidth)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .frame(width: geometry.size.width, alignment: .leading)
+                .clipped()
+                .animation(assistantAnimation, value: askingBookAI)
+            }
+        }
     }
 
     private var reader: some View {
@@ -411,10 +438,9 @@ private struct PDFReader: View {
             selectedRegion = nil
         }
         proxy.clearRegionSelection()
-        // Begin on the next run loop instead of guessing how long the adaptive
-        // inspector's dismissal animation takes. The overlay follows the
-        // reader's live bounds, so rotations and different sheet transitions
-        // cannot leave it mapped to a stale size.
+        // Begin on the next run loop. The overlay follows the reader's live
+        // bounds throughout the panel animation, so it cannot be mapped to a
+        // stale size.
         DispatchQueue.main.async {
             proxy.beginRegionSelection { region in
                 bookAIDetent = .medium

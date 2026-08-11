@@ -145,6 +145,12 @@ struct LibrarySettingsView: View {
             } footer: {
                 Text("Zeigt im Buch den Knopf für die gedruckte Seitenzahl. Eingestellte Zahlen bleiben erhalten.")
             }
+
+            Section {
+                Toggle("Bücher umbenennen", isOn: $settings.showBookRenaming)
+            } footer: {
+                Text("Zeigt im Buch die Option zum Ändern des lokalen Anzeigenamens.")
+            }
         }
         .navigationTitle("Bibliothek")
     }

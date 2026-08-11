@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
+    @Namespace private var bookTransition
     @State private var books: [BackendAPI.Book] = []
     @State private var loading = true
     @State private var loadError: Error?
@@ -66,8 +67,10 @@ struct LibraryView: View {
             // refresh can replace `books` while a large PDF is opening without
             // invalidating the active route.
             BookReaderView(api: api, book: book)
+                .navigationTransition(.zoom(sourceID: book.id, in: bookTransition))
         } label: {
             BookCover(api: api, book: book, unavailable: needsConnection)
+                .matchedTransitionSource(id: book.id, in: bookTransition)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(needsConnection ? "\(book.title), Download benötigt" : book.title)

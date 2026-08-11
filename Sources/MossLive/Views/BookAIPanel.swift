@@ -1,9 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// A page-scoped conversation presented by the book reader's adaptive
-/// inspector. It deliberately uses the same thread and composer language as
-/// the main Chat tab; the page or marked region is its fixed context.
+/// A page-scoped conversation presented by the book reader's adaptive panel.
+/// It deliberately uses the same thread and composer language as the main Chat
+/// tab; the page or marked region is its fixed context.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -55,20 +55,15 @@ struct BookAIPanel: View {
     }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            panelHeader
+
             messagesArea
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
                 .background(Color.black.ignoresSafeArea())
-                // The adaptive inspector briefly shares navigation updates
-                // with its presenting reader while attaching. Keeping the same
-                // title prevents a page label from replacing the book name.
-                .navigationTitle(bookTitle)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(Color.black, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
-                .toolbar { toolbar }
         }
         .background(Color.black.ignoresSafeArea())
+        .environment(\.colorScheme, .dark)
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
@@ -92,28 +87,48 @@ struct BookAIPanel: View {
         }
     }
 
-    // MARK: - Navigation
+    // MARK: - Header
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        if store.hasConversation {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    store.clear()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("Neue Unterhaltung")
+    private var panelHeader: some View {
+        ZStack {
+            Text(bookTitle)
+                .font(.headline)
+                .lineLimit(1)
+                .padding(.horizontal, store.hasConversation ? 88 : 12)
 
-                Menu {
-                    Button("Unterhaltung leeren", systemImage: "eraser", role: .destructive) {
+            if store.hasConversation {
+                HStack(spacing: 4) {
+                    Spacer()
+
+                    Button {
                         store.clear()
+                    } label: {
+                        Image(systemName: "plus")
+                            .frame(width: 36, height: 36)
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Neue Unterhaltung")
+
+                    Menu {
+                        Button("Unterhaltung leeren", systemImage: "eraser", role: .destructive) {
+                            store.clear()
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 36, height: 36)
+                    }
+                    .accessibilityLabel("Chatoptionen")
                 }
-                .accessibilityLabel("Chatoptionen")
             }
+        }
+        .foregroundStyle(.white)
+        .frame(height: 50)
+        .padding(.horizontal, 8)
+        .background(Color.black)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.white.opacity(0.08))
+                .frame(height: 0.5)
         }
     }
 

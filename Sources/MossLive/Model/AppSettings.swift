@@ -73,6 +73,11 @@ final class AppSettings {
         didSet { defaults.set(showPageNumberEditor, forKey: "showPageNumberEditor") }
     }
 
+    /// Whether the reader offers a local display-name editor for books.
+    var showBookRenaming: Bool {
+        didSet { defaults.set(showBookRenaming, forKey: "showBookRenaming") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -90,6 +95,7 @@ final class AppSettings {
         timetableConnected = defaults.bool(forKey: "timetableConnected")
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
+        showBookRenaming = defaults.object(forKey: "showBookRenaming") as? Bool ?? true
         recordButtonHue = defaults.double(forKey: "recordButtonHue") // 0 = the red it was designed in
         // migrate the old default: bare goodnotes:// lands in GoodNotes'
         // file-import handler and shows an "unsupported file type" alert;
