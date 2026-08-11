@@ -165,7 +165,7 @@ private struct BookCover: View {
                 return
             }
             guard let data = try? await api.bookCover(book), !Task.isCancelled else { return }
-            let loaded = await Task.detached(priority: .utility) {
+            let loaded = await Task.detached(priority: .utility) { () -> LoadedCoverImage? in
                 OfflineCache.saveData(data, as: key)
                 guard let image = Self.decode(data) else { return nil }
                 return LoadedCoverImage(image: image)
@@ -176,7 +176,7 @@ private struct BookCover: View {
     }
 
     private static func cachedImage(key: String) async -> LoadedCoverImage? {
-        await Task.detached(priority: .utility) {
+        await Task.detached(priority: .utility) { () -> LoadedCoverImage? in
             guard let data = OfflineCache.loadData(key: key), let image = decode(data) else {
                 return nil
             }
