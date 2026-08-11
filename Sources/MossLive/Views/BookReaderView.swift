@@ -78,11 +78,10 @@ struct BookReaderView: View {
     }
 }
 
-/// The reader itself: a PDFKit page view with the control bar underneath, and
-/// — while a book is open — "Seite fragen" beside it.
+/// The reader itself: a PDFKit page view with page controls underneath and
+/// "Seite fragen" in the upper-left toolbar.
 private struct PDFReader: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.horizontalSizeClass) private var sizeClass
 
     let url: URL
     let book: BackendAPI.Book
@@ -130,6 +129,9 @@ private struct PDFReader: View {
                 }.value.document
             }
             .toolbar {
+                if !askingBookAI {
+                    ToolbarItem(placement: .topBarLeading) { bookAIButton }
+                }
                 if model.settings.showPageNumberEditor {
                     ToolbarItem(placement: .topBarTrailing) { readerMenu }
                 }
@@ -197,22 +199,15 @@ private struct PDFReader: View {
     /// Only ever here, inside an open book: the assistant answers questions on
     /// "this page", which the shelf outside has no answer for.
     ///
-    /// Opens the assistant from the reading controls. While the assistant is
+    /// Opens the assistant from the upper-left toolbar. While the assistant is
     /// visible, its matching leading toolbar control takes over, so the action
     /// has one clear location instead of appearing twice on iPad.
     private var bookAIButton: some View {
-        Button(action: openBookAI) { bookAIButtonLabel }
-            .buttonStyle(.glass)
-            .accessibilityLabel("Seite fragen")
-    }
-
-    @ViewBuilder private var bookAIButtonLabel: some View {
-        if sizeClass == .regular {
+        Button(action: openBookAI) {
             Label("Seite fragen", systemImage: "sparkles")
-        } else {
-            Label("Seite fragen", systemImage: "sparkles")
-                .labelStyle(.iconOnly)
+                .labelStyle(.titleAndIcon)
         }
+        .accessibilityLabel("Seite fragen")
     }
 
     private func openBookAI() {
@@ -386,17 +381,14 @@ private struct PDFReader: View {
         }
     }
 
-    /// Everything you do to an open book, in one bar. The page stays centred
-    /// while the assistant's entry point hands off to its top-leading control.
+    /// Page layout and navigation remain in the bottom bar; Book AI now lives
+    /// exclusively in the upper-left toolbar.
     private var controlBar: some View {
         ZStack {
             pageControls
             HStack {
                 modeToggle
                 Spacer()
-                if !askingBookAI {
-                    bookAIButton
-                }
             }
         }
         .padding(.horizontal, 20)
