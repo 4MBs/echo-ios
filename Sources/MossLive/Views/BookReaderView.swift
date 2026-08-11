@@ -570,7 +570,10 @@ private final class PDFViewProxy {
 /// only reports where the flick ended, which is no use for telling a page turn
 /// apart from a back swipe that started at the screen edge.
 private final class PageSwipeGestureRecognizer: UISwipeGestureRecognizer {
-    private(set) var startPoint = CGPoint(x: .greatestFiniteMagnitude, y: .greatestFiniteMagnitude)
+    private(set) var startPoint = CGPoint(
+        x: CGFloat.greatestFiniteMagnitude,
+        y: CGFloat.greatestFiniteMagnitude
+    )
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if let touch = touches.first, let view {
@@ -581,7 +584,10 @@ private final class PageSwipeGestureRecognizer: UISwipeGestureRecognizer {
 
     override func reset() {
         super.reset()
-        startPoint = CGPoint(x: .greatestFiniteMagnitude, y: .greatestFiniteMagnitude)
+        startPoint = CGPoint(
+            x: CGFloat.greatestFiniteMagnitude,
+            y: CGFloat.greatestFiniteMagnitude
+        )
     }
 }
 
