@@ -94,15 +94,6 @@ struct BookAIPanel: View {
         HStack(spacing: 4) {
             Spacer()
 
-            Button {
-                store.clear()
-            } label: {
-                Image(systemName: "plus")
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Neue Unterhaltung")
-
             Menu {
                 Button("Unterhaltung leeren", systemImage: "eraser", role: .destructive) {
                     store.clear()
