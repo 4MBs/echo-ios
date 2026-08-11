@@ -176,6 +176,16 @@ final class BookAIContextTests: XCTestCase {
         XCTAssertEqual(store.draft, "Frage zu Seite 16")
     }
 
+    func testDraftAloneDoesNotExposeConversationCleanup() {
+        let store = BookAIStore()
+        store.activate(BookAIStore.Context(pages: [16]))
+
+        XCTAssertFalse(store.hasConversation)
+        store.draft = "Noch nicht gesendet"
+        XCTAssertFalse(store.hasConversation)
+        XCTAssertTrue(store.hasContent)
+    }
+
     func testMarkedRegionIsADifferentContextFromItsWholePage() {
         let region = BackendAPI.BookPageRegion(
             pdfPage: 16,

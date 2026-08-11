@@ -92,9 +92,16 @@ final class BookAIStore {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
     }
 
-    /// Whether there is anything the panel's menu could clear.
+    /// A draft is unfinished input, not a running conversation. Keeping this
+    /// distinction prevents the destructive toolbar action from appearing
+    /// before there is an exchange, request or failed request to clear.
+    var hasConversation: Bool {
+        !turns.isEmpty || pending != nil || errorMessage != nil
+    }
+
+    /// Whether the panel has any state worth preserving when it redraws.
     var hasContent: Bool {
-        !turns.isEmpty || pending != nil || errorMessage != nil || !draft.isEmpty
+        hasConversation || !draft.isEmpty
     }
 
     func activate(_ newContext: Context) {

@@ -97,16 +97,17 @@ struct BookAIPanel: View {
                 newQuestionMenu
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
-                    store.clear()
+        if store.hasConversation {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
+                        store.clear()
+                    }
+                } label: {
+                    Image(systemName: "eraser")
                 }
-                .disabled(!store.hasContent)
-            } label: {
-                Image(systemName: "ellipsis")
+                .accessibilityLabel("Verlauf dieser Seite leeren")
             }
-            .accessibilityLabel("Mehr")
         }
     }
 
