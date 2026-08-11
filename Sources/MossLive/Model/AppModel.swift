@@ -1,6 +1,6 @@
 import Foundation
+import Observation
 import os
-import SwiftUI
 
 /// Central state machine + orchestration: audio engine -> WebSocket -> UI.
 @MainActor
@@ -51,10 +51,6 @@ final class AppModel {
     /// shell so a screen can send the student somewhere that answers its empty
     /// state ("Zur Aufnahme") instead of describing it.
     var selectedTab: AppTab? = .aufnahme
-
-    /// Shared with pushed detail screens so they can preserve the system's
-    /// reveal affordance when the split view has been collapsed.
-    var columnVisibility: NavigationSplitViewVisibility = .all
 
     let settings = AppSettings()
     let timetable: TimetableStore

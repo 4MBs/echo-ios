@@ -26,6 +26,7 @@ struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingNoteImportCount = 0
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     /// Which place the sidebar is on. It lives on the model rather than in this
     /// view so screens can change the selected destination directly.
@@ -33,12 +34,8 @@ struct MainTabView: View {
         Binding(get: { model.selectedTab }, set: { model.selectedTab = $0 })
     }
 
-    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
-        Binding(get: { model.columnVisibility }, set: { model.columnVisibility = $0 })
-    }
-
     var body: some View {
-        NavigationSplitView(columnVisibility: columnVisibility) {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(AppTab.navigation, selection: selection) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
@@ -116,9 +113,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     /// What the navigation list holds. Einstellungen is deliberately absent —
     /// it lives pinned at the foot of the sidebar instead.
-    static var navigation: [AppTab] {
-        allCases.filter { $0 != .einstellungen }
-    }
+    static let navigation = allCases.filter { $0 != .einstellungen }
 
     var title: String {
         switch self {

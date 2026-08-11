@@ -4,6 +4,7 @@ struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @Namespace private var bookTransition
     @State private var books: [BackendAPI.Book] = []
+    @State private var downloadedBookIDs: Set<String> = []
     @State private var loading = true
     @State private var loadError: Error?
 
@@ -60,14 +61,16 @@ struct LibraryView: View {
     /// untappable. A book that cannot be fetched is better off opening a reader
     /// that says so and offers to try again — which is what it already does.
     @ViewBuilder private func shelfItem(_ book: BackendAPI.Book) -> some View {
-        let downloaded = BackendAPI.cachedBook(id: book.id) != nil
+        let downloaded = downloadedBookIDs.contains(book.id)
         let needsConnection = !downloaded && !model.connectivity.isOnline
         NavigationLink {
             // The destination owns the exact book that was tapped, so a shelf
             // refresh can replace `books` while a large PDF is opening without
             // invalidating the active route.
-            BookReaderView(api: api, book: book)
-                .navigationTransition(.zoom(sourceID: book.id, in: bookTransition))
+            BookReaderView(api: api, book: book) {
+                downloadedBookIDs.insert(book.id)
+            }
+            .navigationTransition(.zoom(sourceID: book.id, in: bookTransition))
         } label: {
             BookCover(api: api, book: book, unavailable: needsConnection)
                 .matchedTransitionSource(id: book.id, in: bookTransition)
@@ -95,6 +98,21 @@ struct LibraryView: View {
             if books.isEmpty { loadError = error }
         }
         loading = false
+        await refreshDownloadedBooks()
+    }
+
+    /// File-system probes do not belong in `body`: a split-view resize can
+    /// redraw every shelf tile many times per second. Scan once off the main
+    /// actor, then let all redraws use this in-memory set.
+    private func refreshDownloadedBooks() async {
+        let snapshot = books
+        let available = await Task.detached(priority: .utility) {
+            Set(snapshot.compactMap { book in
+                BackendAPI.cachedBook(id: book.id) == nil ? nil : book.id
+            })
+        }.value
+        guard !Task.isCancelled else { return }
+        downloadedBookIDs = available
     }
 }
 
@@ -142,13 +160,40 @@ private struct BookCover: View {
             // A cover never changes, so one fetch per book is the whole story —
             // and it is what makes the shelf look like itself offline.
             let key = OfflineCache.Key.cover(book.id)
-            if let data = OfflineCache.loadData(key: key), let stored = UIImage(data: data) {
-                image = stored
+            if let stored = await Self.cachedImage(key: key) {
+                image = stored.image
                 return
             }
             guard let data = try? await api.bookCover(book), !Task.isCancelled else { return }
-            OfflineCache.saveData(data, as: key)
-            image = UIImage(data: data)
+            let loaded = await Task.detached(priority: .utility) {
+                OfflineCache.saveData(data, as: key)
+                guard let image = Self.decode(data) else { return nil }
+                return LoadedCoverImage(image: image)
+            }.value
+            guard !Task.isCancelled else { return }
+            image = loaded?.image
         }
     }
+
+    private static func cachedImage(key: String) async -> LoadedCoverImage? {
+        await Task.detached(priority: .utility) {
+            guard let data = OfflineCache.loadData(key: key), let image = decode(data) else {
+                return nil
+            }
+            return LoadedCoverImage(image: image)
+        }.value
+    }
+
+    /// `preparingForDisplay` performs decompression on the worker rather than
+    /// on the first animation frame that happens to draw the cover.
+    nonisolated private static func decode(_ data: Data) -> UIImage? {
+        guard let source = UIImage(data: data) else { return nil }
+        return source.preparingForDisplay() ?? source
+    }
+}
+
+/// UIKit images are immutable for this use. The wrapper makes the deliberate
+/// background decode boundary explicit to Swift concurrency.
+private struct LoadedCoverImage: @unchecked Sendable {
+    let image: UIImage
 }

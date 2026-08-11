@@ -41,11 +41,16 @@ struct AIModelSection: View {
     @State private var settings: BackendAPI.AnswerSettings?
     @State private var loadFailed = false
     @State private var errorMessage: String?
+    @State private var saveTask: Task<Void, Never>?
 
     var body: some View {
         Section {
             if let settings {
-                LabeledContent("Anbieter", value: settings.provider == "chatgpt" ? "ChatGPT" : "Gemini")
+                Picker("Anbieter", selection: providerBinding) {
+                    Text("Gemini").tag("gemini")
+                    Text("ChatGPT").tag("chatgpt")
+                }
+                .pickerStyle(.navigationLink)
                 if settings.provider == "chatgpt" {
                     Picker("Modell", selection: modelBinding) {
                         ForEach(modelChoices) { choice in
@@ -132,6 +137,16 @@ struct AIModelSection: View {
         )
     }
 
+    private var providerBinding: Binding<String> {
+        Binding(
+            get: { settings?.provider ?? "chatgpt" },
+            set: { value in
+                settings?.provider = value
+                save()
+            }
+        )
+    }
+
     private var effortBinding: Binding<String> {
         Binding(
             get: { settings?.chatgptReasoningEffort ?? "" },
@@ -149,7 +164,7 @@ struct AIModelSection: View {
         if settings.provider == "chatgpt" {
             return "Gilt für Antworten, Zusammenfassungen und Chat — sofort."
         }
-        return "Den Anbieter wählt der Server (answer.provider in config.toml)."
+        return "Gemini wird für Antworten, Zusammenfassungen und Chat verwendet — sofort."
     }
 
     private func displayName(for choice: BackendAPI.ModelChoice) -> String {
@@ -185,13 +200,17 @@ struct AIModelSection: View {
     private func save() {
         guard let settings else { return }
         errorMessage = nil
-        Task {
+        saveTask?.cancel()
+        saveTask = Task {
             do {
                 try await api.updateAnswerSettings(
+                    provider: settings.provider,
                     model: settings.chatgptModel,
                     reasoningEffort: settings.chatgptReasoningEffort
                 )
+                guard !Task.isCancelled else { return }
             } catch {
+                guard !Task.isCancelled else { return }
                 errorMessage = error.localizedDescription
                 await load()
             }

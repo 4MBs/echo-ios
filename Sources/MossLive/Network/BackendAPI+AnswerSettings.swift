@@ -15,7 +15,7 @@ extension BackendAPI {
     /// The choice lists come from the server so new models appear in the
     /// picker without an app update.
     struct AnswerSettings: Decodable, Sendable {
-        let provider: String // "gemini" | "chatgpt"
+        var provider: String // "gemini" | "chatgpt"
         var chatgptModel: String // "" = server default
         var chatgptReasoningEffort: String // "" = model default
         let chatgptModels: [ModelChoice]
@@ -28,13 +28,20 @@ extension BackendAPI {
         return try await decoder.decode(AnswerSettings.self, from: request("/answer/settings"))
     }
 
-    /// Store the ChatGPT model/effort choice on the server; it applies to the
-    /// running server immediately and survives restarts.
-    func updateAnswerSettings(model: String, reasoningEffort: String) async throws {
+    /// Switch provider/model on the running server and persist the choice.
+    func updateAnswerSettings(
+        provider: String,
+        model: String,
+        reasoningEffort: String
+    ) async throws {
         _ = try await request(
             "/answer/settings",
             method: "POST",
-            jsonBody: ["chatgpt_model": model, "chatgpt_reasoning_effort": reasoningEffort]
+            jsonBody: [
+                "provider": provider,
+                "chatgpt_model": model,
+                "chatgpt_reasoning_effort": reasoningEffort,
+            ]
         )
     }
 }

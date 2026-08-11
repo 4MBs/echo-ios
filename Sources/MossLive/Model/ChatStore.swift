@@ -139,9 +139,23 @@ final class ChatStore {
         }
     }
 
-    private struct SavedState: Codable {
+    private struct SavedState: Codable, Sendable {
         var conversations: [Conversation]
         var selectedConversationID: UUID
+    }
+
+    /// JSON encoding and atomic file replacement can be noticeable once a
+    /// conversation contains thumbnails and long extracted documents. Keep it
+    /// serial and off the main actor; revisions prevent a late older task from
+    /// overwriting a newer snapshot.
+    private actor PersistenceWriter {
+        private var newestRevision = 0
+
+        func save(_ state: SavedState, revision: Int, key: String) {
+            guard revision >= newestRevision else { return }
+            newestRevision = revision
+            OfflineCache.save(state, as: key)
+        }
     }
 
     private static let storageKey = "chat-conversations-v2"
@@ -152,6 +166,8 @@ final class ChatStore {
     var errorMessage: String?
 
     private let persistenceEnabled: Bool
+    @ObservationIgnored private let persistenceWriter = PersistenceWriter()
+    @ObservationIgnored private var persistenceRevision = 0
     private var requestTask: Task<Void, Never>?
     private var activeRequestID: UUID?
 
@@ -259,11 +275,11 @@ final class ChatStore {
             attachments: attachments,
             usedWebSearch: webSearch
         )
-        append(user)
+        conversations[currentIndex].messages.append(user)
         if conversations[currentIndex].messages.count == 1 {
             conversations[currentIndex].title = Self.title(for: visibleQuestion, attachments: attachments)
-            persist()
         }
+        touchCurrentConversation()
         startRequest(for: user, history: history, api: api)
     }
 
@@ -397,11 +413,6 @@ final class ChatStore {
         persist()
     }
 
-    private func append(_ message: Message) {
-        conversations[currentIndex].messages.append(message)
-        touchCurrentConversation()
-    }
-
     private func touchCurrentConversation() {
         conversations[currentIndex].updatedAt = Date()
         sortConversationsKeepingSelection()
@@ -449,9 +460,14 @@ final class ChatStore {
 
     private func persist() {
         guard persistenceEnabled else { return }
-        OfflineCache.save(
-            SavedState(conversations: conversations, selectedConversationID: selectedConversationID),
-            as: Self.storageKey
+        persistenceRevision += 1
+        let revision = persistenceRevision
+        let snapshot = SavedState(
+            conversations: conversations,
+            selectedConversationID: selectedConversationID
         )
+        Task { [persistenceWriter] in
+            await persistenceWriter.save(snapshot, revision: revision, key: Self.storageKey)
+        }
     }
 }

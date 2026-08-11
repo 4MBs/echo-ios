@@ -14,6 +14,7 @@ struct BookReaderView: View {
 
     let api: BackendAPI
     let book: BackendAPI.Book
+    let onBookAvailable: @MainActor () -> Void
 
     @AppStorage private var renamedTitle: String
 
@@ -29,9 +30,14 @@ struct BookReaderView: View {
     @State private var renamingBook = false
     @State private var typedBookTitle = ""
 
-    init(api: BackendAPI, book: BackendAPI.Book) {
+    init(
+        api: BackendAPI,
+        book: BackendAPI.Book,
+        onBookAvailable: @escaping @MainActor () -> Void = {}
+    ) {
         self.api = api
         self.book = book
+        self.onBookAvailable = onBookAvailable
         _renamedTitle = AppStorage(wrappedValue: "", "library.bookTitle.\(book.id)")
     }
 
@@ -171,6 +177,7 @@ struct BookReaderView: View {
 
         if let cached = BackendAPI.cachedBook(id: book.id) {
             phase = .ready(cached)
+            onBookAvailable()
             return
         }
         phase = .downloading(0)
@@ -181,6 +188,7 @@ struct BookReaderView: View {
                 }
             }
             phase = .ready(url)
+            onBookAvailable()
         } catch {
             askingBookAI = false
             phase = .failed(error)
@@ -727,6 +735,8 @@ private final class BookPDFView: PDFView {
     private var selectionOverlay: BookRegionSelectionOverlay?
     private var adjustmentOverlay: BookRegionAdjustmentOverlay?
     private var displayedRegion: BackendAPI.BookPageRegion?
+    private var lastLayoutSize = CGSize.zero
+    private var pendingScaleUpdate: DispatchWorkItem?
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
     private lazy var deselectionTap = UITapGestureRecognizer(
@@ -753,7 +763,13 @@ private final class BookPDFView: PDFView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        applyScaleLimits()
+        let sizeChanged = bounds.size != lastLayoutSize
+        lastLayoutSize = bounds.size
+        if restingScale == 0 {
+            applyScaleLimits()
+        } else if sizeChanged {
+            scheduleScaleUpdate()
+        }
         selectionOverlay?.frame = bounds
         observeScrollingIfNeeded()
         updateDisplayedRegion()
@@ -972,12 +988,33 @@ private final class BookPDFView: PDFView {
         // layout switch, a differently sized page) rather than stranding the page
         // at a scale that no longer belongs to it.
         let restingAtFit = restingScale == 0 || abs(scaleFactor - restingScale) < 0.001
-        minScaleFactor = fit
-        maxScaleFactor = fit * 6
+        if abs(minScaleFactor - fit) > 0.0005 {
+            minScaleFactor = fit
+        }
+        if abs(maxScaleFactor - fit * 6) > 0.0005 {
+            maxScaleFactor = fit * 6
+        }
         if restingAtFit || scaleFactor < fit, abs(scaleFactor - fit) > 0.001 {
             scaleFactor = fit
         }
         restingScale = fit
+    }
+
+    /// Split-view and assistant animations can resize the reader dozens of
+    /// times in a fraction of a second. Re-fitting PDFKit on every intermediate
+    /// width invalidates its page tiles repeatedly and blocks the animation.
+    /// Coalesce those bounds changes and fit once at the settled size.
+    func scheduleScaleUpdate() {
+        pendingScaleUpdate?.cancel()
+        let update = DispatchWorkItem { [weak self] in
+            self?.applyScaleLimits()
+        }
+        pendingScaleUpdate = update
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: update)
+    }
+
+    deinit {
+        pendingScaleUpdate?.cancel()
     }
 }
 
@@ -1012,8 +1049,12 @@ private struct PDFKitView: UIViewRepresentable {
         pdfView.autoScales = false
         pdfView.backgroundColor = .clear
         pdfView.document = document
-        pdfView.onRegionChanged = { selectedRegion = $0 }
+        pdfView.onRegionChanged = { region in
+            context.coordinator.record(region: region)
+            selectedRegion = region
+        }
         pdfView.display(region: selectedRegion)
+        context.coordinator.record(region: selectedRegion)
 
         context.coordinator.proxy = proxy
         context.coordinator.onPageChange = { updatePageState($0) }
@@ -1030,8 +1071,13 @@ private struct PDFKitView: UIViewRepresentable {
     func updateUIView(_ view: PDFView, context: Context) {
         context.coordinator.onPageChange = { updatePageState($0) }
         guard let bookView = view as? BookPDFView else { return }
-        bookView.onRegionChanged = { selectedRegion = $0 }
-        bookView.display(region: selectedRegion)
+        bookView.onRegionChanged = { region in
+            context.coordinator.record(region: region)
+            selectedRegion = region
+        }
+        if context.coordinator.shouldDisplay(region: selectedRegion) {
+            bookView.display(region: selectedRegion)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1039,12 +1085,14 @@ private struct PDFKitView: UIViewRepresentable {
     private func updatePageState(_ view: PDFView) {
         guard let document = view.document else { return }
         // A page of a different size needs its own floor, so re-fit on arrival.
-        (view as? BookPDFView)?.applyScaleLimits()
-        pageCount = document.pageCount
+        (view as? BookPDFView)?.scheduleScaleUpdate()
+        if pageCount != document.pageCount {
+            pageCount = document.pageCount
+        }
         let visible = view.visiblePages.map { document.index(for: $0) + 1 }.sorted()
         if let first = visible.first {
-            currentPage = first
-            visiblePages = visible
+            if currentPage != first { currentPage = first }
+            if visiblePages != visible { visiblePages = visible }
         }
     }
 
@@ -1052,6 +1100,9 @@ private struct PDFKitView: UIViewRepresentable {
         var onPageChange: ((PDFView) -> Void)?
         var proxy: PDFViewProxy?
         private var observers: [NSObjectProtocol] = []
+        private var pageUpdateScheduled = false
+        private var lastRegion: BackendAPI.BookPageRegion?
+        private var hasRegion = false
 
         func attach(to view: PDFView) {
             guard observers.isEmpty else { return }
@@ -1061,7 +1112,7 @@ private struct PDFKitView: UIViewRepresentable {
                     forName: name, object: view, queue: .main
                 ) { [weak self, weak view] _ in
                     guard let self, let view else { return }
-                    onPageChange?(view)
+                    schedulePageUpdate(for: view)
                 })
             }
 
@@ -1071,6 +1122,28 @@ private struct PDFKitView: UIViewRepresentable {
                 swipe.delegate = self
                 swipe.cancelsTouchesInView = false
                 view.addGestureRecognizer(swipe)
+            }
+        }
+
+        func record(region: BackendAPI.BookPageRegion?) {
+            lastRegion = region
+            hasRegion = true
+        }
+
+        func shouldDisplay(region: BackendAPI.BookPageRegion?) -> Bool {
+            guard !hasRegion || lastRegion != region else { return false }
+            record(region: region)
+            return true
+        }
+
+        private func schedulePageUpdate(for view: PDFView) {
+            guard !pageUpdateScheduled else { return }
+            pageUpdateScheduled = true
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self else { return }
+                pageUpdateScheduled = false
+                guard let view else { return }
+                onPageChange?(view)
             }
         }
 
