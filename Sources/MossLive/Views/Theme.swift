@@ -54,6 +54,20 @@ enum Theme {
         /// Above this a question is set one step larger.
         static let largeQuestion: CGFloat = 900
     }
+
+    /// Conversation metrics mirror T3 Code mobile's message hierarchy: a
+    /// compact 85%-width user bubble, unboxed assistant prose, and 20pt turns.
+    /// Keeping the values here makes the free chat, book assistant and study
+    /// follow-up sheet feel like the same conversation component.
+    enum Conversation {
+        static let userBubbleRadius: CGFloat = 20
+        static let userBubbleWidth: CGFloat = 0.85
+        static let userHorizontalInset: CGFloat = 14
+        static let userVerticalInset: CGFloat = 10
+        static let turnSpacing: CGFloat = 20
+        static let collapsedComposerRadius: CGFloat = 999
+        static let expandedComposerRadius: CGFloat = 20
+    }
 }
 
 /// The record control's colour. The control is built from a family of related
@@ -152,6 +166,10 @@ extension View {
             .regular.interactive(),
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
-        .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 28, y: 14)
     }
 }

@@ -1,6 +1,22 @@
 import SwiftUI
 import UIKit
 
+/// T3 Code's quiet in-flight assistant state: three tiny dots on the same
+/// baseline as the answer that will replace them.
+struct ConversationThinkingDots: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().frame(width: 4, height: 4).opacity(1)
+            Circle().frame(width: 4, height: 4).opacity(0.8)
+            Circle().frame(width: 4, height: 4).opacity(0.6)
+        }
+        .foregroundStyle(Color(.tertiaryLabel))
+        .frame(width: 20, height: 12)
+        .accessibilityElement()
+        .accessibilityLabel("Denkt nach")
+    }
+}
+
 /// A quiet copy action with the same immediate confirmation everywhere a
 /// generated answer appears. The state belongs to the button, so copying one
 /// message never changes another message's controls.
@@ -23,9 +39,9 @@ struct CopyFeedbackButton: View {
             }
         } label: {
             Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                .font(.caption)
+                .font(.system(size: 13))
                 .foregroundStyle(copied ? Theme.accent : Color(.tertiaryLabel))
-                .frame(width: 32, height: 32)
+                .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

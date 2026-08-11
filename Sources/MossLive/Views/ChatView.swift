@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// "Chat mit KI": free-form questions to Gemini, grounded in the running
-/// recording or a picked past lesson (mockup screen 2).
+/// Free-form questions grounded in the running recording or a picked lesson.
+/// Its conversation and composer intentionally follow T3 Code mobile's thread
+/// presentation so all emphasis stays on what the assistant actually said.
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -47,8 +48,6 @@ struct ChatView: View {
         .onChange(of: model.phase) { syncContextWithRecording() }
     }
 
-    /// While recording, the chat is always grounded in the live transcript;
-    /// when recording stops, fall back to context-free.
     private func syncContextWithRecording() {
         if model.phase == .recording {
             chat.context = .live
@@ -62,41 +61,46 @@ struct ChatView: View {
     @ViewBuilder
     private var messagesArea: some View {
         if chat.messages.isEmpty {
-            ContentUnavailableView {
-                Label("Frag alles, was du wissen willst", systemImage: "bubble.left.and.text.bubble.right")
-            } description: {
-                Text("Antworten nutzen das Transkript der laufenden Aufnahme oder einer ausgewählten Stunde.")
+            VStack(spacing: 8) {
+                Text("Noch keine Unterhaltung")
+                    .font(.headline.weight(.bold))
+                Text("Frag etwas zur laufenden Aufnahme, zu einer vergangenen Stunde oder ganz ohne Kontext.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
+            .frame(maxWidth: 320)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 40)
         } else {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 22) {
-                        ForEach(chat.messages) { message in
-                            MessageRow(message: message)
-                        }
-                        if chat.sending {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("Denkt nach…")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
+            GeometryReader { geometry in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: Theme.Conversation.turnSpacing) {
+                            ForEach(chat.messages) { message in
+                                MessageRow(message: message)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityElement(children: .combine)
+                            if chat.sending {
+                                ConversationThinkingDots()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            Color.clear.frame(height: 2).id("chat-bottom")
                         }
-                        Color.clear.frame(height: 2).id("chat-bottom")
+                        .frame(maxWidth: Theme.Width.readable)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: geometry.size.height,
+                            alignment: .bottom
+                        )
+                        .padding(.horizontal, Theme.Space.screen)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
                     }
-                    .frame(maxWidth: Theme.Width.readable)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, Theme.Space.screen)
-                    .padding(.top, Theme.Space.screen)
-                    .padding(.bottom, 8)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: chat.messages.count) {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
-                        proxy.scrollTo("chat-bottom", anchor: .bottom)
+                    .scrollDismissesKeyboard(.interactively)
+                    .onChange(of: chat.messages.count) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
+                            proxy.scrollTo("chat-bottom", anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -105,49 +109,71 @@ struct ChatView: View {
 
     // MARK: - Input
 
+    /// A direct SwiftUI translation of T3's pill-to-card composer. The same
+    /// field remains mounted during expansion so focus and selection survive.
     private var inputBar: some View {
         VStack(spacing: 8) {
             composerStatus
 
-            VStack(alignment: .leading, spacing: showsComposerTools ? 4 : 0) {
-                if showsComposerTools {
-                    contextChip
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .bottom, spacing: 8) {
                     TextField("Stelle eine Frage zum Unterricht…", text: $draft, axis: .vertical)
-                        .lineLimit(1 ... 4)
+                        .lineLimit(1 ... 5)
                         .focused($inputFocused)
                         .submitLabel(.send)
                         .onSubmit(send)
-                        .padding(.leading, 8)
-                        .padding(.vertical, 10)
-                        .frame(minHeight: 44)
-                    Button(action: send) {
-                        Image(systemName: "arrow.up")
-                            .font(.subheadline.weight(.semibold))
+                        .padding(.leading, composerExpanded ? 4 : 13)
+                        .frame(
+                            minHeight: composerExpanded ? 80 : 36,
+                            maxHeight: composerExpanded ? 160 : 36,
+                            alignment: composerExpanded ? .topLeading : .leading
+                        )
+
+                    if !composerExpanded {
+                        sendButton
                     }
-                    .buttonStyle(.glassProminent)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
-                    .disabled(!canSend)
-                    .accessibilityLabel("Frage senden")
+                }
+
+                if composerExpanded {
+                    HStack(spacing: 8) {
+                        contextChip
+                        Spacer(minLength: 8)
+                        sendButton
+                    }
+                    .padding(.top, 8)
+                    .transition(.opacity)
                 }
             }
-            .padding(6)
-            .floatingComposerSurface(cornerRadius: inputFocused ? 22 : 28)
-            .animation(reduceMotion ? nil : .snappy, value: showsComposerTools)
+            .padding(.horizontal, composerExpanded ? 14 : 5)
+            .padding(.vertical, composerExpanded ? 12 : 5)
+            .floatingComposerSurface(
+                cornerRadius: composerExpanded
+                    ? Theme.Conversation.expandedComposerRadius
+                    : Theme.Conversation.collapsedComposerRadius
+            )
+            .animation(reduceMotion ? nil : .snappy, value: composerExpanded)
         }
         .frame(maxWidth: Theme.Width.readable)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, Theme.Space.screen)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 16)
+        .padding(.top, composerExpanded ? 8 : 6)
+        .padding(.bottom, composerExpanded ? 8 : 6)
     }
 
-    private var showsComposerTools: Bool {
-        inputFocused || chat.context != .none
+    private var composerExpanded: Bool {
+        inputFocused || !draft.isEmpty
+    }
+
+    private var sendButton: some View {
+        Button(action: send) {
+            Image(systemName: "arrow.up")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.glassProminent)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
+        .disabled(!canSend)
+        .accessibilityLabel("Frage senden")
     }
 
     private var canSend: Bool {
@@ -163,8 +189,6 @@ struct ChatView: View {
         Task { await chat.send(question: question, api: api) }
     }
 
-    /// What the next question is grounded in. Locked to the live transcript
-    /// while recording; otherwise a past lesson (or nothing) can be picked.
     @ViewBuilder
     private var composerStatus: some View {
         if let error = chat.errorMessage {
@@ -181,34 +205,32 @@ struct ChatView: View {
 
     @ViewBuilder
     private var contextChip: some View {
-        HStack(spacing: 6) {
-            if model.phase == .recording {
-                Label("Aktuelle Aufnahme", systemImage: "record.circle")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-            } else {
-                Menu {
-                    Button("Ohne Kontext") { chat.context = .none }
-                    ForEach(lessons) { lesson in
-                        Button(title(for: lesson)) {
-                            chat.context = .lesson(id: lesson.id, title: title(for: lesson))
-                        }
+        if model.phase == .recording {
+            Label("Aktuelle Aufnahme", systemImage: "record.circle")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Theme.accent)
+                .frame(minHeight: 36)
+        } else {
+            Menu {
+                Button("Ohne Kontext") { chat.context = .none }
+                ForEach(lessons) { lesson in
+                    Button(title(for: lesson)) {
+                        chat.context = .lesson(id: lesson.id, title: title(for: lesson))
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "text.book.closed")
-                        Text(chat.context.label)
-                        Image(systemName: "chevron.down").font(.caption2)
-                    }
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(minHeight: 36)
                 }
-                .accessibilityLabel("Kontext: \(chat.context.label)")
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "text.book.closed")
+                    Text(chat.context.label)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 36)
             }
-            Spacer()
+            .accessibilityLabel("Kontext: \(chat.context.label)")
         }
-        .padding(.horizontal, 8)
     }
 
     private func title(for lesson: BackendAPI.LessonInfo) -> String {
@@ -216,8 +238,6 @@ struct ChatView: View {
     }
 
     private func loadLessons() async {
-        // Only the picker's contents — the stored list keeps it populated so
-        // an old chat still shows which lesson it was about.
         if let stored = OfflineCache.load([BackendAPI.LessonInfo].self, key: OfflineCache.Key.lessons) {
             lessons = stored
         }
@@ -227,9 +247,8 @@ struct ChatView: View {
     }
 }
 
-/// Conversation hierarchy borrowed from Messages: the student's words are a
-/// compact colored bubble, while Echo's answer is reading content on the page.
-/// Both get quiet metadata below rather than carrying controls inside the text.
+/// T3 Code's conversation hierarchy: an 85%-width system-blue user bubble,
+/// unboxed assistant prose, and copy/time metadata outside the content.
 private struct MessageRow: View {
     let message: ChatStore.Message
 
@@ -237,17 +256,23 @@ private struct MessageRow: View {
         if message.role == .user {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(renderedMarkdown(message.text))
-                    .font(.callout)
+                    .font(.body)
                     .lineSpacing(3)
                     .textSelection(.enabled)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, Theme.Conversation.userHorizontalInset)
+                    .padding(.vertical, Theme.Conversation.userVerticalInset)
                     .background(
-                        Theme.accent,
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        Color(.systemBlue),
+                        in: RoundedRectangle(
+                            cornerRadius: Theme.Conversation.userBubbleRadius,
+                            style: .continuous
+                        )
                     )
-                    .frame(maxWidth: Theme.Width.readable * 0.85, alignment: .trailing)
+                    .frame(
+                        maxWidth: Theme.Width.readable * Theme.Conversation.userBubbleWidth,
+                        alignment: .trailing
+                    )
                 metadata(copyLabel: "Frage kopieren")
             }
             .padding(.leading, 48)
@@ -262,24 +287,32 @@ private struct MessageRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 metadata(copyLabel: "Antwort kopieren")
             }
+            .padding(.horizontal, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private func metadata(copyLabel: String) -> some View {
         HStack(spacing: 2) {
-            if message.role == .user { Spacer(minLength: 0) }
-            CopyFeedbackButton(text: message.text, accessibilityLabel: copyLabel)
-            Text(message.date.formatted(date: .omitted, time: .shortened))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
-            if message.role == .assistant { Spacer(minLength: 0) }
+            if message.role == .user {
+                Spacer(minLength: 0)
+                timestamp
+                CopyFeedbackButton(text: message.text, accessibilityLabel: copyLabel)
+            } else {
+                CopyFeedbackButton(text: message.text, accessibilityLabel: copyLabel)
+                timestamp
+                Spacer(minLength: 0)
+            }
         }
+    }
+
+    private var timestamp: some View {
+        Text(message.date.formatted(date: .omitted, time: .shortened))
+            .font(.caption.monospacedDigit().weight(.medium))
+            .foregroundStyle(.secondary)
     }
 }
 
-/// A failure or offline state belongs to the action it prevents. Keeping this
-/// pill directly above the composer leaves the conversation itself undisturbed.
 private struct ChatStatusPill: View {
     let text: String
     let systemImage: String

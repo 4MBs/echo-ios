@@ -43,7 +43,7 @@ struct AskAboutCardSheet: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Space.inset) {
+                    VStack(alignment: .leading, spacing: Theme.Conversation.turnSpacing) {
                         cardContext
                         ForEach(turns) { turn in
                             bubble(turn)
@@ -51,7 +51,7 @@ struct AskAboutCardSheet: View {
                         }
                         if sending {
                             HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
+                                ConversationThinkingDots()
                                 Text("Denkt nach …")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
@@ -126,16 +126,22 @@ struct AskAboutCardSheet: View {
         if turn.mine {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(AttributedString(turn.text))
-                    .font(.callout)
+                    .font(.body)
                     .foregroundStyle(.white)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, Theme.Conversation.userHorizontalInset)
+                    .padding(.vertical, Theme.Conversation.userVerticalInset)
                     .background(
-                        Theme.accent,
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        Color(.systemBlue),
+                        in: RoundedRectangle(
+                            cornerRadius: Theme.Conversation.userBubbleRadius,
+                            style: .continuous
+                        )
                     )
-                    .frame(maxWidth: Theme.Width.readable * 0.85, alignment: .trailing)
+                    .frame(
+                        maxWidth: Theme.Width.readable * Theme.Conversation.userBubbleWidth,
+                        alignment: .trailing
+                    )
                 messageMetadata(turn, copyLabel: "Frage kopieren")
             }
             .padding(.leading, 48)
@@ -155,13 +161,22 @@ struct AskAboutCardSheet: View {
 
     private func messageMetadata(_ turn: Turn, copyLabel: String) -> some View {
         HStack(spacing: 2) {
-            if turn.mine { Spacer(minLength: 0) }
-            CopyFeedbackButton(text: turn.text, accessibilityLabel: copyLabel)
-            Text(turn.date.formatted(date: .omitted, time: .shortened))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
-            if !turn.mine { Spacer(minLength: 0) }
+            if turn.mine {
+                Spacer(minLength: 0)
+                messageTimestamp(turn.date)
+                CopyFeedbackButton(text: turn.text, accessibilityLabel: copyLabel)
+            } else {
+                CopyFeedbackButton(text: turn.text, accessibilityLabel: copyLabel)
+                messageTimestamp(turn.date)
+                Spacer(minLength: 0)
+            }
         }
+    }
+
+    private func messageTimestamp(_ date: Date) -> some View {
+        Text(date.formatted(date: .omitted, time: .shortened))
+            .font(.caption.monospacedDigit().weight(.medium))
+            .foregroundStyle(.secondary)
     }
 
     // MARK: - Asking
@@ -183,34 +198,67 @@ struct AskAboutCardSheet: View {
                 }
                 .scrollIndicators(.hidden)
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Frag zu dieser Karte", text: $question, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1 ... 4)
-                    .focused($writing)
-                    .submitLabel(.send)
-                    .onSubmit { send(question) }
-                    .padding(.leading, 8)
-                    .padding(.vertical, 10)
-                    .frame(minHeight: 44)
-                Button {
-                    send(question)
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Frag zu dieser Karte", text: $question, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1 ... 5)
+                        .focused($writing)
+                        .submitLabel(.send)
+                        .onSubmit { send(question) }
+                        .padding(.leading, composerExpanded ? 4 : 13)
+                        .frame(
+                            minHeight: composerExpanded ? 80 : 36,
+                            maxHeight: composerExpanded ? 160 : 36,
+                            alignment: composerExpanded ? .topLeading : .leading
+                        )
+                    if !composerExpanded {
+                        sendButton
+                    }
                 }
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.circle)
-                .controlSize(.large)
-                .disabled(sending || question.trimmingCharacters(in: .whitespaces).isEmpty)
-                .accessibilityLabel("Frage senden")
+
+                if composerExpanded {
+                    HStack(spacing: 8) {
+                        Label("Diese Karte", systemImage: "rectangle.on.rectangle")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(minHeight: 36)
+                        Spacer(minLength: 8)
+                        sendButton
+                    }
+                    .padding(.top, 8)
+                    .transition(.opacity)
+                }
             }
-            .padding(6)
-            .floatingComposerSurface(cornerRadius: writing ? 22 : 28)
-            .padding(.horizontal, Theme.Space.screen)
-            .animation(reduceMotion ? nil : .snappy, value: writing)
+            .padding(.horizontal, composerExpanded ? 14 : 5)
+            .padding(.vertical, composerExpanded ? 12 : 5)
+            .floatingComposerSurface(
+                cornerRadius: composerExpanded
+                    ? Theme.Conversation.expandedComposerRadius
+                    : Theme.Conversation.collapsedComposerRadius
+            )
+            .padding(.horizontal, 16)
+            .animation(reduceMotion ? nil : .snappy, value: composerExpanded)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, composerExpanded ? 8 : 6)
+    }
+
+    private var composerExpanded: Bool {
+        writing || !question.isEmpty
+    }
+
+    private var sendButton: some View {
+        Button {
+            send(question)
+        } label: {
+            Image(systemName: "arrow.up")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.glassProminent)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
+        .disabled(sending || question.trimmingCharacters(in: .whitespaces).isEmpty)
+        .accessibilityLabel("Frage senden")
     }
 
     private func send(_ text: String) {
