@@ -1,82 +1,98 @@
 import SwiftUI
 
-/// Echo's settings index uses the same hierarchy and measurements as T3 Code
-/// mobile's settings sheet, translated from React Native to native SwiftUI:
-/// 20pt screen margins, 24pt gaps, 24pt continuous cards, monochrome 22pt
-/// symbols, and quiet trailing values. Destinations remain Echo-specific.
+/// Einstellungen, arranged the way iOS arranges its own: an index of
+/// destinations, each with one subject, rather than a single page carrying
+/// every control in the app with a paragraph of explanation under each of
+/// them. What a row is currently set to is shown on the row, so the common
+/// question — "is the server in?", "when does it remind me?" — is answered
+/// without opening anything.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
-                    T3SettingsSection("Konfiguration") {
-                        T3SettingsLink(
+            List {
+                Section {
+                    NavigationLink {
+                        ServerSettingsView()
+                    } label: {
+                        SettingsRow(
                             title: "Server",
                             systemImage: "server.rack",
+                            tint: .blue,
                             value: serverValue
-                        ) {
-                            ServerSettingsView()
-                        }
-                        T3SettingsLink(
+                        )
+                    }
+                    NavigationLink {
+                        TimetableSettingsView()
+                    } label: {
+                        SettingsRow(
                             title: "Stundenplan",
                             systemImage: "calendar",
+                            tint: .red,
                             value: model.timetable.enabled ? "WebUntis" : "Aus"
-                        ) {
-                            TimetableSettingsView()
-                        }
-                    }
-
-                    T3SettingsSection("Aufnahme & KI") {
-                        T3SettingsLink(title: "Aufnahme", systemImage: "waveform") {
-                            RecordingSettingsView()
-                        }
-                        T3SettingsLink(title: "KI", systemImage: "sparkles") {
-                            AISettingsView()
-                        }
-                    }
-
-                    T3SettingsSection("Lernen") {
-                        T3SettingsLink(
-                            title: "Lernen",
-                            systemImage: "brain.head.profile",
-                            value: learnValue
-                        ) {
-                            LearnSettingsView()
-                        }
-                        T3SettingsLink(title: "Bibliothek", systemImage: "book.closed") {
-                            LibrarySettingsView()
-                        }
-                        T3SettingsLink(
-                            title: "App-Wechsel",
-                            systemImage: "hand.tap",
-                            value: QuickSwitchApp(urlString: model.settings.quickSwitchURL).title
-                        ) {
-                            QuickSwitchSettingsView()
-                        }
-                    }
-
-                    T3SettingsSection("App") {
-                        T3SettingsLink(
-                            title: "Über Echo",
-                            systemImage: "info.circle",
-                            value: AppInfo.version
-                        ) {
-                            AboutSettingsView()
-                        }
+                        )
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 36)
-                .frame(maxWidth: 700)
-                .frame(maxWidth: .infinity)
+
+                Section {
+                    NavigationLink {
+                        RecordingSettingsView()
+                    } label: {
+                        SettingsRow(title: "Aufnahme", systemImage: "waveform", tint: .pink)
+                    }
+                    NavigationLink {
+                        AISettingsView()
+                    } label: {
+                        SettingsRow(title: "KI", systemImage: "sparkles", tint: .purple)
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        LearnSettingsView()
+                    } label: {
+                        SettingsRow(
+                            title: "Lernen",
+                            systemImage: "brain.head.profile",
+                            tint: .orange,
+                            value: learnValue
+                        )
+                    }
+                    NavigationLink {
+                        LibrarySettingsView()
+                    } label: {
+                        SettingsRow(title: "Bibliothek", systemImage: "book.closed", tint: .brown)
+                    }
+                    NavigationLink {
+                        QuickSwitchSettingsView()
+                    } label: {
+                        SettingsRow(
+                            title: "App-Wechsel",
+                            systemImage: "hand.tap",
+                            tint: .teal,
+                            value: QuickSwitchApp(urlString: model.settings.quickSwitchURL).title
+                        )
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        AboutSettingsView()
+                    } label: {
+                        SettingsRow(
+                            title: "Über Echo",
+                            systemImage: "info",
+                            tint: .gray,
+                            value: AppInfo.version
+                        )
+                    }
+                }
             }
-            .scrollIndicators(.hidden)
-            .groupedScreen()
+            // Explicit, because this list lives in the detail column of a
+            // split view, where the automatic style is not the grouped one.
+            .listStyle(.insetGrouped)
             .navigationTitle("Einstellungen")
-            .navigationBarTitleDisplayMode(.inline)
             .task { await model.refreshTimetable() }
         }
     }
@@ -87,6 +103,8 @@ struct SettingsView: View {
         return host
     }
 
+    /// The daily goal leads, because that is what the row now mostly holds; the
+    /// reminder time follows it only when there is one.
     private var learnValue: String {
         let settings = model.settings
         let goal = "\(settings.dailyLearnMinutes) Min"
@@ -102,116 +120,49 @@ struct SettingsView: View {
     }
 }
 
-/// SwiftUI counterpart of T3 Code's `SettingsSection`: a quiet section label
-/// above one uninterrupted card rather than a stack of individually decorated
-/// controls.
-struct T3SettingsSection<Content: View>: View {
-    let title: String
-    let content: Content
+// MARK: - The index's rows
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(
-                Color(.secondarySystemGroupedBackground),
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        }
-    }
-}
-
-/// SwiftUI counterpart of T3 Code's `SettingsRow`: monochrome leading symbol,
-/// 18pt label, muted value and a small system chevron.
-private struct T3SettingsRow: View {
+/// One row of the index: a tinted glyph, the name, and — where there is one —
+/// what it is currently set to, which is exactly how iOS builds its own.
+struct SettingsRow: View {
     let title: String
     let systemImage: String
-    let value: String?
+    let tint: Color
+    var value: String?
 
     var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: systemImage)
-                .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(.primary)
-                .frame(width: 22)
-                .accessibilityHidden(true)
-
+        HStack(spacing: 12) {
+            SettingsGlyph(systemImage: systemImage, tint: tint)
             Text(title)
-                .font(.system(size: 18))
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-
+            Spacer(minLength: 12)
             if let value {
                 Text(value)
-                    .font(.system(size: 16))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(maxWidth: 180, alignment: .trailing)
             }
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color(.tertiaryLabel))
-                .accessibilityHidden(true)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 
-private struct T3SettingsLink<Destination: View>: View {
-    let title: String
+/// The rounded, filled tile iOS puts at the head of a settings row. Fixed at
+/// 29pt like the system's, so the titles line up down the column.
+struct SettingsGlyph: View {
     let systemImage: String
-    let value: String?
-    let destination: Destination
-
-    init(
-        title: String,
-        systemImage: String,
-        value: String? = nil,
-        @ViewBuilder destination: () -> Destination
-    ) {
-        self.title = title
-        self.systemImage = systemImage
-        self.value = value
-        self.destination = destination()
-    }
+    let tint: Color
 
     var body: some View {
-        NavigationLink {
-            destination
-        } label: {
-            T3SettingsRow(title: title, systemImage: systemImage, value: value)
-        }
-        .buttonStyle(T3SettingsPressStyle())
-        .accessibilityLabel(value.map { "\(title), \($0)" } ?? title)
-    }
-}
-
-private struct T3SettingsPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(configuration.isPressed ? Color(.tertiarySystemFill) : .clear)
-            .opacity(configuration.isPressed ? 0.72 : 1)
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 29, height: 29)
+            .background(tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
 enum AppInfo {
+    /// Marketing version and build, the way About screens spell it.
     static var version: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"

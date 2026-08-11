@@ -40,7 +40,6 @@ final class BookAIStore {
         let text: String
         let citations: [BackendAPI.BookCitation]
         let pagesRead: [Int]
-        let date: Date
 
         init(
             question: String,
@@ -48,8 +47,7 @@ final class BookAIStore {
             text: String,
             citations: [BackendAPI.BookCitation],
             pagesRead: [Int],
-            request: String? = nil,
-            date: Date = .now
+            request: String? = nil
         ) {
             self.question = question
             self.request = request ?? question
@@ -57,7 +55,6 @@ final class BookAIStore {
             self.text = text
             self.citations = citations
             self.pagesRead = pagesRead
-            self.date = date
         }
     }
 

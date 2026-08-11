@@ -16,7 +16,6 @@ struct AskAboutCardSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var question = ""
     @State private var turns: [Turn] = []
@@ -28,7 +27,6 @@ struct AskAboutCardSheet: View {
         let id = UUID()
         let mine: Bool
         let text: String
-        let date = Date()
     }
 
     /// Openers that are worth a tap because they are the three things a student
@@ -43,7 +41,7 @@ struct AskAboutCardSheet: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Conversation.turnSpacing) {
+                    VStack(alignment: .leading, spacing: Theme.Space.inset) {
                         cardContext
                         ForEach(turns) { turn in
                             bubble(turn)
@@ -51,7 +49,7 @@ struct AskAboutCardSheet: View {
                         }
                         if sending {
                             HStack(spacing: 8) {
-                                ConversationThinkingDots()
+                                ProgressView().controlSize(.small)
                                 Text("Denkt nach …")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
@@ -67,12 +65,9 @@ struct AskAboutCardSheet: View {
                     .frame(maxWidth: .infinity)
                     .padding(Theme.Space.screen)
                 }
-                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: turns.count) { _, _ in
                     guard let last = turns.last else { return }
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+                    withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
             .groupedScreen()
@@ -121,62 +116,17 @@ struct AskAboutCardSheet: View {
         return card.lessonTitle?.trimmingCharacters(in: .whitespaces).nilWhenEmpty
     }
 
-    @ViewBuilder
     private func bubble(_ turn: Turn) -> some View {
-        if turn.mine {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(AttributedString(turn.text))
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, Theme.Conversation.userHorizontalInset)
-                    .padding(.vertical, Theme.Conversation.userVerticalInset)
-                    .background(
-                        Color(.systemBlue),
-                        in: RoundedRectangle(
-                            cornerRadius: Theme.Conversation.userBubbleRadius,
-                            style: .continuous
-                        )
-                    )
-                    .frame(
-                        maxWidth: Theme.Width.readable * Theme.Conversation.userBubbleWidth,
-                        alignment: .trailing
-                    )
-                messageMetadata(turn, copyLabel: "Frage kopieren")
-            }
-            .padding(.leading, 48)
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(renderedMarkdown(turn.text))
-                    .font(.body)
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                messageMetadata(turn, copyLabel: "Antwort kopieren")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(turn.mine ? "Du" : "Echo")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(turn.mine ? AttributedString(turn.text) : renderedMarkdown(turn.text))
+                .font(.body)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private func messageMetadata(_ turn: Turn, copyLabel: String) -> some View {
-        HStack(spacing: 2) {
-            if turn.mine {
-                Spacer(minLength: 0)
-                messageTimestamp(turn.date)
-                CopyFeedbackButton(text: turn.text, accessibilityLabel: copyLabel)
-            } else {
-                CopyFeedbackButton(text: turn.text, accessibilityLabel: copyLabel)
-                messageTimestamp(turn.date)
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private func messageTimestamp(_ date: Date) -> some View {
-        Text(date.formatted(date: .omitted, time: .shortened))
-            .font(.caption.monospacedDigit().weight(.medium))
-            .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Asking
@@ -198,39 +148,28 @@ struct AskAboutCardSheet: View {
                 }
                 .scrollIndicators(.hidden)
             }
-            HStack(alignment: .bottom, spacing: 6) {
-                Image(systemName: "rectangle.on.rectangle")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .accessibilityLabel("Kontext: Diese Karte")
+            HStack(spacing: 10) {
                 TextField("Frag zu dieser Karte", text: $question, axis: .vertical)
-                    .textFieldStyle(.plain)
+                    .textFieldStyle(.roundedBorder)
                     .lineLimit(1 ... 4)
                     .focused($writing)
-                    .submitLabel(.send)
                     .onSubmit { send(question) }
-                    .padding(.vertical, 9)
-                    .frame(minHeight: 44, maxHeight: 96, alignment: .leading)
-                sendButton
+                Button {
+                    send(question)
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(sending || question.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityLabel("Frage senden")
             }
-            .padding(5)
-            .floatingComposerSurface(cornerRadius: 28)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Space.screen)
         }
-        .padding(.vertical, 6)
-    }
-
-    private var sendButton: some View {
-        Button {
-            send(question)
-        } label: {
-            Image(systemName: "arrow.up")
-                .font(.subheadline.weight(.semibold))
-        }
-        .buttonStyle(ConversationPrimaryButtonStyle())
-        .disabled(sending || question.trimmingCharacters(in: .whitespaces).isEmpty)
-        .accessibilityLabel("Frage senden")
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     private func send(_ text: String) {

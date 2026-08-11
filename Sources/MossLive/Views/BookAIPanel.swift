@@ -1,9 +1,10 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
-/// A page-scoped assistant presented as a flat sibling pane on wide screens and
-/// a native sheet on compact screens. Its custom header avoids nesting another
-/// navigation stack inside the book reader.
+/// A page-scoped assistant presented by the book reader's adaptive inspector.
+/// Navigation, bars, menus and controls are intentionally system components so
+/// iOS can provide the appropriate Liquid Glass appearance and transitions.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -24,6 +25,7 @@ struct BookAIPanel: View {
     @State private var showingExercise = false
     @State private var exerciseNumber = ""
     @State private var expandedCitations: Set<UUID> = []
+    @State private var copiedTurn: UUID?
     @State private var speaker = BookAnswerSpeaker()
     @State private var scopedContext: BookAIStore.Context?
     @State private var citationDestination: Int?
@@ -55,13 +57,14 @@ struct BookAIPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            panelHeader
-            Divider()
+        NavigationStack {
             rootContent
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+                .navigationTitle(contextLabel)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { toolbar }
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(Color(.systemBackground))
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
@@ -77,38 +80,27 @@ struct BookAIPanel: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Navigation
 
-    private var panelHeader: some View {
-        HStack(spacing: 6) {
-            Text(contextLabel)
-                .font(.headline)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            GlassEffectContainer(spacing: 6) {
-                if store.hasContent {
-                    newQuestionMenu
-                        .frame(width: 44, height: 44)
-                        .glassEffect(.regular.interactive(), in: Circle())
-                }
-                if store.hasConversation {
-                    Menu {
-                        Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
-                            store.clear()
-                        }
-                    } label: {
-                        Image(systemName: "eraser")
-                            .frame(width: 44, height: 44)
-                    }
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .accessibilityLabel("Verlauf dieser Seite leeren")
-                }
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        if store.hasContent {
+            ToolbarItem(placement: .topBarTrailing) {
+                newQuestionMenu
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 56)
+        if store.hasConversation {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
+                        store.clear()
+                    }
+                } label: {
+                    Image(systemName: "eraser")
+                }
+                .accessibilityLabel("Verlauf dieser Seite leeren")
+            }
+        }
     }
 
     private var newQuestionMenu: some View {
@@ -134,8 +126,7 @@ struct BookAIPanel: View {
                 action: requestRegion
             )
         } label: {
-            Image(systemName: "square.and.pencil")
-                .frame(width: 44, height: 44)
+            Label("Neue Frage", systemImage: "square.and.pencil")
         }
         .accessibilityLabel("Neue Frage oder Aktion")
     }
@@ -326,7 +317,7 @@ struct BookAIPanel: View {
     private var thread: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Theme.Conversation.turnSpacing) {
+                LazyVStack(alignment: .leading, spacing: 22) {
                     ForEach(store.turns) { turn in
                         exchange(turn)
                             .id(turn.id)
@@ -364,34 +355,21 @@ struct BookAIPanel: View {
 
     private func exchange(_ turn: BookAIStore.Turn) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .trailing, spacing: 2) {
+            HStack {
+                Spacer(minLength: 48)
                 Text(turn.question)
-                    .font(.body)
+                    .font(.callout)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, Theme.Conversation.userHorizontalInset)
-                    .padding(.vertical, Theme.Conversation.userVerticalInset)
-                    .background(
-                        Color(.systemBlue),
-                        in: RoundedRectangle(
-                            cornerRadius: Theme.Conversation.userBubbleRadius,
-                            style: .continuous
-                        )
-                    )
-                    .frame(
-                        maxWidth: Theme.Width.readable * Theme.Conversation.userBubbleWidth,
-                        alignment: .trailing
-                    )
-                HStack(spacing: 2) {
-                    Spacer(minLength: 0)
-                    timestamp(turn.date)
-                    CopyFeedbackButton(text: turn.question, accessibilityLabel: "Frage kopieren")
-                }
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            .padding(.leading, 48)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+
+            Label("Echo", systemImage: "sparkles")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
 
             BookAIAnswerView(text: turn.text)
-                .padding(.horizontal, 4)
 
             let citations = sources(for: turn)
             if !citations.isEmpty {
@@ -477,17 +455,34 @@ struct BookAIPanel: View {
 
     private func responseActions(_ turn: BookAIStore.Turn) -> some View {
         HStack(spacing: 2) {
-            CopyFeedbackButton(text: turn.text, accessibilityLabel: "Antwort kopieren")
-            timestamp(turn.date)
+            Button {
+                UIPasteboard.general.string = turn.text
+                copiedTurn = turn.id
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    if copiedTurn == turn.id { copiedTurn = nil }
+                }
+            } label: {
+                Image(systemName: copiedTurn == turn.id ? "checkmark" : "doc.on.doc")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel(copiedTurn == turn.id ? "Antwort kopiert" : "Antwort kopieren")
+
+            Button {
+                speaker.speak(turn.text)
+            } label: {
+                Image(systemName: "speaker.wave.2")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Antwort vorlesen")
+
+            ShareLink(item: shareText(turn)) {
+                Image(systemName: "square.and.arrow.up")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Antwort teilen")
 
             Menu {
-                Button("Antwort vorlesen", systemImage: "speaker.wave.2") {
-                    speaker.speak(turn.text)
-                }
-                ShareLink(item: shareText(turn)) {
-                    Label("Antwort teilen", systemImage: "square.and.arrow.up")
-                }
-                Divider()
                 Button("Kürzer erklären", systemImage: "text.badge.minus") {
                     store.ask(
                         "Kürzer erklären",
@@ -502,19 +497,13 @@ struct BookAIPanel: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 32, height: 32)
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .accessibilityLabel("Weitere Antwortaktionen")
-            Spacer(minLength: 0)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-    }
-
-    private func timestamp(_ date: Date) -> some View {
-        Text(date.formatted(date: .omitted, time: .shortened))
-            .font(.caption.monospacedDigit().weight(.medium))
-            .foregroundStyle(.secondary)
+        .sensoryFeedback(.success, trigger: copiedTurn)
     }
 
     private func shareText(_ turn: BookAIStore.Turn) -> String {
@@ -531,20 +520,14 @@ struct BookAIPanel: View {
             HStack {
                 Spacer(minLength: 48)
                 Text(question)
-                    .font(.body)
+                    .font(.callout)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, Theme.Conversation.userHorizontalInset)
-                    .padding(.vertical, Theme.Conversation.userVerticalInset)
-                    .background(
-                        Color(.systemBlue),
-                        in: RoundedRectangle(
-                            cornerRadius: Theme.Conversation.userBubbleRadius,
-                            style: .continuous
-                        )
-                    )
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             HStack(spacing: 10) {
-                ConversationThinkingDots()
+                ProgressView().controlSize(.small)
                 Text(activeRegion == nil
                     ? "Analysiert Seite \(pageLabel)…"
                     : "Analysiert den markierten Bereich…")
@@ -584,53 +567,53 @@ struct BookAIPanel: View {
                     .foregroundStyle(.secondary)
             }
 
+            Menu {
+                Button("Aktuelle Seite", systemImage: "doc", action: useCurrentPage)
+                    .disabled(activeRegion == nil && context.pages == visiblePages)
+                Button("Bereich markieren", systemImage: "rectangle.dashed") { requestRegion() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: activeRegion == nil ? "doc" : "rectangle.dashed")
+                    Text(contextLabel)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.tint)
+                .frame(minHeight: 36)
+            }
+
             if !store.sending, !store.turns.isEmpty {
                 followUps
             }
 
-            HStack(alignment: .bottom, spacing: 6) {
-                contextMenu
+            HStack(alignment: .bottom, spacing: 8) {
                 TextField(fieldPrompt, text: draftBinding, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .lineLimit(1 ... 4)
+                    .lineLimit(1 ... 5)
                     .focused($inputFocused)
                     .submitLabel(.send)
                     .onSubmit(sendDraft)
-                    .padding(.vertical, 9)
-                    .frame(minHeight: 44, maxHeight: 96, alignment: .leading)
-                bookSendButton
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+
+                Button {
+                    if store.sending { store.cancel() } else { sendDraft() }
+                } label: {
+                    Image(systemName: store.sending ? "stop.fill" : "arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.circle)
+                .controlSize(.large)
+                .disabled(!store.sending && !canSend)
+                .accessibilityLabel(store.sending ? "Antwort stoppen" : "Frage senden")
             }
-            .padding(5)
-            .floatingComposerSurface(cornerRadius: 28)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-    }
-
-    private var contextMenu: some View {
-        Menu {
-            Button("Aktuelle Seite", systemImage: "doc", action: useCurrentPage)
-                .disabled(activeRegion == nil && context.pages == visiblePages)
-            Button("Bereich markieren", systemImage: "rectangle.dashed") { requestRegion() }
-        } label: {
-            Image(systemName: activeRegion == nil ? "doc" : "rectangle.dashed")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-        }
-        .accessibilityLabel("Kontext: \(contextLabel)")
-    }
-
-    private var bookSendButton: some View {
-        Button {
-            if store.sending { store.cancel() } else { sendDraft() }
-        } label: {
-            Image(systemName: store.sending ? "stop.fill" : "arrow.up")
-                .font(.subheadline.weight(.semibold))
-        }
-        .buttonStyle(ConversationPrimaryButtonStyle())
-        .disabled(!store.sending && !canSend)
-        .accessibilityLabel(store.sending ? "Antwort stoppen" : "Frage senden")
+        .padding(.horizontal, Theme.Space.inset)
+        .padding(.top, 7)
+        .padding(.bottom, 10)
+        .background(.bar)
     }
 
     private var followUps: some View {

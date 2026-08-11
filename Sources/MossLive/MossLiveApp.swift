@@ -10,48 +10,47 @@ struct MossLiveApp: App {
             MainTabView()
                 .environment(model)
         }
-        // Make the iPad's top-level places reachable without leaving the page.
-        // These appear in the system shortcut HUD when Command is held.
-        .commands {
-            CommandMenu("Bereiche") {
-                Button("Aufnahme", systemImage: "waveform") { model.selectedTab = .aufnahme }
-                    .keyboardShortcut("1", modifiers: .command)
-                Button("Stunden", systemImage: "folder") { model.selectedTab = .stunden }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("Lernen", systemImage: "brain.head.profile") { model.selectedTab = .lernen }
-                    .keyboardShortcut("3", modifiers: .command)
-                Button("Bibliothek", systemImage: "book.closed") { model.selectedTab = .bibliothek }
-                    .keyboardShortcut("4", modifiers: .command)
-                Button("Chat mit KI", systemImage: "bubble.left.and.text.bubble.right") {
-                    model.selectedTab = .chat
-                }
-                .keyboardShortcut("5", modifiers: .command)
-                Divider()
-                Button("Einstellungen", systemImage: "gearshape") { model.selectedTab = .einstellungen }
-                    .keyboardShortcut("6", modifiers: .command)
-            }
-        }
     }
 }
 
-/// T3 Code does not use `NavigationSplitView` for its iPad workspace. It lays
-/// out a rectangular drawer and content pane as siblings, separated by one
-/// hairline. Echo follows that structure here so iOS 26 cannot turn the whole
-/// sidebar into a rounded floating glass card. Only the header control is glass.
+/// iPad shell: a dedicated, collapsible system sidebar. Unlike an adaptable
+/// tab view, this never turns the app navigation into a bar across the top.
+///
+/// The rows are the system's, not ours. This column used to set its own row
+/// height, its own insets and its own selection capsule, all measured off
+/// screenshots of Apple's sidebars. Under the new design a sidebar is a
+/// floating Liquid Glass surface the system styles, lights and insets itself,
+/// and hand-set metrics fight that rather than match it — the platform adapts,
+/// and anything pinned to last year's numbers stops adapting with it.
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.colorScheme) private var colorScheme
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var pendingNoteImportCount = 0
 
+    /// Which place the sidebar is on. It lives on the model rather than in this
+    /// view so a screen can send the student somewhere — Lernen with no cards
+    /// yet offers "Zur Aufnahme", and that has to actually go there.
+    private var selection: Binding<AppTab?> {
+        Binding(get: { model.selectedTab }, set: { model.selectedTab = $0 })
+    }
+
     var body: some View {
-        GeometryReader { geometry in
-            if usesSidebar(geometry.size) {
-                wideShell(width: geometry.size.width)
-            } else {
-                compactShell
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            List(AppTab.navigation, selection: selection) { tab in
+                Label(tab.title, systemImage: tab.systemImage)
+                    .tag(tab)
+                    .badge(tab == .stunden ? pendingNoteImportCount : 0)
             }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                sidebarFooter
+            }
+        } detail: {
+            selectedView
         }
+        .navigationSplitViewStyle(.balanced)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
         // Studying covers the whole window, from wherever it was started: the
         // Lernen screen, a subject board or a single lesson. It is a mode, not a
@@ -83,149 +82,36 @@ struct MainTabView: View {
         }
     }
 
-    private func usesSidebar(_ size: CGSize) -> Bool {
-        size.width >= 720 && size.height >= 600
-    }
-
-    private func wideShell(width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: min(380, max(280, (width * 0.32).rounded())))
-
-            Rectangle()
-                .fill(Color(.separator).opacity(0.7))
-                .frame(width: 0.5)
-                .accessibilityHidden(true)
-
-            selectedView
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(detailBackground)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var compactShell: some View {
-        TabView(selection: compactSelection) {
-            ForEach(AppTab.allCases) { tab in
-                tabContent(tab)
-                    .tabItem {
-                        Label(tab.title, systemImage: tab.systemImage)
-                    }
-                    .badge(tab == .stunden ? pendingNoteImportCount : 0)
-                    .tag(tab)
-            }
-        }
-    }
-
-    private var compactSelection: Binding<AppTab> {
-        Binding(
-            get: { model.selectedTab ?? .aufnahme },
-            set: { model.selectedTab = $0 }
-        )
-    }
-
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer(minLength: 0)
-                GlassEffectContainer(spacing: 2) {
-                    Button {
-                        model.selectedTab = .einstellungen
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 20, weight: .regular))
-                            .frame(width: 50, height: 44)
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: Capsule())
-                    .accessibilityLabel("Einstellungen")
-                    .accessibilityAddTraits(model.selectedTab == .einstellungen ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 52)
-
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(AppTab.navigation) { tab in
-                        sidebarRow(tab)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.top, 6)
-            }
-            .scrollIndicators(.hidden)
-
-            sidebarFooter
-        }
-        .background(sidebarBackground.ignoresSafeArea())
-    }
-
-    private var sidebarBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 14.0 / 255.0, green: 14.0 / 255.0, blue: 14.0 / 255.0)
-            : .white
-    }
-
-    private var detailBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 10.0 / 255.0, green: 10.0 / 255.0, blue: 10.0 / 255.0)
-            : Color(red: 242.0 / 255.0, green: 242.0 / 255.0, blue: 247.0 / 255.0)
-    }
-
+    /// Settings sits under the navigation list rather than inside it. It is not
+    /// one of the places this app keeps things, so as a peer of Stunden and
+    /// Bibliothek it carried a weight it had not earned — and pinning it gives
+    /// the column the bottom edge it was missing. The offline line shares the
+    /// footer, which is where Apple keeps what is true of the whole app rather
+    /// than of one screen.
+    ///
+    /// It is a `List` of one rather than a button dressed as a row, so its
+    /// height, its insets and its selection are the same system-drawn things as
+    /// the rows above it — previously they were a hand-drawn approximation that
+    /// only matched at one point size, in one appearance, on one iPad.
     private var sidebarFooter: some View {
-        SidebarOfflineNote()
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
-    }
-
-    private func sidebarRow(_ tab: AppTab) -> some View {
-        let selected = model.selectedTab == tab
-        return Button {
-            withAnimation(.snappy) {
-                model.selectedTab = tab
+        VStack(alignment: .leading, spacing: 0) {
+            SidebarOfflineNote()
+                .padding(.horizontal, 20)
+                .padding(.bottom, 4)
+            List(selection: selection) {
+                Label(AppTab.einstellungen.title, systemImage: AppTab.einstellungen.systemImage)
+                    .tag(AppTab.einstellungen)
             }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: tab.systemImage)
-                    .font(.system(size: 18, weight: .medium))
-                    .frame(width: 22)
-                Text(tab.title)
-                    .font(.system(size: 16, weight: .medium))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if tab == .stunden, pendingNoteImportCount > 0 {
-                    Text("\(pendingNoteImportCount)")
-                        .font(.caption2.weight(.bold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            selected ? Color.white.opacity(0.2) : Color(.tertiarySystemFill),
-                            in: Capsule()
-                        )
-                }
-            }
-            .foregroundStyle(selected ? Color.white : Color.primary)
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-            .background(
-                selected ? Color(.systemBlue) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .listStyle(.sidebar)
+            .scrollDisabled(true)
+            .frame(height: 52)
         }
-        .buttonStyle(T3SidebarPressStyle())
-        .hoverEffect(.highlight)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .padding(.bottom, 4)
     }
 
-    @ViewBuilder private var selectedView: some View {
-        tabContent(model.selectedTab ?? .aufnahme)
-    }
-
-    @ViewBuilder private func tabContent(_ tab: AppTab) -> some View {
-        switch tab {
+    @ViewBuilder
+    private var selectedView: some View {
+        switch model.selectedTab ?? .aufnahme {
         case .aufnahme: LiveView()
         case .stunden: LessonsView()
         case .lernen: TodayView()
@@ -236,22 +122,13 @@ struct MainTabView: View {
     }
 }
 
-/// T3's sidebar rows keep their selection shape stable and express a press by
-/// fading the contents rather than introducing a second custom surface.
-private struct T3SidebarPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.68 : 1)
-    }
-}
-
 enum AppTab: String, CaseIterable, Identifiable {
     case aufnahme, stunden, lernen, bibliothek, chat, einstellungen
 
     var id: Self { self }
 
     /// What the navigation list holds. Einstellungen is deliberately absent —
-    /// like T3 Code, it is reached from the sidebar's toolbar gear instead.
+    /// it lives pinned at the foot of the sidebar instead.
     static var navigation: [AppTab] {
         allCases.filter { $0 != .einstellungen }
     }

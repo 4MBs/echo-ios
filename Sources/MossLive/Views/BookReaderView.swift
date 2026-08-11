@@ -119,33 +119,7 @@ private struct PDFReader: View {
     @FocusState private var numberingFocused: Bool
 
     var body: some View {
-        GeometryReader { geometry in
-            if usesInlineAssistant(geometry.size) {
-                HStack(spacing: 0) {
-                    reader
-
-                    if askingBookAI {
-                        Rectangle()
-                            .fill(Color(.separator).opacity(0.7))
-                            .frame(width: 0.5)
-                            .accessibilityHidden(true)
-
-                        bookAIPanel
-                            .frame(width: assistantWidth(for: geometry.size.width))
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                }
-                .animation(.snappy, value: askingBookAI)
-            } else {
-                reader
-                    .sheet(isPresented: $askingBookAI) {
-                        bookAIPanel
-                            .presentationDetents([.medium, .large], selection: $bookAIDetent)
-                            .presentationDragIndicator(.visible)
-                            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-                    }
-            }
-        }
+        reader
             // Parsing a 300 MB schoolbook off the main thread keeps the push
             // animation smooth, and reusing the document means flipping the
             // layout does not re-read the file.
@@ -159,6 +133,24 @@ private struct PDFReader: View {
                 if model.settings.showPageNumberEditor {
                     ToolbarItem(placement: .topBarTrailing) { readerMenu }
                 }
+            }
+            // One adaptive presentation, not a hand-switched HStack and sheet.
+            // SwiftUI keeps the panel as a trailing column on an iPad and adapts
+            // it to a sheet in compact width, and — this is the part that
+            // matters — it hosts it outside the navigation content.
+            //
+            // The panel is a NavigationStack, because that is what gives it a
+            // real bar. Placed inline in an HStack it was a navigation stack
+            // nested inside the pushed reader, which is unsupported: opening it
+            // popped the whole stack back to the shelf and left the shelf's
+            // route torn down behind it. An inspector is its own presentation,
+            // so nothing behind it moves.
+            .inspector(isPresented: $askingBookAI) {
+                bookAIPanel
+                    .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
+                    .presentationDetents([.medium, .large], selection: $bookAIDetent)
+                    .presentationDragIndicator(.visible)
+                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
             }
             .onChange(of: visiblePages) { _, pages in
                 guard let selectedRegion, !pages.contains(selectedRegion.pdfPage) else { return }
@@ -205,9 +197,8 @@ private struct PDFReader: View {
     /// Only ever here, inside an open book: the assistant answers questions on
     /// "this page", which the shelf outside has no answer for.
     ///
-    /// The sparkle is the assistant's single open/close control. The wide pane
-    /// deliberately has no duplicate close button; a compact sheet still has
-    /// the native swipe-to-dismiss gesture.
+    /// The sparkle is the assistant's single open/close control. The assistant
+    /// itself deliberately has no duplicate close button.
     private var bookAIButton: some View {
         Button(action: toggleBookAI) {
             Label("Seite fragen", systemImage: "sparkles")
@@ -223,14 +214,6 @@ private struct PDFReader: View {
         }
         bookAIDetent = .medium
         askingBookAI = true
-    }
-
-    private func usesInlineAssistant(_ size: CGSize) -> Bool {
-        size.width >= 650 && size.height >= 600
-    }
-
-    private func assistantWidth(for width: CGFloat) -> CGFloat {
-        min(440, max(320, (width * 0.32).rounded()))
     }
 
     private var bookAIPanel: some View {
