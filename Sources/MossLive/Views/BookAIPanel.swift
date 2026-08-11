@@ -1,9 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// A page-scoped conversation presented by the book reader's adaptive panel.
-/// It deliberately uses the same thread and composer language as the main Chat
-/// tab; the page or marked region is its fixed context.
+/// A book-scoped conversation presented by the reader's adaptive panel. The
+/// current page or marked region grounds the next message without replacing
+/// the visible conversation.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -25,6 +25,7 @@ struct BookAIPanel: View {
     @State private var dictationPrefix = ""
     @State private var voiceError: String?
     @State private var voiceInput = ChatVoiceInput()
+    @State private var showHistory = false
 
     private static let bottomID = "book-chat-bottom"
 
@@ -49,9 +50,7 @@ struct BookAIPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if store.hasConversation {
-                panelHeader
-            }
+            panelHeader
 
             messagesArea
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
@@ -64,6 +63,9 @@ struct BookAIPanel: View {
             store.activate(incomingContext)
         }
         .onDisappear { voiceInput.stop() }
+        .sheet(isPresented: $showHistory) {
+            BookAIHistorySheet(store: store, activeContext: context)
+        }
         .onChange(of: incomingContext) { _, newContext in
             guard citationDestination == nil else { return }
             scopedContext = newContext
@@ -72,6 +74,9 @@ struct BookAIPanel: View {
         .onChange(of: visiblePages) { _, pages in
             guard let destination = citationDestination, pages.contains(destination) else { return }
             citationDestination = nil
+        }
+        .onChange(of: store.selectedConversationID) {
+            store.activate(context)
         }
         .onChange(of: voiceInput.transcript) { _, transcript in
             guard !transcript.isEmpty else { return }
@@ -89,12 +94,24 @@ struct BookAIPanel: View {
             Spacer()
 
             Button {
+                showHistory = true
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Chatverlauf")
+
+            Button {
                 store.clear()
             } label: {
                 Image(systemName: "eraser")
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
+            .disabled(!store.hasConversation)
+            .opacity(store.hasConversation ? 1 : 0)
+            .accessibilityHidden(!store.hasConversation)
             .accessibilityLabel("Unterhaltung leeren")
         }
         .foregroundStyle(.white)
@@ -436,5 +453,102 @@ struct BookAIPanel: View {
             detent = .large
         }
         store.ask(store.draft, bookID: bookID, api: api)
+    }
+}
+
+/// The same local conversation management offered by the main AI chat, scoped
+/// to one book so unrelated schoolbooks never share history.
+private struct BookAIHistorySheet: View {
+    let store: BookAIStore
+    let activeContext: BookAIStore.Context
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var renamingConversation: BookAIStore.Conversation?
+    @State private var renameText = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(store.conversations) { conversation in
+                    Button {
+                        store.select(conversation.id)
+                        store.activate(activeContext)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(conversation.title)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                if !conversation.turns.isEmpty {
+                                    Text(conversation.updatedAt, style: .relative)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if conversation.id == store.selectedConversationID {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    .swipeActions {
+                        Button("Löschen", role: .destructive) {
+                            store.delete(conversation.id)
+                        }
+                        Button("Umbenennen") {
+                            beginRenaming(conversation)
+                        }
+                        .tint(.blue)
+                    }
+                    .contextMenu {
+                        Button("Umbenennen", systemImage: "pencil") {
+                            beginRenaming(conversation)
+                        }
+                        Button("Löschen", systemImage: "trash", role: .destructive) {
+                            store.delete(conversation.id)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Chatverlauf")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fertig") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        store.createConversation()
+                        store.activate(activeContext)
+                        dismiss()
+                    } label: {
+                        Label("Neue Unterhaltung", systemImage: "plus")
+                    }
+                }
+            }
+            .alert("Unterhaltung umbenennen", isPresented: renamePresented) {
+                TextField("Titel", text: $renameText)
+                Button("Abbrechen", role: .cancel) { renamingConversation = nil }
+                Button("Sichern") {
+                    if let conversation = renamingConversation {
+                        store.rename(conversation.id, to: renameText)
+                    }
+                    renamingConversation = nil
+                }
+            }
+        }
+    }
+
+    private var renamePresented: Binding<Bool> {
+        Binding(
+            get: { renamingConversation != nil },
+            set: { if !$0 { renamingConversation = nil } }
+        )
+    }
+
+    private func beginRenaming(_ conversation: BookAIStore.Conversation) {
+        renamingConversation = conversation
+        renameText = conversation.title
     }
 }

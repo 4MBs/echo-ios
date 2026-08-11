@@ -44,7 +44,7 @@ extension BackendAPI {
 
     /// One page of the same book the answer rests on. The reader can jump
     /// there, which is why it is a PDF page and not a printed label.
-    struct BookCitation: Decodable, Identifiable, Hashable, Sendable {
+    struct BookCitation: Codable, Identifiable, Hashable, Sendable {
         let pdfPage: Int
         /// Why this page — a few words from the server, often empty.
         let note: String

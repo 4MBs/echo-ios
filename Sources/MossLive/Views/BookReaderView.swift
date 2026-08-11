@@ -225,6 +225,7 @@ private struct PDFReader: View {
         _askingBookAI = askingBookAI
         _bookAIDetent = bookAIDetent
         _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(book.id)")
+        _bookAI = State(initialValue: BookAIStore(bookID: book.id))
     }
 
     @State private var document: PDFDocument?
@@ -233,7 +234,7 @@ private struct PDFReader: View {
     @State private var visiblePages: [Int] = [1]
     @State private var pageCount = 0
     @State private var proxy = PDFViewProxy()
-    @State private var bookAI = BookAIStore()
+    @State private var bookAI: BookAIStore
     @State private var selectedRegion: BackendAPI.BookPageRegion?
     @State private var selectingRegion = false
     @State private var askingForPage = false

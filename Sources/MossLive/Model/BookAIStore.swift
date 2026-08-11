@@ -1,23 +1,16 @@
 import Foundation
 import Observation
 
-/// "Seite fragen" state for one open book. Each page, spread or marked region
-/// owns its own short-lived thread, so turning the page can never make a
-/// follow-up silently refer to an answer about somewhere else in the book.
+/// Persistent, multi-conversation state for the assistant inside one book.
 ///
-/// It is a short thread rather than a single exchange. The endpoint is
-/// stateless — `POST /library/{id}/ask` is told a question and the pages on
-/// screen and nothing else — but "erklär das nochmal einfacher" is the most
-/// common next thing a student says, and it cannot mean anything if the answer
-/// it refers to has already been thrown off the screen. So the turns stay, and
-/// a follow-up carries the turn before it up with it as context.
-///
-/// The thread belongs to one open book and dies with it: a book is not a
-/// conversation to keep.
+/// Page and region selection describe the context of the next request. They do
+/// not own the conversation: removing a marked rectangle or turning a page must
+/// never make an existing exchange disappear. Each completed turn remembers
+/// the exact context it used so retrying it remains grounded in the same place.
 @MainActor
 @Observable
 final class BookAIStore {
-    struct Context: Hashable, Sendable {
+    struct Context: Codable, Hashable, Sendable {
         let pages: [Int]
         let region: BackendAPI.BookPageRegion?
 
@@ -27,170 +20,362 @@ final class BookAIStore {
         }
     }
 
-    /// A question and what came back for it — kept together so an answer can
-    /// never be read under a different question than it was given.
-    struct Turn: Identifiable, Equatable {
-        let id = UUID()
+    struct Turn: Identifiable, Codable, Equatable, Sendable {
+        let id: UUID
         let question: String
-        /// The PDF pages the question was asked about.
+        /// The PDF pages and optional rectangle used for this particular turn.
         let pages: [Int]
+        let region: BackendAPI.BookPageRegion?
         let text: String
         let citations: [BackendAPI.BookCitation]
         let pagesRead: [Int]
 
         init(
+            id: UUID = UUID(),
             question: String,
             pages: [Int],
+            region: BackendAPI.BookPageRegion? = nil,
             text: String,
             citations: [BackendAPI.BookCitation],
             pagesRead: [Int]
         ) {
+            self.id = id
             self.question = question
             self.pages = pages
+            self.region = region
             self.text = text
             self.citations = citations
             self.pagesRead = pagesRead
         }
     }
 
+    struct Conversation: Identifiable, Codable, Equatable, Sendable {
+        let id: UUID
+        var title: String
+        var turns: [Turn]
+        var draft: String
+        let createdAt: Date
+        var updatedAt: Date
+
+        init(
+            id: UUID = UUID(),
+            title: String = "Neue Unterhaltung",
+            turns: [Turn] = [],
+            draft: String = "",
+            createdAt: Date = Date(),
+            updatedAt: Date = Date()
+        ) {
+            self.id = id
+            self.title = title
+            self.turns = turns
+            self.draft = draft
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+        }
+    }
+
+    private struct SavedState: Codable, Sendable {
+        var conversations: [Conversation]
+        var selectedConversationID: UUID
+    }
+
+    /// Keep JSON encoding and atomic file replacement off the main actor.
+    private actor PersistenceWriter {
+        private var newestRevision = 0
+
+        func save(_ state: SavedState, revision: Int, key: String) {
+            guard revision >= newestRevision else { return }
+            newestRevision = revision
+            OfflineCache.save(state, as: key)
+        }
+    }
+
+    private(set) var conversations: [Conversation]
+    private(set) var selectedConversationID: UUID
     private(set) var context = Context(pages: [])
-    private var threads: [Context: [Turn]] = [:]
-    private var drafts: [Context: String] = [:]
-    /// The question in flight. It is shown at the end of the thread under a
-    /// spinner, so asking a follow-up never blanks the answer it follows up on.
-    private(set) var pendingByContext: [Context: String] = [:]
-    private(set) var errors: [Context: String] = [:]
-    private var requestTasks: [Context: Task<Void, Never>] = [:]
-    private var requestIDs: [Context: UUID] = [:]
+    private var pendingByConversation: [UUID: (question: String, context: Context)] = [:]
+    private var errors: [UUID: String] = [:]
+    private var requestTasks: [UUID: Task<Void, Never>] = [:]
+    private var requestIDs: [UUID: UUID] = [:]
 
-    var turns: [Turn] { threads[context] ?? [] }
+    private let persistenceEnabled: Bool
+    private let storageKey: String?
+    @ObservationIgnored private let persistenceWriter = PersistenceWriter()
+    @ObservationIgnored private var persistenceRevision = 0
+
+    init(bookID: String? = nil, loadPersisted: Bool = true) {
+        let key = bookID.map { Self.storageKey(for: $0) }
+        storageKey = key
+        persistenceEnabled = loadPersisted && key != nil
+
+        if loadPersisted,
+           let key,
+           let saved = OfflineCache.load(SavedState.self, key: key),
+           !saved.conversations.isEmpty {
+            let restored = saved.conversations.sorted { $0.updatedAt > $1.updatedAt }
+            let restoredSelection = restored.contains(where: { $0.id == saved.selectedConversationID })
+                ? saved.selectedConversationID
+                : restored[0].id
+            conversations = restored
+            selectedConversationID = restoredSelection
+        } else {
+            let conversation = Conversation()
+            conversations = [conversation]
+            selectedConversationID = conversation.id
+        }
+    }
+
+    var currentConversation: Conversation { conversations[currentIndex] }
+    var turns: [Turn] { currentConversation.turns }
+
     var draft: String {
-        get { drafts[context] ?? "" }
-        set { drafts[context] = newValue }
+        get { conversations[currentIndex].draft }
+        set { conversations[currentIndex].draft = newValue }
     }
 
-    var sending: Bool { requestIDs[context] != nil }
+    var sending: Bool { requestIDs[selectedConversationID] != nil }
     var pending: (question: String, pages: [Int])? {
-        pendingByContext[context].map { ($0, context.pages) }
+        pendingByConversation[selectedConversationID].map { ($0.question, $0.context.pages) }
     }
 
-    var errorMessage: String? { errors[context] }
+    var errorMessage: String? { errors[selectedConversationID] }
     var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
     }
 
-    /// A draft is unfinished input, not a running conversation. Keeping this
-    /// distinction prevents the destructive toolbar action from appearing
-    /// before there is an exchange, request or failed request to clear.
     var hasConversation: Bool {
         !turns.isEmpty || pending != nil || errorMessage != nil
     }
 
-    /// Whether the panel has any state worth preserving when it redraws.
-    var hasContent: Bool {
-        hasConversation || !draft.isEmpty
-    }
+    var hasContent: Bool { hasConversation || !draft.isEmpty }
 
+    /// Selection affects only subsequent requests; it never changes which
+    /// conversation (and therefore which messages) is visible.
     func activate(_ newContext: Context) {
         context = newContext
     }
 
+    func select(_ id: UUID) {
+        guard conversations.contains(where: { $0.id == id }) else { return }
+        cancel()
+        selectedConversationID = id
+        persist()
+    }
+
+    func createConversation() {
+        cancel()
+        if turns.isEmpty, draft.isEmpty {
+            errors[selectedConversationID] = nil
+            return
+        }
+        let conversation = Conversation()
+        conversations.insert(conversation, at: 0)
+        selectedConversationID = conversation.id
+        persist()
+    }
+
+    func rename(_ id: UUID, to proposedTitle: String) {
+        let title = proposedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, let index = index(of: id) else { return }
+        conversations[index].title = String(title.prefix(80))
+        touchConversation(id)
+    }
+
+    func delete(_ id: UUID) {
+        if selectedConversationID == id { cancel() }
+        conversations.removeAll { $0.id == id }
+        requestTasks[id]?.cancel()
+        requestTasks[id] = nil
+        requestIDs[id] = nil
+        pendingByConversation[id] = nil
+        errors[id] = nil
+
+        if conversations.isEmpty {
+            let conversation = Conversation()
+            conversations = [conversation]
+            selectedConversationID = conversation.id
+        } else if !conversations.contains(where: { $0.id == selectedConversationID }) {
+            selectedConversationID = conversations[0].id
+        }
+        persist()
+    }
+}
+
+extension BookAIStore {
     func ask(
         _ question: String,
         bookID: String,
         api: BackendAPI,
-        replacing turnID: UUID? = nil
+        replacing turnID: UUID? = nil,
+        using contextOverride: Context? = nil
     ) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        let target = context
-        guard !trimmed.isEmpty, requestIDs[target] == nil, !target.pages.isEmpty else { return }
-        errors[target] = nil
-        drafts[target] = ""
-        pendingByContext[target] = trimmed
-        let operationID = UUID()
-        requestIDs[target] = operationID
+        let conversationID = selectedConversationID
+        let requestContext = contextOverride ?? context
+        guard !trimmed.isEmpty,
+              requestIDs[conversationID] == nil,
+              !requestContext.pages.isEmpty,
+              let conversationIndex = index(of: conversationID)
+        else { return }
 
-        let thread = threads[target] ?? []
-        let previous: Turn? = if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
-            index > 0 ? thread[index - 1] : nil
+        errors[conversationID] = nil
+        conversations[conversationIndex].draft = ""
+        pendingByConversation[conversationID] = (trimmed, requestContext)
+        let operationID = UUID()
+        requestIDs[conversationID] = operationID
+
+        let thread = conversations[conversationIndex].turns
+        let previous: Turn? = if let turnID,
+                                 let turnIndex = thread.firstIndex(where: { $0.id == turnID }) {
+            turnIndex > 0 ? thread[turnIndex - 1] : nil
         } else {
             thread.last
         }
-        requestTasks[target] = Task { [weak self] in
+        if thread.isEmpty, turnID == nil {
+            conversations[conversationIndex].title = Self.title(for: trimmed)
+        }
+        touchConversation(conversationID)
+        startRequest(
+            question: trimmed,
+            previous: previous,
+            turnID: turnID,
+            context: requestContext,
+            conversationID: conversationID,
+            operationID: operationID,
+            bookID: bookID,
+            api: api
+        )
+    }
+
+    private func startRequest(
+        question: String,
+        previous: Turn?,
+        turnID: UUID?,
+        context: Context,
+        conversationID: UUID,
+        operationID: UUID,
+        bookID: String,
+        api: BackendAPI
+    ) {
+        requestTasks[conversationID] = Task { [weak self] in
             guard let self else { return }
             do {
                 let answer = try await api.askBook(
                     id: bookID,
                     question: BookAIPrompts.formatted(
                         Self.scoped(
-                            Self.grounded(trimmed, after: previous),
-                            to: target.region
+                            Self.grounded(question, after: previous),
+                            to: context.region
                         )
                     ),
-                    pages: target.pages,
-                    region: target.region
+                    pages: context.pages,
+                    region: context.region
                 )
-                if !Task.isCancelled, requestIDs[target] == operationID {
-                    let completed = Turn(
-                        question: trimmed,
-                        pages: target.pages,
-                        text: answer.text,
-                        citations: answer.citations,
-                        pagesRead: answer.pagesRead
+                if !Task.isCancelled {
+                    complete(
+                        answer,
+                        question: question,
+                        turnID: turnID,
+                        context: context,
+                        conversationID: conversationID,
+                        operationID: operationID
                     )
-                    var thread = threads[target] ?? []
-                    if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
-                        thread[index] = completed
-                    } else {
-                        thread.append(completed)
-                    }
-                    threads[target] = thread
                 }
             } catch {
-                guard requestIDs[target] == operationID else { return }
-                if Task.isCancelled {
-                    drafts[target] = trimmed
-                } else {
-                    errors[target] = error.localizedDescription
-                    drafts[target] = trimmed
-                }
+                recordFailure(
+                    error,
+                    question: question,
+                    conversationID: conversationID,
+                    operationID: operationID,
+                    wasCancelled: Task.isCancelled
+                )
             }
-            if requestIDs[target] == operationID {
-                requestTasks[target] = nil
-                requestIDs[target] = nil
-                pendingByContext[target] = nil
-            }
+            finishRequest(conversationID: conversationID, operationID: operationID)
         }
     }
 
+    private func complete(
+        _ answer: BackendAPI.BookAnswer,
+        question: String,
+        turnID: UUID?,
+        context: Context,
+        conversationID: UUID,
+        operationID: UUID
+    ) {
+        guard requestIDs[conversationID] == operationID, let index = index(of: conversationID) else { return }
+        let completed = Turn(
+            question: question,
+            pages: context.pages,
+            region: context.region,
+            text: answer.text,
+            citations: answer.citations,
+            pagesRead: answer.pagesRead
+        )
+        if let turnID,
+           let turnIndex = conversations[index].turns.firstIndex(where: { $0.id == turnID }) {
+            conversations[index].turns[turnIndex] = completed
+        } else {
+            conversations[index].turns.append(completed)
+        }
+        touchConversation(conversationID)
+    }
+
+    private func recordFailure(
+        _ error: Error,
+        question: String,
+        conversationID: UUID,
+        operationID: UUID,
+        wasCancelled: Bool
+    ) {
+        guard requestIDs[conversationID] == operationID else { return }
+        if !wasCancelled { errors[conversationID] = error.localizedDescription }
+        if let index = index(of: conversationID) {
+            conversations[index].draft = question
+        }
+    }
+
+    private func finishRequest(conversationID: UUID, operationID: UUID) {
+        guard requestIDs[conversationID] == operationID else { return }
+        requestTasks[conversationID] = nil
+        requestIDs[conversationID] = nil
+        pendingByConversation[conversationID] = nil
+        persist()
+    }
+
     func retry(_ turn: Turn, bookID: String, api: BackendAPI) {
-        ask(turn.question, bookID: bookID, api: api, replacing: turn.id)
+        ask(
+            turn.question,
+            bookID: bookID,
+            api: api,
+            replacing: turn.id,
+            using: Context(pages: turn.pages, region: turn.region)
+        )
     }
 
     func cancel() {
-        let target = context
-        requestTasks[target]?.cancel()
-        requestTasks[target] = nil
-        requestIDs[target] = nil
-        if let question = pendingByContext[target] { drafts[target] = question }
-        pendingByContext[target] = nil
+        let conversationID = selectedConversationID
+        requestTasks[conversationID]?.cancel()
+        requestTasks[conversationID] = nil
+        requestIDs[conversationID] = nil
+        if let pending = pendingByConversation[conversationID], let index = index(of: conversationID) {
+            conversations[index].draft = pending.question
+        }
+        pendingByConversation[conversationID] = nil
+        persist()
     }
 
     func clear() {
         cancel()
-        threads[context] = []
-        errors[context] = nil
-        drafts[context] = ""
+        conversations[currentIndex].turns = []
+        conversations[currentIndex].draft = ""
+        conversations[currentIndex].title = "Neue Unterhaltung"
+        conversations[currentIndex].updatedAt = Date()
+        errors[selectedConversationID] = nil
+        persist()
     }
 
-    /// What actually goes up the wire. A first question travels as typed; a
-    /// follow-up gets the turn before it in front of it, because the server
-    /// remembers nothing between calls and "erklär das nochmal einfacher" is
-    /// unanswerable without knowing what "das" was.
-    ///
-    /// Only the last turn, and only the front of its answer: the page itself is
-    /// the context that matters, and a full second answer quoted back would
-    /// crowd it out.
+    /// What actually goes up the wire. A follow-up gets the previous turn in
+    /// front of it because the book endpoint itself is stateless.
     static func grounded(_ question: String, after previous: Turn?) -> String {
         guard let previous else { return question }
         let quoted = previous.text.count > answerContextLimit
@@ -205,9 +390,7 @@ final class BookAIStore {
     }
 
     /// Region-aware servers use the structured rectangle sent beside the
-    /// question. This short textual description also gives older servers a
-    /// useful fallback when they already show the full rendered page to their
-    /// vision model but ignore unknown JSON fields.
+    /// question. The textual description also supports older strict servers.
     static func scoped(_ question: String, to region: BackendAPI.BookPageRegion?) -> String {
         guard let region else { return question }
         let left = Int((region.x * 100).rounded())
@@ -221,6 +404,51 @@ final class BookAIStore {
 
         \(question)
         """
+    }
+
+    private func touchConversation(_ id: UUID) {
+        guard let index = index(of: id) else { return }
+        conversations[index].updatedAt = Date()
+        conversations.sort { $0.updatedAt > $1.updatedAt }
+        persist()
+    }
+
+    private func index(of id: UUID) -> Int? {
+        conversations.firstIndex(where: { $0.id == id })
+    }
+
+    private var currentIndex: Int {
+        index(of: selectedConversationID) ?? 0
+    }
+
+    private func persist() {
+        guard persistenceEnabled, let storageKey else { return }
+        persistenceRevision += 1
+        let revision = persistenceRevision
+        let snapshot = SavedState(
+            conversations: conversations,
+            selectedConversationID: selectedConversationID
+        )
+        Task { [persistenceWriter] in
+            await persistenceWriter.save(snapshot, revision: revision, key: storageKey)
+        }
+    }
+
+    private static func storageKey(for bookID: String) -> String {
+        let encoded = Data(bookID.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        return "book-ai-conversations-v1-\(encoded)"
+    }
+
+    private static func title(for question: String) -> String {
+        let normalized = question
+            .replacingOccurrences(of: "\n", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        let prefix = normalized.prefix(52)
+        return prefix.count < normalized.count ? "\(prefix)…" : String(prefix)
     }
 
     /// How much of the previous answer is quoted back as context.

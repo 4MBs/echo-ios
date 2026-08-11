@@ -106,9 +106,8 @@ final class BookAIFollowUpTests: XCTestCase {
     }
 }
 
-/// A follow-up only makes sense inside the page or marked rectangle that
-/// produced the answer. The store therefore switches threads when the reader
-/// switches context, while preserving unfinished text in each one.
+/// Page and rectangle changes alter request grounding without replacing the
+/// visible conversation.
 @MainActor
 final class BookAIContextTests: XCTestCase {
     func testSpreadContextIsStableRegardlessOfPageOrder() {
@@ -118,29 +117,73 @@ final class BookAIContextTests: XCTestCase {
         )
     }
 
-    func testDraftsAreKeptSeparateByPage() {
-        let store = BookAIStore()
+    func testDraftAndConversationSurviveAContextChange() {
+        let store = BookAIStore(loadPersisted: false)
         let first = BookAIStore.Context(pages: [16])
         let second = BookAIStore.Context(pages: [17])
+        let conversationID = store.selectedConversationID
 
         store.activate(first)
         store.draft = "Frage zu Seite 16"
         store.activate(second)
-        XCTAssertEqual(store.draft, "")
-
-        store.draft = "Frage zu Seite 17"
-        store.activate(first)
         XCTAssertEqual(store.draft, "Frage zu Seite 16")
+        XCTAssertEqual(store.selectedConversationID, conversationID)
+        XCTAssertEqual(store.context, second)
     }
 
     func testDraftAloneDoesNotExposeConversationCleanup() {
-        let store = BookAIStore()
+        let store = BookAIStore(loadPersisted: false)
         store.activate(BookAIStore.Context(pages: [16]))
 
         XCTAssertFalse(store.hasConversation)
         store.draft = "Noch nicht gesendet"
         XCTAssertFalse(store.hasConversation)
         XCTAssertTrue(store.hasContent)
+    }
+
+    func testNewConversationCanReturnToThePreviousDraft() {
+        let store = BookAIStore(loadPersisted: false)
+        let firstID = store.selectedConversationID
+        store.draft = "Ungesendete erste Frage"
+
+        store.createConversation()
+
+        XCTAssertEqual(store.conversations.count, 2)
+        XCTAssertNotEqual(store.selectedConversationID, firstID)
+        XCTAssertEqual(store.draft, "")
+
+        store.select(firstID)
+        XCTAssertEqual(store.draft, "Ungesendete erste Frage")
+    }
+
+    func testConversationHistorySupportsRenameAndDelete() {
+        let store = BookAIStore(loadPersisted: false)
+        let firstID = store.selectedConversationID
+        store.draft = "Erste Frage"
+        store.createConversation()
+
+        store.rename(firstID, to: "Zellatmung")
+        XCTAssertEqual(store.conversations.first(where: { $0.id == firstID })?.title, "Zellatmung")
+
+        store.delete(firstID)
+        XCTAssertFalse(store.conversations.contains(where: { $0.id == firstID }))
+        XCTAssertFalse(store.conversations.isEmpty)
+    }
+
+    func testConversationHistoryIsCodableWithBookCitations() throws {
+        let turn = BookAIStore.Turn(
+            question: "Was zeigt die Abbildung?",
+            pages: [16],
+            text: "Sie zeigt die Zellatmung.",
+            citations: [BackendAPI.BookCitation(pdfPage: 16, note: "Abbildung")],
+            pagesRead: [16]
+        )
+        let conversation = BookAIStore.Conversation(title: "Zellatmung", turns: [turn])
+
+        let encoded = try JSONEncoder().encode(conversation)
+        let decoded = try JSONDecoder().decode(BookAIStore.Conversation.self, from: encoded)
+
+        XCTAssertEqual(decoded, conversation)
     }
 
     func testMarkedRegionIsADifferentContextFromItsWholePage() {
