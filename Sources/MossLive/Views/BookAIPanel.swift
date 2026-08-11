@@ -57,11 +57,14 @@ struct BookAIPanel: View {
         NavigationStack {
             messagesArea
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-                .background(Color(.systemBackground).ignoresSafeArea())
+                .background(Color.black.ignoresSafeArea())
                 .navigationTitle(contextLabel)
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(Color.black, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
                 .toolbar { toolbar }
         }
+        .background(Color.black.ignoresSafeArea())
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
@@ -115,15 +118,8 @@ struct BookAIPanel: View {
     @ViewBuilder
     private var messagesArea: some View {
         if store.turns.isEmpty, store.pending == nil {
-            VStack {
-                Text("Unterhaltung beginnen")
-                    .font(.title.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 72)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 32)
+            Color.black
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
                 ScrollView {

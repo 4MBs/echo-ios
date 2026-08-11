@@ -150,6 +150,7 @@ private struct PDFReader: View {
                     .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
                     .presentationDetents([.medium, .large], selection: $bookAIDetent)
                     .presentationDragIndicator(.visible)
+                    .presentationBackground(Color.black)
                     .presentationBackgroundInteraction(.enabled(upThrough: .medium))
             }
             .onChange(of: visiblePages) { _, pages in
@@ -392,7 +393,7 @@ private struct PDFReader: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(Color.black.ignoresSafeArea())
     }
 
     /// Previous/next buttons around the current page, which opens the jump-to
