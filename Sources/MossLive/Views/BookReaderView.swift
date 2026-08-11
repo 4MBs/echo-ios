@@ -82,6 +82,7 @@ struct BookReaderView: View {
 /// "Seite fragen" in the upper-left toolbar.
 private struct PDFReader: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let url: URL
     let book: BackendAPI.Book
@@ -118,8 +119,31 @@ private struct PDFReader: View {
     @FocusState private var pageFieldFocused: Bool
     @FocusState private var numberingFocused: Bool
 
+    /// One transaction drives the inspector and every part of the reader whose
+    /// available width changes with it. Without an explicit transaction the
+    /// native inspector appears correctly, but PDFKit and the controls receive
+    /// their final frames in a single layout pass and visibly jump sideways.
+    private var assistantAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.42)
+    }
+
+    /// System-driven dismissal (dragging the compact sheet down or closing the
+    /// inspector) comes back through this binding, so it uses the same layout
+    /// transaction as taps on the toolbar button.
+    private var assistantPresentation: Binding<Bool> {
+        Binding(
+            get: { askingBookAI },
+            set: { presented in
+                withAnimation(assistantAnimation) {
+                    askingBookAI = presented
+                }
+            }
+        )
+    }
+
     var body: some View {
         reader
+            .animation(assistantAnimation, value: askingBookAI)
             // Parsing a 300 MB schoolbook off the main thread keeps the push
             // animation smooth, and reusing the document means flipping the
             // layout does not re-read the file.
@@ -143,9 +167,9 @@ private struct PDFReader: View {
             // real bar. Placed inline in an HStack it was a navigation stack
             // nested inside the pushed reader, which is unsupported: opening it
             // popped the whole stack back to the shelf and left the shelf's
-            // route torn down behind it. An inspector is its own presentation,
-            // so nothing behind it moves.
-            .inspector(isPresented: $askingBookAI) {
+            // route torn down behind it. An inspector owns that presentation
+            // while the coordinated animation above narrows the reader safely.
+            .inspector(isPresented: assistantPresentation) {
                 bookAIPanel
                     .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
                     .presentationDetents([.medium, .large], selection: $bookAIDetent)
@@ -209,12 +233,12 @@ private struct PDFReader: View {
     }
 
     private func toggleBookAI() {
-        if askingBookAI {
-            askingBookAI = false
-            return
+        if !askingBookAI {
+            bookAIDetent = .medium
         }
-        bookAIDetent = .medium
-        askingBookAI = true
+        withAnimation(assistantAnimation) {
+            askingBookAI.toggle()
+        }
     }
 
     private var bookAIPanel: some View {
@@ -274,20 +298,24 @@ private struct PDFReader: View {
     }
 
     private func beginRegionSelection() {
-        askingBookAI = false
-        selectingRegion = true
+        withAnimation(assistantAnimation) {
+            askingBookAI = false
+            selectingRegion = true
+            selectedRegion = nil
+        }
         proxy.clearRegionSelection()
-        selectedRegion = nil
         // Begin on the next run loop instead of guessing how long the adaptive
         // inspector's dismissal animation takes. The overlay follows the
         // reader's live bounds, so rotations and different sheet transitions
         // cannot leave it mapped to a stale size.
         DispatchQueue.main.async {
             proxy.beginRegionSelection { region in
-                selectedRegion = region
-                selectingRegion = false
                 bookAIDetent = .medium
-                askingBookAI = true
+                withAnimation(assistantAnimation) {
+                    selectedRegion = region
+                    selectingRegion = false
+                    askingBookAI = true
+                }
             }
         }
     }
