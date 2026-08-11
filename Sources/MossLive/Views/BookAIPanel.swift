@@ -16,7 +16,6 @@ struct BookAIPanel: View {
     @Binding var detent: PresentationDetent
     let goToPage: (Int) -> Void
     let requestRegion: () -> Void
-    let clearRegion: () -> Void
 
     @FocusState private var inputFocused: Bool
     @State private var expandedCitations: Set<UUID> = []
@@ -47,11 +46,6 @@ struct BookAIPanel: View {
     /// A citation can turn the book without silently moving the open answer to
     /// another context. The student's next page turn adopts that page normally.
     private var context: BookAIStore.Context { scopedContext ?? incomingContext }
-    private var activeRegion: BackendAPI.BookPageRegion? { context.region }
-    private var pageLabel: String { numbering.printedLabel(forVisible: context.pages) }
-    private var contextLabel: String {
-        activeRegion == nil ? "Seite \(pageLabel)" : "Markierter Bereich · Seite \(pageLabel)"
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -349,7 +343,7 @@ struct BookAIPanel: View {
                 .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
 
                 HStack(spacing: 10) {
-                    contextMenu
+                    regionSelectionButton
 
                     Spacer(minLength: 0)
 
@@ -403,32 +397,15 @@ struct BookAIPanel: View {
         .padding(.bottom, 6)
     }
 
-    private var contextMenu: some View {
-        Menu {
-            Button("Aktuelle Seite", systemImage: activeRegion == nil ? "checkmark" : "doc") {
-                useCurrentPage()
-            }
-            .disabled(activeRegion == nil && context.pages == visiblePages)
-
-            Button("Bereich markieren", systemImage: "rectangle.dashed") {
-                requestRegion()
-            }
-        } label: {
-            if activeRegion != nil {
-                Label("Ausschnitt", systemImage: "rectangle.dashed")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .padding(.horizontal, 9)
-                    .frame(height: 32)
-                    .background(Theme.accent.opacity(0.1), in: Capsule())
-            } else {
-                Image(systemName: "text.book.closed")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-            }
+    private var regionSelectionButton: some View {
+        Button(action: requestRegion) {
+            Image(systemName: "rectangle.dashed")
+                .font(.system(size: 18))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
         }
-        .accessibilityLabel("Kontext: \(contextLabel)")
+        .buttonStyle(.plain)
+        .accessibilityLabel("Bereich markieren")
     }
 
     @ViewBuilder
@@ -459,13 +436,5 @@ struct BookAIPanel: View {
             detent = .large
         }
         store.ask(store.draft, bookID: bookID, api: api)
-    }
-
-    private func useCurrentPage() {
-        citationDestination = nil
-        let pageContext = BookAIStore.Context(pages: visiblePages)
-        scopedContext = pageContext
-        store.activate(pageContext)
-        clearRegion()
     }
 }

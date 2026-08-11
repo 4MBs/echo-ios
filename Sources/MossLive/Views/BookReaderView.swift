@@ -359,8 +359,7 @@ private struct PDFReader: View {
             goToPage: { page in
                 proxy.go(toPage: page)
             },
-            requestRegion: beginRegionSelection,
-            clearRegion: clearRegionSelection
+            requestRegion: beginRegionSelection
         )
     }
 
