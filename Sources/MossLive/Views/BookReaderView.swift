@@ -79,7 +79,7 @@ struct BookReaderView: View {
 }
 
 /// The reader itself: a PDFKit page view with the control bar underneath, and
-/// — while a book is open — Buch-KI beside it.
+/// — while a book is open — "Seite fragen" beside it.
 private struct PDFReader: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -106,6 +106,9 @@ private struct PDFReader: View {
     @State private var proxy = PDFViewProxy()
     @State private var bookAI = BookAIStore()
     @State private var askingBookAI = false
+    @State private var bookAIDetent: PresentationDetent = .medium
+    @State private var selectedRegion: BackendAPI.BookPageRegion?
+    @State private var selectingRegion = false
     @State private var askingForPage = false
     @State private var typedPage = ""
     @State private var openedAt = "1"
@@ -145,8 +148,14 @@ private struct PDFReader: View {
             .inspector(isPresented: $askingBookAI) {
                 bookAIPanel
                     .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.medium, .large], selection: $bookAIDetent)
                     .presentationDragIndicator(.visible)
+                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+            }
+            .onChange(of: visiblePages) { _, pages in
+                guard let selectedRegion, !pages.contains(selectedRegion.pdfPage) else { return }
+                self.selectedRegion = nil
+                proxy.clearRegionSelection()
             }
     }
 
@@ -159,7 +168,8 @@ private struct PDFReader: View {
                     proxy: proxy,
                     currentPage: $currentPage,
                     visiblePages: $visiblePages,
-                    pageCount: $pageCount
+                    pageCount: $pageCount,
+                    selectedRegion: selectedRegion
                 )
                 // Switching layout needs a freshly built PDFView: PDFKit does not
                 // relayout an existing one when displayMode changes.
@@ -170,48 +180,111 @@ private struct PDFReader: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
+        .overlay(alignment: .top) {
+            if selectingRegion {
+                regionSelectionBanner
+                    .padding(.top, 12)
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) { controlBar }
     }
 
-    // MARK: - Buch-KI
+    // MARK: - Seite fragen
 
-    /// Only ever here, inside an open book: the question Buch-KI answers is
+    /// Only ever here, inside an open book: the assistant answers questions on
     /// "this page", which the shelf outside has no answer for.
     ///
     /// It sits in the control bar with the other things you do to a book, not
     /// alone in the top corner — the page arrows, the layout switch and this
-    /// are one set of controls and belong within reach of the same thumb. A
-    /// `Toggle` rather than a `Button` because the panel it opens stays open:
-    /// the system draws the on state, and VoiceOver is told it is a switch
-    /// instead of being handed a label that changes underneath it.
-    private var bookAIButton: some View {
-        Toggle(isOn: $askingBookAI) {
-            if sizeClass == .regular {
-                Label("Buch-KI", systemImage: "sparkles")
-            } else {
-                // A phone's bar is not wide enough for the page controls and a
-                // word as well, and the page controls have to stay centred.
-                Label("Buch-KI", systemImage: "sparkles")
-                    .labelStyle(.iconOnly)
-            }
+    /// are one set of controls and belong within reach of the same thumb. The
+    /// prominent style while open communicates the persistent state, but
+    /// this remains a button semantically: its action is to present a panel,
+    /// not to change a setting.
+    @ViewBuilder private var bookAIButton: some View {
+        if askingBookAI {
+            Button(action: toggleBookAI) { bookAIButtonLabel }
+                .buttonStyle(.glassProminent)
+                .accessibilityLabel("Seite fragen schließen")
+        } else {
+            Button(action: toggleBookAI) { bookAIButtonLabel }
+                .buttonStyle(.glass)
+                .accessibilityLabel("Seite fragen")
         }
-        .toggleStyle(.button)
-        .buttonStyle(.glass)
+    }
+
+    @ViewBuilder private var bookAIButtonLabel: some View {
+        if sizeClass == .regular {
+            Label("Seite fragen", systemImage: "sparkles")
+        } else {
+            Label("Seite fragen", systemImage: "sparkles")
+                .labelStyle(.iconOnly)
+        }
+    }
+
+    private func toggleBookAI() {
+        bookAIDetent = .medium
+        askingBookAI.toggle()
     }
 
     private var bookAIPanel: some View {
         BookAIPanel(
             bookID: book.id,
+            bookTitle: book.title,
             numbering: numbering,
             visiblePages: visiblePages,
+            region: selectedRegion,
             store: bookAI,
+            detent: $bookAIDetent,
             goToPage: { page in
                 proxy.go(toPage: page)
-                // On a phone the sheet covers the page it just turned to.
-                if sizeClass != .regular { askingBookAI = false }
             },
+            requestRegion: beginRegionSelection,
+            clearRegion: clearRegionSelection,
             close: { askingBookAI = false }
         )
+    }
+
+    private var regionSelectionBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "rectangle.dashed")
+            Text("Ziehe einen Rahmen um den gewünschten Bereich.")
+                .font(.subheadline.weight(.medium))
+            Button("Abbrechen") {
+                proxy.cancelRegionSelection()
+                selectingRegion = false
+            }
+            .font(.subheadline)
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .frame(minHeight: 48)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+    }
+
+    private func beginRegionSelection() {
+        askingBookAI = false
+        bookAI.cancel()
+        selectingRegion = true
+        proxy.clearRegionSelection()
+        selectedRegion = nil
+        // Let the inspector/sheet finish moving before its old size is used to
+        // map the selection back into PDF coordinates.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            proxy.beginRegionSelection { region in
+                selectedRegion = region
+                selectingRegion = false
+                bookAIDetent = .medium
+                askingBookAI = true
+            }
+        }
+    }
+
+    private func clearRegionSelection() {
+        selectedRegion = nil
+        selectingRegion = false
+        proxy.cancelRegionSelection()
+        proxy.clearRegionSelection()
     }
 
     /// Set once per book and then forgotten, so it belongs in the navigation
@@ -298,7 +371,7 @@ private struct PDFReader: View {
 
     /// Everything you do to an open book, in one bar: the layout on the left,
     /// the page in the middle where it can stay centred whatever flanks it, and
-    /// Buch-KI on the right.
+    /// "Seite fragen" on the right.
     private var controlBar: some View {
         ZStack {
             pageControls
@@ -398,7 +471,7 @@ private struct PDFReader: View {
         }
     }
 
-    /// The book's own numbering, shared with Buch-KI's panel so a cited page is
+    /// The book's own numbering, shared with the assistant panel so a cited page is
     /// named there exactly as the reader names it here.
     private var numbering: BookPageNumbering {
         BookPageNumbering(offset: pageOffset, pageCount: pageCount)
@@ -440,7 +513,7 @@ private struct LoadedDocument: @unchecked Sendable {
 /// Bridge so the SwiftUI control bar can drive the UIKit PDFView (which only
 /// exists once makeUIView has run).
 private final class PDFViewProxy {
-    weak var pdfView: PDFView?
+    weak var pdfView: BookPDFView?
 
     /// One page forward or back. `goToNextPage(_:)` is unreliable outside the
     /// page-view-controller mode, so the target page is computed by hand — in a
@@ -454,6 +527,18 @@ private final class PDFViewProxy {
 
     func go(toPage number: Int) {
         go(toIndex: number - 1)
+    }
+
+    func beginRegionSelection(onSelected: @escaping (BackendAPI.BookPageRegion) -> Void) {
+        pdfView?.beginRegionSelection(onSelected: onSelected)
+    }
+
+    func cancelRegionSelection() {
+        pdfView?.cancelRegionSelection()
+    }
+
+    func clearRegionSelection() {
+        pdfView?.display(region: nil)
     }
 
     private func go(toIndex index: Int) {
@@ -496,10 +581,107 @@ private final class BookPDFView: PDFView {
     /// The scale the page rests at: its natural size on this screen, and the
     /// point below which zooming out stops.
     private(set) var restingScale: CGFloat = 0
+    private let selectedRegionLayer = CAShapeLayer()
+    private var selectionOverlay: BookRegionSelectionOverlay?
+    private var displayedRegion: BackendAPI.BookPageRegion?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureRegionLayer()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureRegionLayer()
+    }
+
+    private func configureRegionLayer() {
+        selectedRegionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.12).cgColor
+        selectedRegionLayer.strokeColor = UIColor.systemBlue.cgColor
+        selectedRegionLayer.lineWidth = 2
+        selectedRegionLayer.lineDashPattern = [7, 5]
+        selectedRegionLayer.lineJoin = .round
+        layer.addSublayer(selectedRegionLayer)
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         applyScaleLimits()
+        selectionOverlay?.frame = bounds
+        updateDisplayedRegion()
+    }
+
+    func beginRegionSelection(onSelected: @escaping (BackendAPI.BookPageRegion) -> Void) {
+        cancelRegionSelection()
+        let overlay = BookRegionSelectionOverlay(frame: bounds)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.onFinished = { [weak self] rect in
+            guard let self else { return }
+            if let region = normalizedRegion(from: rect) {
+                display(region: region)
+                onSelected(region)
+                cancelRegionSelection()
+            }
+        }
+        addSubview(overlay)
+        selectionOverlay = overlay
+    }
+
+    func cancelRegionSelection() {
+        selectionOverlay?.removeFromSuperview()
+        selectionOverlay = nil
+    }
+
+    func display(region: BackendAPI.BookPageRegion?) {
+        displayedRegion = region
+        updateDisplayedRegion()
+    }
+
+    private func normalizedRegion(from selection: CGRect) -> BackendAPI.BookPageRegion? {
+        guard selection.width >= 18, selection.height >= 18,
+              let document,
+              let page = page(for: CGPoint(x: selection.midX, y: selection.midY), nearest: true)
+        else { return nil }
+
+        let pageFrame = convert(page.bounds(for: .cropBox), from: page)
+        let clipped = selection.standardized.intersection(pageFrame)
+        guard !clipped.isNull, clipped.width >= 18, clipped.height >= 18 else { return nil }
+
+        let pageBounds = page.bounds(for: .cropBox)
+        let pdfRect = convert(clipped, to: page).intersection(pageBounds)
+        let pageIndex = document.index(for: page)
+        guard pageBounds.width > 0, pageBounds.height > 0, pageIndex >= 0 else { return nil }
+
+        return BackendAPI.BookPageRegion(
+            pdfPage: pageIndex + 1,
+            x: Double((pdfRect.minX - pageBounds.minX) / pageBounds.width).clamped01,
+            y: Double((pdfRect.minY - pageBounds.minY) / pageBounds.height).clamped01,
+            width: Double(pdfRect.width / pageBounds.width).clamped01,
+            height: Double(pdfRect.height / pageBounds.height).clamped01
+        )
+    }
+
+    private func updateDisplayedRegion() {
+        // PDFKit installs its page-hosting subviews after initialization. Move
+        // the highlight to the end whenever it changes so it remains above the
+        // rendered page instead of disappearing behind that host view.
+        selectedRegionLayer.removeFromSuperlayer()
+        layer.addSublayer(selectedRegionLayer)
+        guard let region = displayedRegion,
+              let document,
+              let page = document.page(at: region.pdfPage - 1)
+        else {
+            selectedRegionLayer.path = nil
+            return
+        }
+        let bounds = page.bounds(for: .cropBox)
+        let pdfRect = CGRect(
+            x: bounds.minX + bounds.width * CGFloat(region.x),
+            y: bounds.minY + bounds.height * CGFloat(region.y),
+            width: bounds.width * CGFloat(region.width),
+            height: bounds.height * CGFloat(region.height)
+        )
+        selectedRegionLayer.path = UIBezierPath(roundedRect: convert(pdfRect, from: page), cornerRadius: 6).cgPath
     }
 
     func applyScaleLimits() {
@@ -540,13 +722,14 @@ private struct PDFKitView: UIViewRepresentable {
     let twoUp: Bool
     let proxy: PDFViewProxy
     @Binding var currentPage: Int
-    /// Every PDF page on screen: one, or both halves of a spread. Buch-KI asks
+    /// Every PDF page on screen: one, or both halves of a spread. The assistant asks
     /// about exactly these.
     @Binding var visiblePages: [Int]
     @Binding var pageCount: Int
+    let selectedRegion: BackendAPI.BookPageRegion?
 
     func makeUIView(context: Context) -> PDFView {
-        let pdfView = BookPDFView()
+        let pdfView = BookPDFView(frame: .zero)
         proxy.pdfView = pdfView
         // PDFKit is order-sensitive: layout has to be configured before the
         // document is attached, or the direction quietly falls back to vertical.
@@ -560,6 +743,7 @@ private struct PDFKitView: UIViewRepresentable {
         pdfView.autoScales = false
         pdfView.backgroundColor = .clear
         pdfView.document = document
+        pdfView.display(region: selectedRegion)
 
         context.coordinator.proxy = proxy
         context.coordinator.onPageChange = { updatePageState($0) }
@@ -575,6 +759,7 @@ private struct PDFKitView: UIViewRepresentable {
 
     func updateUIView(_ view: PDFView, context: Context) {
         context.coordinator.onPageChange = { updatePageState($0) }
+        (view as? BookPDFView)?.display(region: selectedRegion)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -670,4 +855,61 @@ private struct PDFKitView: UIViewRepresentable {
             }
         }
     }
+}
+
+/// A temporary transparent drawing surface above PDFKit. It takes the gesture
+/// while active, which prevents the PDF's scroll view from panning underneath
+/// the student's rectangle, then removes itself as soon as the drag finishes.
+private final class BookRegionSelectionOverlay: UIView {
+    var onFinished: ((CGRect) -> Void)?
+
+    private let shape = CAShapeLayer()
+    private var start = CGPoint.zero
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isAccessibilityElement = true
+        accessibilityLabel = "Buchbereich markieren"
+        shape.fillColor = UIColor.systemBlue.withAlphaComponent(0.14).cgColor
+        shape.strokeColor = UIColor.systemBlue.cgColor
+        shape.lineWidth = 2
+        shape.lineDashPattern = [7, 5]
+        layer.addSublayer(shape)
+        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(dragged)))
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func dragged(_ recognizer: UIPanGestureRecognizer) {
+        let point = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began:
+            start = point
+            shape.path = nil
+        case .changed:
+            shape.path = UIBezierPath(roundedRect: rectangle(to: point), cornerRadius: 6).cgPath
+        case .ended:
+            onFinished?(rectangle(to: point))
+        case .cancelled, .failed:
+            shape.path = nil
+        default:
+            break
+        }
+    }
+
+    private func rectangle(to point: CGPoint) -> CGRect {
+        CGRect(
+            x: min(start.x, point.x),
+            y: min(start.y, point.y),
+            width: abs(point.x - start.x),
+            height: abs(point.y - start.y)
+        )
+    }
+}
+
+private extension Double {
+    var clamped01: Double { min(max(self, 0), 1) }
 }

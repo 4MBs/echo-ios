@@ -191,28 +191,29 @@ Schoolbooks rarely print page 1 on the first PDF page, so every book learns its
 own numbering once: turn to any page whose number you can read, type that number,
 and the rest of the book follows. It is remembered per book.
 
-**Buch-KI** sits in the reader's control bar beside the page arrows and the
-layout switch, only ever inside an open book — everything you do to a book is in
-one place, and the button stays lit while its panel is open. On an iPad it opens
-as a panel beside the page, so the answer is read against what it is about; on a
-phone it is a sheet. The question goes to the server with nothing but the PDF
-page numbers currently on screen — the server already has the book, so no page,
-picture or text is ever uploaded. It reads that page there, looks at the rendered
-image when the page is a diagram or a scan, and may follow the book's own
-references into neighbouring pages; it never leaves the book. The answer arrives
-with the pages it rests on attached, named with the book's printed numbers, and
-tapping one turns the reader to it. Reading a downloaded book stays offline;
-asking about it needs the server.
+**Seite fragen** sits in the reader's control bar beside the page arrows and the
+layout switch, only ever inside an open book. On an iPad it opens as an inspector
+beside the page; on a phone it is a nonmodal sheet that can collapse while a
+cited page is checked. The question goes to the server with the PDF page numbers
+currently on screen — the server already has the book, so no page, picture or
+text is uploaded. It reads that page there, looks at the rendered image when the
+page is a diagram or scan, and may follow the book's own references into nearby
+pages. The answer arrives with its book sources attached, named with the printed
+numbers, and tapping one turns the reader without throwing the answer away.
+Reading a downloaded book stays offline; asking about it needs the server.
 
-Asking is a short thread rather than one shot. The endpoint remembers nothing
-between calls, so a follow-up carries the turn before it up with it — which is
-what makes "erklär das nochmal einfacher" mean anything, and why the previous
-answer stays on screen instead of being wiped by the next question. Above the
-field are chips: openings for a page nothing has been asked about yet, and
-follow-ups once there is an answer to point at. They send on one tap. The one
-that does not is "Aufgabe …", which puts the words in the field and waits for the
-number printed on the page — pointing at a single exercise, without asking the
-app to guess where on the page it is.
+Each page or spread has its own short thread. Turning the page switches context
+instead of quietly attaching a follow-up to the previous page. The first view
+offers full-size actions to explain, summarize or inspect an illustration, plus
+a dedicated exercise-number field. After an answer, compact follow-ups can make
+it simpler, shorter or step-by-step; answers can also be copied, shared, retried
+and read aloud. Sources stay collapsed until wanted.
+
+For something more precise than an exercise number, **Bereich markieren** closes
+the panel and lets the student draw a rectangle directly on the PDF with a finger
+or Apple Pencil. Echo sends only the page number and normalized rectangle
+coordinates, not a screenshot. That marked region gets its own thread and remains
+outlined while the answer is compared with the book.
 
 <p align="center">
   <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">

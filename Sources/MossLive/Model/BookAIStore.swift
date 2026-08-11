@@ -1,8 +1,9 @@
 import Foundation
 import Observation
 
-/// Buch-KI's state for one open book: the questions asked about it, the answers
-/// that came back, and whatever is being typed next.
+/// "Seite fragen" state for one open book. Each page, spread or marked region
+/// owns its own short-lived thread, so turning the page can never make a
+/// follow-up silently refer to an answer about somewhere else in the book.
 ///
 /// It is a short thread rather than a single exchange. The endpoint is
 /// stateless — `POST /library/{id}/ask` is told a question and the pages on
@@ -16,6 +17,16 @@ import Observation
 @MainActor
 @Observable
 final class BookAIStore {
+    struct Context: Hashable, Sendable {
+        let pages: [Int]
+        let region: BackendAPI.BookPageRegion?
+
+        init(pages: [Int], region: BackendAPI.BookPageRegion? = nil) {
+            self.pages = Array(Set(pages)).sorted()
+            self.region = region
+        }
+    }
+
     /// A question and what came back for it — kept together so an answer can
     /// never be read under a different question than it was given.
     struct Turn: Identifiable, Equatable {
@@ -28,16 +39,33 @@ final class BookAIStore {
         let pagesRead: [Int]
     }
 
-    var draft = ""
-    private(set) var turns: [Turn] = []
-    private(set) var sending = false
+    private(set) var context = Context(pages: [])
+    private var threads: [Context: [Turn]] = [:]
+    private var drafts: [Context: String] = [:]
+    private(set) var sendingContext: Context?
     /// The question in flight. It is shown at the end of the thread under a
     /// spinner, so asking a follow-up never blanks the answer it follows up on.
-    private(set) var pending: (question: String, pages: [Int])?
-    private(set) var errorMessage: String?
+    private(set) var pendingByContext: [Context: String] = [:]
+    private(set) var errors: [Context: String] = [:]
     /// The question of a failed attempt, so "Erneut versuchen" has something
     /// to retry.
-    private(set) var lastFailed: (question: String, pages: [Int])?
+    private(set) var failedQuestions: [Context: String] = [:]
+    private var requestTask: Task<Void, Never>?
+    private var requestID: UUID?
+
+    var turns: [Turn] { threads[context] ?? [] }
+    var draft: String {
+        get { drafts[context] ?? "" }
+        set { drafts[context] = newValue }
+    }
+    var sending: Bool { sendingContext == context }
+    var pending: (question: String, pages: [Int])? {
+        pendingByContext[context].map { ($0, context.pages) }
+    }
+    var errorMessage: String? { errors[context] }
+    var lastFailed: (question: String, pages: [Int])? {
+        failedQuestions[context].map { ($0, context.pages) }
+    }
 
     var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
@@ -45,45 +73,107 @@ final class BookAIStore {
 
     /// Whether there is anything the panel's menu could clear.
     var hasContent: Bool {
-        !turns.isEmpty || errorMessage != nil
+        !turns.isEmpty || errorMessage != nil || !draft.isEmpty
     }
 
-    func ask(_ question: String, pages: [Int], bookID: String, api: BackendAPI) async {
+    func activate(_ newContext: Context) {
+        if let sendingContext, sendingContext != newContext { cancel() }
+        context = newContext
+    }
+
+    func ask(
+        _ question: String,
+        bookID: String,
+        api: BackendAPI,
+        after contextTurn: Turn? = nil,
+        replacing turnID: UUID? = nil
+    ) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !sending, !pages.isEmpty else { return }
-        errorMessage = nil
-        lastFailed = nil
-        draft = ""
-        pending = (trimmed, pages)
-        sending = true
-        defer {
-            sending = false
-            pending = nil
+        let target = context
+        guard !trimmed.isEmpty, sendingContext == nil, !target.pages.isEmpty else { return }
+        errors[target] = nil
+        failedQuestions[target] = nil
+        drafts[target] = ""
+        pendingByContext[target] = trimmed
+        sendingContext = target
+        let operationID = UUID()
+        requestID = operationID
+
+        let thread = threads[target] ?? []
+        let previous: Turn?
+        if let contextTurn {
+            previous = contextTurn
+        } else if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
+            previous = index > 0 ? thread[index - 1] : nil
+        } else {
+            previous = thread.last
         }
-        do {
-            let answer = try await api.askBook(
-                id: bookID,
-                question: Self.grounded(trimmed, after: turns.last),
-                pages: pages
-            )
-            turns.append(Turn(
-                question: trimmed,
-                pages: pages,
-                text: answer.text,
-                citations: answer.citations,
-                pagesRead: answer.pagesRead
-            ))
-        } catch {
-            errorMessage = error.localizedDescription
-            lastFailed = (trimmed, pages)
+        requestTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let answer = try await api.askBook(
+                    id: bookID,
+                    question: Self.scoped(
+                        Self.grounded(trimmed, after: previous),
+                        to: target.region
+                    ),
+                    pages: target.pages,
+                    region: target.region
+                )
+                if !Task.isCancelled, requestID == operationID {
+                    let completed = Turn(
+                        question: trimmed,
+                        pages: target.pages,
+                        text: answer.text,
+                        citations: answer.citations,
+                        pagesRead: answer.pagesRead
+                    )
+                    var thread = threads[target] ?? []
+                    if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
+                        thread[index] = completed
+                    } else {
+                        thread.append(completed)
+                    }
+                    threads[target] = thread
+                }
+            } catch {
+                guard requestID == operationID else { return }
+                if Task.isCancelled {
+                    drafts[target] = trimmed
+                } else {
+                    errors[target] = error.localizedDescription
+                    failedQuestions[target] = trimmed
+                }
+            }
+            if sendingContext == target, requestID == operationID {
+                sendingContext = nil
+                requestTask = nil
+                requestID = nil
+                pendingByContext[target] = nil
+            }
         }
+    }
+
+    func retry(_ turn: Turn, bookID: String, api: BackendAPI) {
+        ask(turn.question, bookID: bookID, api: api, replacing: turn.id)
+    }
+
+    func cancel() {
+        requestTask?.cancel()
+        requestTask = nil
+        requestID = nil
+        if let target = sendingContext {
+            if let question = pendingByContext[target] { drafts[target] = question }
+            pendingByContext[target] = nil
+        }
+        sendingContext = nil
     }
 
     func clear() {
-        turns = []
-        errorMessage = nil
-        lastFailed = nil
-        draft = ""
+        threads[context] = []
+        errors[context] = nil
+        failedQuestions[context] = nil
+        drafts[context] = ""
     }
 
     /// What actually goes up the wire. A first question travels as typed; a
@@ -102,6 +192,25 @@ final class BookAIStore {
         return """
         Zuvor gefragt: „\(previous.question)“
         Deine Antwort darauf: \(quoted)
+
+        \(question)
+        """
+    }
+
+    /// Region-aware servers use the structured rectangle sent beside the
+    /// question. This short textual description also gives older servers a
+    /// useful fallback when they already show the full rendered page to their
+    /// vision model but ignore unknown JSON fields.
+    static func scoped(_ question: String, to region: BackendAPI.BookPageRegion?) -> String {
+        guard let region else { return question }
+        let left = Int((region.x * 100).rounded())
+        let top = Int(((1 - region.y - region.height) * 100).rounded())
+        let right = Int(((region.x + region.width) * 100).rounded())
+        let bottom = Int(((1 - region.y) * 100).rounded())
+        return """
+        Der Nutzer hat auf PDF-Seite \(region.pdfPage) einen Bereich markiert: \
+        von \(left) % links / \(top) % oben bis \(right) % links / \(bottom) % oben. \
+        Beziehe dich vorrangig auf diesen Ausschnitt.
 
         \(question)
         """

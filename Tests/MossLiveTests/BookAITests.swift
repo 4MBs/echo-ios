@@ -2,7 +2,7 @@
 import XCTest
 
 /// A schoolbook page has two numbers — the one printed on it and the one the
-/// PDF calls it — and Buch-KI is the place they meet: the reader shows the
+/// PDF calls it — and "Seite fragen" is where they meet: the reader shows the
 /// printed one, the server is only ever told the PDF one, and a citation has
 /// to travel back the other way to land on the right page.
 final class BookPageNumberingTests: XCTestCase {
@@ -95,6 +95,77 @@ final class BookAIFollowUpTests: XCTestCase {
         XCTAssertFalse(sent.contains(long), "the whole answer must not be quoted back")
         XCTAssertTrue(sent.contains("…"), "the quote is marked as cut")
         XCTAssertLessThan(sent.count, 1500)
+    }
+}
+
+/// A follow-up only makes sense inside the page or marked rectangle that
+/// produced the answer. The store therefore switches threads when the reader
+/// switches context, while preserving unfinished text in each one.
+@MainActor
+final class BookAIContextTests: XCTestCase {
+    func testSpreadContextIsStableRegardlessOfPageOrder() {
+        XCTAssertEqual(
+            BookAIStore.Context(pages: [17, 16, 17]),
+            BookAIStore.Context(pages: [16, 17])
+        )
+    }
+
+    func testDraftsAreKeptSeparateByPage() {
+        let store = BookAIStore()
+        let first = BookAIStore.Context(pages: [16])
+        let second = BookAIStore.Context(pages: [17])
+
+        store.activate(first)
+        store.draft = "Frage zu Seite 16"
+        store.activate(second)
+        XCTAssertEqual(store.draft, "")
+
+        store.draft = "Frage zu Seite 17"
+        store.activate(first)
+        XCTAssertEqual(store.draft, "Frage zu Seite 16")
+    }
+
+    func testMarkedRegionIsADifferentContextFromItsWholePage() {
+        let region = BackendAPI.BookPageRegion(
+            pdfPage: 16,
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.4
+        )
+        XCTAssertNotEqual(
+            BookAIStore.Context(pages: [16]),
+            BookAIStore.Context(pages: [16], region: region)
+        )
+    }
+
+    func testRegionUsesNormalizedServerPayloadKeys() throws {
+        let region = BackendAPI.BookPageRegion(
+            pdfPage: 16,
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.4
+        )
+        let data = try JSONSerialization.data(withJSONObject: region.json)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["pdf_page"] as? Int, 16)
+        XCTAssertEqual(object["x"] as? Double, 0.1)
+        XCTAssertEqual(object["height"] as? Double, 0.4)
+    }
+
+    func testRegionAlsoGroundsOlderServersInTheMarkedArea() {
+        let region = BackendAPI.BookPageRegion(
+            pdfPage: 16,
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.4
+        )
+        let prompt = BookAIStore.scoped("Erkläre das.", to: region)
+        XCTAssertTrue(prompt.contains("PDF-Seite 16"))
+        XCTAssertTrue(prompt.contains("10 % links / 40 % oben"))
+        XCTAssertTrue(prompt.hasSuffix("Erkläre das."))
     }
 }
 
