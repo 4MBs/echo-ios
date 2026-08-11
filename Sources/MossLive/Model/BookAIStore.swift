@@ -32,17 +32,35 @@ final class BookAIStore {
     struct Turn: Identifiable, Equatable {
         let id = UUID()
         let question: String
+        /// The feature-specific request sent to the server. It can be more
+        /// precise than the short label shown in the conversation.
+        let request: String
         /// The PDF pages the question was asked about.
         let pages: [Int]
         let text: String
         let citations: [BackendAPI.BookCitation]
         let pagesRead: [Int]
+
+        init(
+            question: String,
+            pages: [Int],
+            text: String,
+            citations: [BackendAPI.BookCitation],
+            pagesRead: [Int],
+            request: String? = nil
+        ) {
+            self.question = question
+            self.request = request ?? question
+            self.pages = pages
+            self.text = text
+            self.citations = citations
+            self.pagesRead = pagesRead
+        }
     }
 
     private(set) var context = Context(pages: [])
     private var threads: [Context: [Turn]] = [:]
     private var drafts: [Context: String] = [:]
-    private(set) var sendingContext: Context?
     /// The question in flight. It is shown at the end of the thread under a
     /// spinner, so asking a follow-up never blanks the answer it follows up on.
     private(set) var pendingByContext: [Context: String] = [:]
@@ -50,15 +68,16 @@ final class BookAIStore {
     /// The question of a failed attempt, so "Erneut versuchen" has something
     /// to retry.
     private(set) var failedQuestions: [Context: String] = [:]
-    private var requestTask: Task<Void, Never>?
-    private var requestID: UUID?
+    private var failedRequests: [Context: String] = [:]
+    private var requestTasks: [Context: Task<Void, Never>] = [:]
+    private var requestIDs: [Context: UUID] = [:]
 
     var turns: [Turn] { threads[context] ?? [] }
     var draft: String {
         get { drafts[context] ?? "" }
         set { drafts[context] = newValue }
     }
-    var sending: Bool { sendingContext == context }
+    var sending: Bool { requestIDs[context] != nil }
     var pending: (question: String, pages: [Int])? {
         pendingByContext[context].map { ($0, context.pages) }
     }
@@ -73,11 +92,10 @@ final class BookAIStore {
 
     /// Whether there is anything the panel's menu could clear.
     var hasContent: Bool {
-        !turns.isEmpty || errorMessage != nil || !draft.isEmpty
+        !turns.isEmpty || pending != nil || errorMessage != nil || !draft.isEmpty
     }
 
     func activate(_ newContext: Context) {
-        if let sendingContext, sendingContext != newContext { cancel() }
         context = newContext
     }
 
@@ -85,19 +103,21 @@ final class BookAIStore {
         _ question: String,
         bookID: String,
         api: BackendAPI,
+        request: String? = nil,
         after contextTurn: Turn? = nil,
         replacing turnID: UUID? = nil
     ) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preparedRequest = (request ?? trimmed).trimmingCharacters(in: .whitespacesAndNewlines)
         let target = context
-        guard !trimmed.isEmpty, sendingContext == nil, !target.pages.isEmpty else { return }
+        guard !trimmed.isEmpty, !preparedRequest.isEmpty, requestIDs[target] == nil, !target.pages.isEmpty else { return }
         errors[target] = nil
         failedQuestions[target] = nil
+        failedRequests[target] = nil
         drafts[target] = ""
         pendingByContext[target] = trimmed
-        sendingContext = target
         let operationID = UUID()
-        requestID = operationID
+        requestIDs[target] = operationID
 
         let thread = threads[target] ?? []
         let previous: Turn?
@@ -108,25 +128,28 @@ final class BookAIStore {
         } else {
             previous = thread.last
         }
-        requestTask = Task { [weak self] in
+        requestTasks[target] = Task { [weak self] in
             guard let self else { return }
             do {
                 let answer = try await api.askBook(
                     id: bookID,
-                    question: Self.scoped(
-                        Self.grounded(trimmed, after: previous),
-                        to: target.region
+                    question: BookAIPrompts.formatted(
+                        Self.scoped(
+                            Self.grounded(preparedRequest, after: previous),
+                            to: target.region
+                        )
                     ),
                     pages: target.pages,
                     region: target.region
                 )
-                if !Task.isCancelled, requestID == operationID {
+                if !Task.isCancelled, requestIDs[target] == operationID {
                     let completed = Turn(
                         question: trimmed,
                         pages: target.pages,
                         text: answer.text,
                         citations: answer.citations,
-                        pagesRead: answer.pagesRead
+                        pagesRead: answer.pagesRead,
+                        request: preparedRequest
                     )
                     var thread = threads[target] ?? []
                     if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
@@ -137,42 +160,47 @@ final class BookAIStore {
                     threads[target] = thread
                 }
             } catch {
-                guard requestID == operationID else { return }
+                guard requestIDs[target] == operationID else { return }
                 if Task.isCancelled {
                     drafts[target] = trimmed
                 } else {
                     errors[target] = error.localizedDescription
                     failedQuestions[target] = trimmed
+                    failedRequests[target] = preparedRequest
                 }
             }
-            if sendingContext == target, requestID == operationID {
-                sendingContext = nil
-                requestTask = nil
-                requestID = nil
+            if requestIDs[target] == operationID {
+                requestTasks[target] = nil
+                requestIDs[target] = nil
                 pendingByContext[target] = nil
             }
         }
     }
 
     func retry(_ turn: Turn, bookID: String, api: BackendAPI) {
-        ask(turn.question, bookID: bookID, api: api, replacing: turn.id)
+        ask(turn.question, bookID: bookID, api: api, request: turn.request, replacing: turn.id)
+    }
+
+    func retryLastFailure(bookID: String, api: BackendAPI) {
+        guard let question = failedQuestions[context] else { return }
+        ask(question, bookID: bookID, api: api, request: failedRequests[context])
     }
 
     func cancel() {
-        requestTask?.cancel()
-        requestTask = nil
-        requestID = nil
-        if let target = sendingContext {
-            if let question = pendingByContext[target] { drafts[target] = question }
-            pendingByContext[target] = nil
-        }
-        sendingContext = nil
+        let target = context
+        requestTasks[target]?.cancel()
+        requestTasks[target] = nil
+        requestIDs[target] = nil
+        if let question = pendingByContext[target] { drafts[target] = question }
+        pendingByContext[target] = nil
     }
 
     func clear() {
+        cancel()
         threads[context] = []
         errors[context] = nil
         failedQuestions[context] = nil
+        failedRequests[context] = nil
         drafts[context] = ""
     }
 

@@ -96,6 +96,57 @@ final class BookAIFollowUpTests: XCTestCase {
         XCTAssertTrue(sent.contains("…"), "the quote is marked as cut")
         XCTAssertLessThan(sent.count, 1500)
     }
+
+    func testFeaturePromptKeepsTheActualRequestAndAddsAGroundedFormatContract() {
+        let sent = BookAIPrompts.formatted(BookAIPrompts.solveExercise("4b"))
+        XCTAssertTrue(sent.contains("Aufgabe 4b"))
+        XCTAssertTrue(sent.contains("Erfinde keine Aufgabenstellung"))
+        XCTAssertTrue(sent.contains("Markdown-Codeblock"))
+        XCTAssertTrue(sent.contains("keine Tabellen"))
+    }
+}
+
+/// Book answers are rendered as semantic blocks rather than one undifferentiated
+/// text view. This keeps the parser deliberately small and predictable.
+final class BookAIAnswerDocumentTests: XCTestCase {
+    func testParsesAnswerHierarchyAndSteps() {
+        let document = BookAIAnswerDocument(markdown: """
+        ## Ergebnis
+        **42**
+
+        ## Lösungsweg
+        1. Erster Schritt
+        2. Zweiter Schritt
+        """)
+
+        XCTAssertEqual(document.blocks, [
+            .heading(level: 2, text: "Ergebnis"),
+            .paragraph("**42**"),
+            .heading(level: 2, text: "Lösungsweg"),
+            .ordered(number: 1, text: "Erster Schritt"),
+            .ordered(number: 2, text: "Zweiter Schritt"),
+        ])
+    }
+
+    func testParsesMathAndPlainTextFallbacks() {
+        let document = BookAIAnswerDocument(markdown: """
+        Erklärung:
+        Die Formel lautet:
+
+        $$E = m · c²$$
+        """)
+
+        XCTAssertEqual(document.blocks, [
+            .heading(level: 2, text: "Erklärung"),
+            .paragraph("Die Formel lautet:"),
+            .formula("E = m · c²"),
+        ])
+    }
+
+    func testKeepsOrdinarySentenceWithColonAsParagraph() {
+        let document = BookAIAnswerDocument(markdown: "Beispiel: Das Ergebnis ist 7.")
+        XCTAssertEqual(document.blocks, [.paragraph("Beispiel: Das Ergebnis ist 7.")])
+    }
 }
 
 /// A follow-up only makes sense inside the page or marked rectangle that

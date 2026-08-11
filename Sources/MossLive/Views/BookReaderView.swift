@@ -264,13 +264,14 @@ private struct PDFReader: View {
 
     private func beginRegionSelection() {
         askingBookAI = false
-        bookAI.cancel()
         selectingRegion = true
         proxy.clearRegionSelection()
         selectedRegion = nil
-        // Let the inspector/sheet finish moving before its old size is used to
-        // map the selection back into PDF coordinates.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        // Begin on the next run loop instead of guessing how long the adaptive
+        // inspector's dismissal animation takes. The overlay follows the
+        // reader's live bounds, so rotations and different sheet transitions
+        // cannot leave it mapped to a stale size.
+        DispatchQueue.main.async {
             proxy.beginRegionSelection { region in
                 selectedRegion = region
                 selectingRegion = false

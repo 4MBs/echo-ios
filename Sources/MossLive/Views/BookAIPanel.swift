@@ -2,12 +2,12 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// The book reader's contextual assistant. It is deliberately an action on
-/// the page, not a second general-purpose Chat tab: the active page or marked
-/// rectangle is always visible beside the composer, and every context keeps a
-/// separate short-lived thread.
+/// A page-scoped assistant presented by the book reader's adaptive inspector.
+/// Navigation, bars, menus and controls are intentionally system components so
+/// iOS can provide the appropriate Liquid Glass appearance and transitions.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let bookID: String
     let bookTitle: String
@@ -21,12 +21,17 @@ struct BookAIPanel: View {
     let clearRegion: () -> Void
     let close: () -> Void
 
+    private enum Route: Hashable {
+        case actions
+        case exercise
+    }
+
     @FocusState private var inputFocused: Bool
     @FocusState private var exerciseFocused: Bool
+    @State private var path: [Route] = []
     @State private var exerciseNumber = ""
-    @State private var enteringExercise = false
     @State private var expandedCitations: Set<UUID> = []
-    @State private var showingInfo = false
+    @State private var copiedTurn: UUID?
     @State private var speaker = BookAnswerSpeaker()
     @State private var scopedContext: BookAIStore.Context?
     @State private var citationDestination: Int?
@@ -48,33 +53,35 @@ struct BookAIPanel: View {
         )
     }
 
-    /// A citation temporarily turns the book without changing what the open
-    /// answer and its follow-ups are about. The next page turn made by the
-    /// student adopts the new page normally.
-    private var context: BookAIStore.Context {
-        scopedContext ?? incomingContext
-    }
-
+    /// A citation can turn the book without silently moving the open answer to
+    /// another context. The student's next page turn adopts that page normally.
+    private var context: BookAIStore.Context { scopedContext ?? incomingContext }
     private var activeRegion: BackendAPI.BookPageRegion? { context.region }
-
-    private var pageLabel: String {
-        numbering.printedLabel(forVisible: context.pages)
-    }
-
+    private var pageLabel: String { numbering.printedLabel(forVisible: context.pages) }
     private var contextLabel: String {
         activeRegion == nil ? "Seite \(pageLabel)" : "Markierter Bereich · Seite \(pageLabel)"
     }
 
     var body: some View {
-        NavigationStack {
-            content
-                .background(Color(.systemBackground))
+        NavigationStack(path: $path) {
+            rootContent
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-                .navigationTitle("Seite \(pageLabel)")
-                .navigationSubtitle(bookTitle)
+                .navigationTitle("Seite fragen")
+                .navigationSubtitle(contextLabel)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
+                .navigationDestination(for: Route.self) { route in
+                    switch route {
+                    case .actions:
+                        actionList(showIntroduction: false)
+                            .navigationTitle("Neue Frage")
+                            .navigationBarTitleDisplayMode(.inline)
+                    case .exercise:
+                        exerciseView
+                    }
+                }
         }
+        .background(Color(.systemBackground))
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
@@ -88,178 +95,207 @@ struct BookAIPanel: View {
             guard let destination = citationDestination, pages.contains(destination) else { return }
             citationDestination = nil
         }
-        .onChange(of: store.turns.count) { _, _ in detent = .large }
-        .alert("So arbeitet „Seite fragen“", isPresented: $showingInfo) {
-            Button("OK") {}
-        } message: {
-            Text(
-                "Deine Frage wird an deinen eigenen Server gesendet. Das Buch liegt dort bereits; "
-                    + "die Buchseite wird nicht hochgeladen. KI-Antworten können Fehler enthalten — "
-                    + "prüfe deshalb die angegebenen Seiten."
-            )
-        }
     }
 
     // MARK: - Navigation
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button(action: close) {
-                Image(systemName: "xmark")
+        if path.isEmpty {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(action: close) { Image(systemName: "xmark") }
+                    .accessibilityLabel("Schließen")
             }
-            .accessibilityLabel("Schließen")
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button("Hinweise & Datenschutz", systemImage: "info.circle") {
-                    showingInfo = true
+            if store.hasContent {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { path.append(.actions) } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Neue Frage")
                 }
-                Divider()
-                Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
-                    store.clear()
-                }
-                .disabled(!store.hasContent)
-            } label: {
-                Image(systemName: "ellipsis.circle")
             }
-            .accessibilityLabel("Mehr")
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
+                        store.clear()
+                    }
+                    .disabled(!store.hasContent)
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .accessibilityLabel("Mehr")
+            }
         }
     }
 
-    // MARK: - Content
+    // MARK: - Start and actions
 
     @ViewBuilder
-    private var content: some View {
+    private var rootContent: some View {
         if store.turns.isEmpty, store.pending == nil, store.errorMessage == nil {
-            startView
+            actionList(showIntroduction: true)
         } else {
             thread
         }
     }
 
-    private var startView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Wobei soll ich helfen?")
-                        .font(.title3.weight(.semibold))
-                    Text(activeRegion == nil
-                        ? "Wähle eine Aktion oder stelle unten eine eigene Frage."
-                        : "Die nächste Frage bezieht sich nur auf den markierten Bereich.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                if enteringExercise {
-                    exerciseEntry
-                }
-
-                VStack(spacing: 1) {
-                    startAction(
-                        title: "Aufgabe lösen",
-                        subtitle: "Eine bestimmte Aufgabennummer eingeben",
-                        symbol: "function"
-                    ) {
-                        enteringExercise = true
-                        Task {
-                            try? await Task.sleep(for: .milliseconds(80))
-                            exerciseFocused = true
-                        }
+    private func actionList(showIntroduction: Bool) -> some View {
+        List {
+            if showIntroduction {
+                Section {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Wobei soll ich helfen?")
+                            .font(.title3.weight(.semibold))
+                        Text(activeRegion == nil
+                            ? "Wähle eine Aktion oder stelle unten eine eigene Frage."
+                            : "Die nächste Frage bezieht sich auf den markierten Bereich.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    startAction(
-                        title: "Seite erklären",
-                        subtitle: "Die Zusammenhänge verständlich erklären",
-                        symbol: "text.book.closed"
-                    ) { send("Erkläre diese Seite verständlich.") }
-                    startAction(
-                        title: "Kurz zusammenfassen",
-                        subtitle: "Die wichtigsten Punkte in wenigen Sätzen",
-                        symbol: "text.alignleft"
-                    ) { send("Fasse diese Seite in wenigen Sätzen zusammen.") }
-                    startAction(
-                        title: "Abbildung erklären",
-                        subtitle: "Karte, Diagramm oder Bild untersuchen",
-                        symbol: "photo"
-                    ) { send("Erkläre die Abbildung auf dieser Seite.") }
-                    startAction(
-                        title: activeRegion == nil ? "Bereich markieren" : "Anderen Bereich markieren",
-                        subtitle: "Mit Finger oder Apple Pencil genau auswählen",
-                        symbol: "rectangle.dashed"
-                    ) { requestRegion() }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous)
-                        .stroke(.primary.opacity(0.07), lineWidth: 0.5)
+                    .listRowSeparator(.hidden)
+                    .padding(.vertical, 6)
                 }
             }
-            .padding(Theme.Space.inset)
+
+            Section {
+                NavigationLink(value: Route.exercise) {
+                    actionLabel(
+                        "Aufgabe lösen",
+                        detail: "Aufgabennummer eingeben",
+                        symbol: "function"
+                    )
+                }
+                .disabled(!canAsk)
+
+                actionButton(
+                    "Seite erklären",
+                    detail: "Kernaussage, Begriffe und Zusammenhänge",
+                    symbol: "text.book.closed",
+                    request: BookAIPrompts.explainPage
+                )
+                actionButton(
+                    "Kurz zusammenfassen",
+                    detail: "Das Wichtigste auf einen Blick",
+                    symbol: "text.alignleft",
+                    request: BookAIPrompts.summarizePage
+                )
+                actionButton(
+                    "Abbildung erklären",
+                    detail: "Darstellung lesen und einordnen",
+                    symbol: "photo",
+                    request: BookAIPrompts.explainFigure
+                )
+            }
+
+            Section {
+                Button {
+                    requestRegion()
+                } label: {
+                    actionLabel(
+                        activeRegion == nil ? "Bereich markieren" : "Anderen Bereich markieren",
+                        detail: "Mit Finger oder Apple Pencil auswählen",
+                        symbol: "rectangle.dashed"
+                    )
+                }
+                .foregroundStyle(.primary)
+
+                if activeRegion != nil {
+                    Button {
+                        useCurrentPage()
+                        path.removeAll()
+                    } label: {
+                        actionLabel(
+                            "Ganze Seite verwenden",
+                            detail: "Markierung für die nächste Frage aufheben",
+                            symbol: "doc"
+                        )
+                    }
+                    .foregroundStyle(.primary)
+                }
+            }
+
+            if !model.connectivity.isOnline {
+                Section {
+                    Label("Fragen benötigen eine Serververbindung. Das Buch bleibt verfügbar.", systemImage: "wifi.slash")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemBackground))
     }
 
-    private func startAction(
-        title: String,
-        subtitle: String,
+    private func actionButton(
+        _ title: String,
+        detail: String,
         symbol: String,
-        action: @escaping () -> Void
+        request: String
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.body)
-                    .foregroundStyle(.tint)
-                    .frame(width: 30, height: 30)
-                    .background(Color.accentColor.opacity(0.1), in: Circle())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.forward")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .background(Color(.secondarySystemBackground))
-            .contentShape(Rectangle())
+        Button {
+            send(title, request: request)
+        } label: {
+            actionLabel(title, detail: detail, symbol: symbol)
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
         .disabled(!canAsk)
     }
 
-    private var exerciseEntry: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Welche Aufgabe?")
-                .font(.subheadline.weight(.semibold))
-            HStack(spacing: 10) {
-                Text("Aufgabe")
+    private func actionLabel(_ title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.body)
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                Text(detail)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private var exerciseView: some View {
+        Form {
+            Section {
                 TextField("z. B. 4b", text: $exerciseNumber)
-                    .textFieldStyle(.roundedBorder)
                     .focused($exerciseFocused)
                     .submitLabel(.send)
                     .onSubmit(sendExercise)
-                Button("Lösen", action: sendExercise)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } header: {
+                Text("Aufgabennummer")
+            } footer: {
+                Text("Die Aufgabe muss auf \(contextLabel.lowercased()) zu sehen sein.")
             }
         }
-        .padding(Theme.Space.inset)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+        .navigationTitle("Aufgabe lösen")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button("Aufgabe lösen", action: sendExercise)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(.bar)
+                .disabled(exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canAsk)
+        }
+        .onAppear {
+            DispatchQueue.main.async { exerciseFocused = true }
+        }
     }
+
+    // MARK: - Conversation
 
     private var thread: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 22) {
                     ForEach(store.turns) { turn in
                         exchange(turn)
                             .id(turn.id)
@@ -275,6 +311,7 @@ struct BookAIPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Space.inset)
             }
+            .background(Color(.systemBackground))
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: store.turns.count) { _, _ in scrollToEnd(proxy) }
             .onChange(of: store.sending) { _, _ in scrollToEnd(proxy) }
@@ -282,13 +319,13 @@ struct BookAIPanel: View {
     }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
             proxy.scrollTo(Self.bottomID, anchor: .bottom)
         }
     }
 
     private func exchange(_ turn: BookAIStore.Turn) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Spacer(minLength: 48)
                 Text(turn.question)
@@ -299,22 +336,15 @@ struct BookAIPanel: View {
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(.tint)
-                Text("Echo · KI-Antwort")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
+            Label("Echo", systemImage: "sparkles")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
 
-            Text(renderedMarkdown(turn.text))
-                .font(.body)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            BookAIAnswerView(text: turn.text)
 
-            if !sources(for: turn).isEmpty {
-                citationDisclosure(turn)
+            let citations = sources(for: turn)
+            if !citations.isEmpty {
+                citationDisclosure(turn, citations: citations)
             }
 
             responseActions(turn)
@@ -322,33 +352,12 @@ struct BookAIPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func citationDisclosure(_ turn: BookAIStore.Turn) -> some View {
-        let citations = sources(for: turn)
-        return VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withAnimation(.smooth(duration: 0.2)) {
-                    if expandedCitations.contains(turn.id) {
-                        expandedCitations.remove(turn.id)
-                    } else {
-                        expandedCitations.insert(turn.id)
-                    }
-                }
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "text.book.closed")
-                    Text(citationSummary(citations))
-                    Spacer(minLength: 4)
-                    Image(systemName: expandedCitations.contains(turn.id) ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                }
-                .font(.subheadline)
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
-            }
-            .buttonStyle(.plain)
-
-            if expandedCitations.contains(turn.id) {
+    private func citationDisclosure(
+        _ turn: BookAIStore.Turn,
+        citations: [BackendAPI.BookCitation]
+    ) -> some View {
+        DisclosureGroup(isExpanded: citationBinding(for: turn.id)) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(citations) { citation in
                     Button {
                         citationDestination = visiblePages.contains(citation.pdfPage) ? nil : citation.pdfPage
@@ -356,13 +365,15 @@ struct BookAIPanel: View {
                         goToPage(citation.pdfPage)
                     } label: {
                         HStack(spacing: 10) {
-                            Text(numbering.citationLabel(pdfPage: citation.pdfPage))
-                                .font(.subheadline.weight(.medium))
-                            if !citation.note.isEmpty {
-                                Text(citation.note)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(numbering.citationLabel(pdfPage: citation.pdfPage))
+                                    .font(.subheadline.weight(.medium))
+                                if !citation.note.isEmpty {
+                                    Text(citation.note)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                             }
                             Spacer(minLength: 4)
                             Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -377,7 +388,24 @@ struct BookAIPanel: View {
                     .accessibilityHint("Zeigt diese Seite im Buch")
                 }
             }
+            .padding(.top, 6)
+        } label: {
+            Label(citationSummary(citations), systemImage: "text.book.closed")
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .frame(minHeight: 44)
         }
+    }
+
+    private func citationBinding(for id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedCitations.contains(id) },
+            set: { expanded in
+                withAnimation(reduceMotion ? nil : .default) {
+                    if expanded { expandedCitations.insert(id) } else { expandedCitations.remove(id) }
+                }
+            }
+        )
     }
 
     private func citationSummary(_ citations: [BackendAPI.BookCitation]) -> String {
@@ -385,9 +413,8 @@ struct BookAIPanel: View {
         return "\(citations.count) \(citations.count == 1 ? "Quelle" : "Quellen"): \(pages.joined(separator: ", "))"
     }
 
-    /// Older servers sometimes return only `pages_read`; keep those useful and
-    /// tappable, while preferring the richer citation note when both describe
-    /// the same page.
+    /// Older servers may return only `pages_read`; keep those pages useful and
+    /// prefer the richer citation note when both describe the same page.
     private func sources(for turn: BookAIStore.Turn) -> [BackendAPI.BookCitation] {
         var result = turn.citations
         let cited = Set(result.map(\.pdfPage))
@@ -401,11 +428,16 @@ struct BookAIPanel: View {
         HStack(spacing: 2) {
             Button {
                 UIPasteboard.general.string = turn.text
+                copiedTurn = turn.id
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    if copiedTurn == turn.id { copiedTurn = nil }
+                }
             } label: {
-                Image(systemName: "doc.on.doc")
+                Image(systemName: copiedTurn == turn.id ? "checkmark" : "doc.on.doc")
                     .frame(minWidth: 44, minHeight: 44)
             }
-            .accessibilityLabel("Antwort kopieren")
+            .accessibilityLabel(copiedTurn == turn.id ? "Antwort kopiert" : "Antwort kopieren")
 
             Button {
                 speaker.speak(turn.text)
@@ -424,9 +456,10 @@ struct BookAIPanel: View {
             Menu {
                 Button("Kürzer erklären", systemImage: "text.badge.minus") {
                     store.ask(
-                        "Erkläre diese Antwort kürzer und einfacher.",
+                        "Kürzer erklären",
                         bookID: bookID,
                         api: api,
+                        request: BookAIPrompts.shorterFollowUp,
                         after: turn
                     )
                 }
@@ -441,6 +474,7 @@ struct BookAIPanel: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+        .sensoryFeedback(.success, trigger: copiedTurn)
     }
 
     private func shareText(_ turn: BookAIStore.Turn) -> String {
@@ -466,7 +500,7 @@ struct BookAIPanel: View {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 Text(activeRegion == nil
-                    ? "Analysiert Text und Abbildungen auf Seite \(pageLabel)…"
+                    ? "Analysiert Seite \(pageLabel)…"
                     : "Analysiert den markierten Bereich…")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -476,6 +510,7 @@ struct BookAIPanel: View {
                     .frame(minHeight: 44)
             }
         }
+        .accessibilityElement(children: .combine)
     }
 
     private func failure(_ message: String) -> some View {
@@ -483,21 +518,20 @@ struct BookAIPanel: View {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.footnote)
                 .foregroundStyle(.red)
-            if let failed = store.lastFailed, model.connectivity.isOnline {
+            if store.lastFailed != nil, model.connectivity.isOnline {
                 Button("Erneut versuchen") {
-                    store.ask(failed.question, bookID: bookID, api: api)
+                    store.retryLastFailure(bookID: bookID, api: api)
                 }
                 .buttonStyle(.bordered)
             }
         }
-        .padding(Theme.Space.inset)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Composer
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             if !model.connectivity.isOnline {
                 Label("Ohne Serververbindung — Lesen geht weiter, Fragen nicht.", systemImage: "wifi.slash")
                     .font(.caption)
@@ -505,14 +539,8 @@ struct BookAIPanel: View {
             }
 
             Menu {
-                Button("Aktuelle Seite", systemImage: "doc") {
-                    citationDestination = nil
-                    let pageContext = BookAIStore.Context(pages: visiblePages)
-                    scopedContext = pageContext
-                    store.activate(pageContext)
-                    clearRegion()
-                }
-                .disabled(activeRegion == nil && context.pages == visiblePages)
+                Button("Aktuelle Seite", systemImage: "doc", action: useCurrentPage)
+                    .disabled(activeRegion == nil && context.pages == visiblePages)
                 Button("Bereich markieren", systemImage: "rectangle.dashed") { requestRegion() }
             } label: {
                 HStack(spacing: 5) {
@@ -522,7 +550,7 @@ struct BookAIPanel: View {
                 }
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.tint)
-                .frame(minHeight: 44)
+                .frame(minHeight: 36)
             }
 
             if !store.sending, !store.turns.isEmpty {
@@ -538,7 +566,7 @@ struct BookAIPanel: View {
                     .onSubmit(sendDraft)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
+                    .background(Color(.tertiarySystemFill), in: Capsule())
 
                 Button {
                     if store.sending { store.cancel() } else { sendDraft() }
@@ -554,25 +582,25 @@ struct BookAIPanel: View {
             }
         }
         .padding(.horizontal, Theme.Space.inset)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.top, 7)
+        .padding(.bottom, 10)
         .background(.bar)
     }
 
     private var followUps: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                followUp("Einfacher", "Erkläre die vorige Antwort noch einmal einfacher.")
-                followUp("Beispiel", "Gib mir ein konkretes Beispiel dazu.")
-                followUp("Schritt für Schritt", "Zeig mir das Schritt für Schritt.")
-                followUp("Warum?", "Warum ist das so?")
+                followUp("Einfacher", BookAIPrompts.simplerFollowUp)
+                followUp("Beispiel", BookAIPrompts.exampleFollowUp)
+                followUp("Schritt für Schritt", BookAIPrompts.stepsFollowUp)
+                followUp("Warum?", BookAIPrompts.whyFollowUp)
             }
         }
         .scrollIndicators(.hidden)
     }
 
-    private func followUp(_ label: String, _ question: String) -> some View {
-        Button(label) { send(question) }
+    private func followUp(_ label: String, _ request: String) -> some View {
+        Button(label) { send(label, request: request) }
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
             .frame(minHeight: 44)
@@ -591,14 +619,14 @@ struct BookAIPanel: View {
         !store.sending && model.connectivity.isOnline && !context.pages.isEmpty
     }
 
-    private var canSend: Bool {
-        store.canSend && canAsk
-    }
+    private var canSend: Bool { store.canSend && canAsk }
 
-    private func send(_ question: String) {
+    private func send(_ question: String, request: String? = nil) {
         guard canAsk else { return }
         inputFocused = false
-        store.ask(question, bookID: bookID, api: api)
+        path.removeAll()
+        withAnimation(reduceMotion ? nil : .default) { detent = .large }
+        store.ask(question, bookID: bookID, api: api, request: request)
     }
 
     private func sendDraft() {
@@ -608,16 +636,23 @@ struct BookAIPanel: View {
 
     private func sendExercise() {
         let number = exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !number.isEmpty else { return }
-        enteringExercise = false
+        guard !number.isEmpty, canAsk else { return }
         exerciseFocused = false
         exerciseNumber = ""
-        send("Löse Aufgabe \(number) Schritt für Schritt.")
+        send("Aufgabe \(number) lösen", request: BookAIPrompts.solveExercise(number))
+    }
+
+    private func useCurrentPage() {
+        citationDestination = nil
+        let pageContext = BookAIStore.Context(pages: visiblePages)
+        scopedContext = pageContext
+        store.activate(pageContext)
+        clearRegion()
     }
 }
 
-/// Kept alive by the panel while it is presented; creating a synthesizer for
-/// every tap can make the first words disappear when SwiftUI redraws.
+/// Kept alive while the panel is presented; recreating the synthesizer on
+/// every redraw can swallow the beginning of an utterance.
 private final class BookAnswerSpeaker {
     private let synthesizer = AVSpeechSynthesizer()
 
