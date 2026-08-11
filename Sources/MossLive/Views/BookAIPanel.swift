@@ -324,7 +324,7 @@ struct BookAIPanel: View {
 
     private func citationDisclosure(_ turn: BookAIStore.Turn) -> some View {
         let citations = sources(for: turn)
-        VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 8) {
             Button {
                 withAnimation(.smooth(duration: 0.2)) {
                     if expandedCitations.contains(turn.id) {
