@@ -6,6 +6,7 @@ import SwiftUI
 /// navigation stack inside the book reader.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let bookID: String
     let bookTitle: String
