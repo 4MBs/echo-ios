@@ -601,7 +601,7 @@ private final class PageSwipeGestureRecognizer: UISwipeGestureRecognizer {
 /// its own. The margin around the page is what stays constant, in points, so
 /// the spread never sits edge to edge but never floats in the middle of the
 /// screen either.
-private final class BookPDFView: PDFView, UIGestureRecognizerDelegate {
+private final class BookPDFView: PDFView {
     /// Breathing room left around the page at its smallest, in points.
     private let margin: CGFloat = 14
     /// The scale the page rests at: its natural size on this screen, and the
@@ -612,6 +612,10 @@ private final class BookPDFView: PDFView, UIGestureRecognizerDelegate {
     private var displayedRegion: BackendAPI.BookPageRegion?
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
+    private lazy var deselectionTap = UITapGestureRecognizer(
+        target: self,
+        action: #selector(tappedOutsideSelection)
+    )
     var onRegionChanged: ((BackendAPI.BookPageRegion?) -> Void)?
 
     override init(frame: CGRect) {
@@ -625,10 +629,9 @@ private final class BookPDFView: PDFView, UIGestureRecognizerDelegate {
     }
 
     private func configureRegionInteraction() {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(tappedOutsideSelection))
-        tap.cancelsTouchesInView = false
-        tap.delegate = self
-        addGestureRecognizer(tap)
+        deselectionTap.cancelsTouchesInView = false
+        deselectionTap.delegate = self
+        addGestureRecognizer(deselectionTap)
     }
 
     override func layoutSubviews() {
@@ -796,11 +799,17 @@ private final class BookPDFView: PDFView, UIGestureRecognizerDelegate {
         onRegionChanged?(nil)
     }
 
-    func gestureRecognizer(
+    override func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        true
+        if gestureRecognizer === deselectionTap || otherGestureRecognizer === deselectionTap {
+            return true
+        }
+        return super.gestureRecognizer(
+            gestureRecognizer,
+            shouldRecognizeSimultaneouslyWith: otherGestureRecognizer
+        )
     }
 
     func applyScaleLimits() {
