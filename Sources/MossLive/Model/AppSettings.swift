@@ -81,18 +81,6 @@ final class AppSettings {
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
-        // Book display names have always been local UserDefaults values; the
-        // server only supplies the original title. Clear every override from
-        // older builds once, while allowing names created after this migration
-        // to persist normally.
-        let clearedBookTitlesKey = "didClearBookTitleOverrides20260811"
-        if !defaults.bool(forKey: clearedBookTitlesKey) {
-            for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("library.bookTitle.") {
-                defaults.removeObject(forKey: key)
-            }
-            defaults.set(true, forKey: clearedBookTitlesKey)
-        }
-
         self.defaults = defaults
         serverHost = defaults.string(forKey: "serverHost") ?? ""
         let port = defaults.integer(forKey: "serverPort")
