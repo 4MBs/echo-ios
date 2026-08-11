@@ -219,7 +219,6 @@ private struct PDFReader: View {
     private var bookAIPanel: some View {
         BookAIPanel(
             bookID: book.id,
-            bookTitle: book.title,
             numbering: numbering,
             visiblePages: visiblePages,
             region: selectedRegion,

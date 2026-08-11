@@ -32,9 +32,6 @@ final class BookAIStore {
     struct Turn: Identifiable, Equatable {
         let id = UUID()
         let question: String
-        /// The feature-specific request sent to the server. It can be more
-        /// precise than the short label shown in the conversation.
-        let request: String
         /// The PDF pages the question was asked about.
         let pages: [Int]
         let text: String
@@ -46,11 +43,9 @@ final class BookAIStore {
             pages: [Int],
             text: String,
             citations: [BackendAPI.BookCitation],
-            pagesRead: [Int],
-            request: String? = nil
+            pagesRead: [Int]
         ) {
             self.question = question
-            self.request = request ?? question
             self.pages = pages
             self.text = text
             self.citations = citations
@@ -65,10 +60,6 @@ final class BookAIStore {
     /// spinner, so asking a follow-up never blanks the answer it follows up on.
     private(set) var pendingByContext: [Context: String] = [:]
     private(set) var errors: [Context: String] = [:]
-    /// The question of a failed attempt, so "Erneut versuchen" has something
-    /// to retry.
-    private(set) var failedQuestions: [Context: String] = [:]
-    private var failedRequests: [Context: String] = [:]
     private var requestTasks: [Context: Task<Void, Never>] = [:]
     private var requestIDs: [Context: UUID] = [:]
 
@@ -84,10 +75,6 @@ final class BookAIStore {
     }
 
     var errorMessage: String? { errors[context] }
-    var lastFailed: (question: String, pages: [Int])? {
-        failedQuestions[context].map { ($0, context.pages) }
-    }
-
     var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
     }
@@ -112,27 +99,19 @@ final class BookAIStore {
         _ question: String,
         bookID: String,
         api: BackendAPI,
-        request: String? = nil,
-        after contextTurn: Turn? = nil,
         replacing turnID: UUID? = nil
     ) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        let preparedRequest = (request ?? trimmed).trimmingCharacters(in: .whitespacesAndNewlines)
         let target = context
-        guard !trimmed.isEmpty, !preparedRequest.isEmpty, requestIDs[target] == nil,
-              !target.pages.isEmpty else { return }
+        guard !trimmed.isEmpty, requestIDs[target] == nil, !target.pages.isEmpty else { return }
         errors[target] = nil
-        failedQuestions[target] = nil
-        failedRequests[target] = nil
         drafts[target] = ""
         pendingByContext[target] = trimmed
         let operationID = UUID()
         requestIDs[target] = operationID
 
         let thread = threads[target] ?? []
-        let previous: Turn? = if let contextTurn {
-            contextTurn
-        } else if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
+        let previous: Turn? = if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
             index > 0 ? thread[index - 1] : nil
         } else {
             thread.last
@@ -144,7 +123,7 @@ final class BookAIStore {
                     id: bookID,
                     question: BookAIPrompts.formatted(
                         Self.scoped(
-                            Self.grounded(preparedRequest, after: previous),
+                            Self.grounded(trimmed, after: previous),
                             to: target.region
                         )
                     ),
@@ -157,8 +136,7 @@ final class BookAIStore {
                         pages: target.pages,
                         text: answer.text,
                         citations: answer.citations,
-                        pagesRead: answer.pagesRead,
-                        request: preparedRequest
+                        pagesRead: answer.pagesRead
                     )
                     var thread = threads[target] ?? []
                     if let turnID, let index = thread.firstIndex(where: { $0.id == turnID }) {
@@ -174,8 +152,7 @@ final class BookAIStore {
                     drafts[target] = trimmed
                 } else {
                     errors[target] = error.localizedDescription
-                    failedQuestions[target] = trimmed
-                    failedRequests[target] = preparedRequest
+                    drafts[target] = trimmed
                 }
             }
             if requestIDs[target] == operationID {
@@ -187,12 +164,7 @@ final class BookAIStore {
     }
 
     func retry(_ turn: Turn, bookID: String, api: BackendAPI) {
-        ask(turn.question, bookID: bookID, api: api, request: turn.request, replacing: turn.id)
-    }
-
-    func retryLastFailure(bookID: String, api: BackendAPI) {
-        guard let question = failedQuestions[context] else { return }
-        ask(question, bookID: bookID, api: api, request: failedRequests[context])
+        ask(turn.question, bookID: bookID, api: api, replacing: turn.id)
     }
 
     func cancel() {
@@ -208,8 +180,6 @@ final class BookAIStore {
         cancel()
         threads[context] = []
         errors[context] = nil
-        failedQuestions[context] = nil
-        failedRequests[context] = nil
         drafts[context] = ""
     }
 

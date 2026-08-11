@@ -1,16 +1,14 @@
-import AVFoundation
 import SwiftUI
 import UIKit
 
-/// A page-scoped assistant presented by the book reader's adaptive inspector.
-/// Navigation, bars, menus and controls are intentionally system components so
-/// iOS can provide the appropriate Liquid Glass appearance and transitions.
+/// A page-scoped conversation presented by the book reader's adaptive
+/// inspector. It deliberately uses the same thread and composer language as
+/// the main Chat tab; the page or marked region is its fixed context.
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let bookID: String
-    let bookTitle: String
     let numbering: BookPageNumbering
     let visiblePages: [Int]
     let region: BackendAPI.BookPageRegion?
@@ -21,16 +19,15 @@ struct BookAIPanel: View {
     let clearRegion: () -> Void
 
     @FocusState private var inputFocused: Bool
-    @FocusState private var exerciseFocused: Bool
-    @State private var showingExercise = false
-    @State private var exerciseNumber = ""
     @State private var expandedCitations: Set<UUID> = []
     @State private var copiedTurn: UUID?
-    @State private var speaker = BookAnswerSpeaker()
     @State private var scopedContext: BookAIStore.Context?
     @State private var citationDestination: Int?
+    @State private var dictationPrefix = ""
+    @State private var voiceError: String?
+    @State private var voiceInput = ChatVoiceInput()
 
-    private static let bottomID = "page-question-bottom"
+    private static let bottomID = "book-chat-bottom"
 
     private var api: BackendAPI {
         BackendAPI(
@@ -58,17 +55,18 @@ struct BookAIPanel: View {
 
     var body: some View {
         NavigationStack {
-            rootContent
+            messagesArea
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+                .background(Color(.systemBackground).ignoresSafeArea())
                 .navigationTitle(contextLabel)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
         }
-        .background(Color(.systemBackground))
         .onAppear {
             scopedContext = incomingContext
             store.activate(incomingContext)
         }
+        .onDisappear { voiceInput.stop() }
         .onChange(of: incomingContext) { _, newContext in
             guard citationDestination == nil else { return }
             scopedContext = newContext
@@ -78,308 +76,182 @@ struct BookAIPanel: View {
             guard let destination = citationDestination, pages.contains(destination) else { return }
             citationDestination = nil
         }
+        .onChange(of: voiceInput.transcript) { _, transcript in
+            guard !transcript.isEmpty else { return }
+            store.draft = dictationPrefix + transcript
+        }
+        .onChange(of: voiceInput.errorMessage) { _, error in
+            if let error { voiceError = error }
+        }
     }
 
     // MARK: - Navigation
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if store.hasContent {
-            ToolbarItem(placement: .topBarTrailing) {
-                newQuestionMenu
-            }
-        }
         if store.hasConversation {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    store.clear()
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Neue Unterhaltung")
+
                 Menu {
-                    Button("Verlauf dieser Seite leeren", systemImage: "eraser") {
+                    Button("Unterhaltung leeren", systemImage: "eraser", role: .destructive) {
                         store.clear()
                     }
                 } label: {
-                    Image(systemName: "eraser")
+                    Image(systemName: "ellipsis")
                 }
-                .accessibilityLabel("Verlauf dieser Seite leeren")
+                .accessibilityLabel("Chatoptionen")
             }
         }
     }
 
-    private var newQuestionMenu: some View {
-        Menu {
-            Button("Aufgabe lösen", systemImage: "function", action: presentExercise)
-                .disabled(!canAsk)
-            Button("Seite erklären", systemImage: "text.book.closed") {
-                send("Seite erklären", request: BookAIPrompts.explainPage)
-            }
-            .disabled(!canAsk)
-            Button("Kurz zusammenfassen", systemImage: "text.alignleft") {
-                send("Kurz zusammenfassen", request: BookAIPrompts.summarizePage)
-            }
-            .disabled(!canAsk)
-            Button("Abbildung erklären", systemImage: "photo") {
-                send("Abbildung erklären", request: BookAIPrompts.explainFigure)
-            }
-            .disabled(!canAsk)
-            Divider()
-            Button(
-                activeRegion == nil ? "Bereich markieren" : "Anderen Bereich markieren",
-                systemImage: "rectangle.dashed",
-                action: requestRegion
-            )
-        } label: {
-            Label("Neue Frage", systemImage: "square.and.pencil")
-        }
-        .accessibilityLabel("Neue Frage oder Aktion")
-    }
-
-    // MARK: - Start and actions
+    // MARK: - Messages
 
     @ViewBuilder
-    private var rootContent: some View {
-        if store.turns.isEmpty, store.pending == nil, store.errorMessage == nil {
-            actionList
-        } else {
-            thread
-        }
-    }
-
-    private var actionList: some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Wobei soll ich helfen?")
-                        .font(.title3.weight(.semibold))
-                    Text(activeRegion == nil
-                        ? "Wähle eine Aktion oder stelle unten eine eigene Frage."
-                        : "Die nächste Frage bezieht sich auf den markierten Bereich.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .listRowSeparator(.hidden)
-                .padding(.vertical, 6)
-            }
-
-            Section {
-                Button(action: presentExercise) {
-                    actionLabel(
-                        "Aufgabe lösen",
-                        detail: "Aufgabennummer eingeben",
-                        symbol: "function"
-                    )
-                }
-                .foregroundStyle(.primary)
-                .disabled(!canAsk)
-
-                if showingExercise {
-                    exerciseEditor
-                        .listRowSeparator(.hidden)
-                }
-
-                actionButton(
-                    "Seite erklären",
-                    detail: "Kernaussage, Begriffe und Zusammenhänge",
-                    symbol: "text.book.closed",
-                    request: BookAIPrompts.explainPage
-                )
-                actionButton(
-                    "Kurz zusammenfassen",
-                    detail: "Das Wichtigste auf einen Blick",
-                    symbol: "text.alignleft",
-                    request: BookAIPrompts.summarizePage
-                )
-                actionButton(
-                    "Abbildung erklären",
-                    detail: "Darstellung lesen und einordnen",
-                    symbol: "photo",
-                    request: BookAIPrompts.explainFigure
-                )
-            }
-
-            Section {
-                Button {
-                    requestRegion()
-                } label: {
-                    actionLabel(
-                        activeRegion == nil ? "Bereich markieren" : "Anderen Bereich markieren",
-                        detail: "Mit Finger oder Apple Pencil auswählen",
-                        symbol: "rectangle.dashed"
-                    )
-                }
-                .foregroundStyle(.primary)
-
-                if activeRegion != nil {
-                    Button {
-                        useCurrentPage()
-                    } label: {
-                        actionLabel(
-                            "Ganze Seite verwenden",
-                            detail: "Markierung für die nächste Frage aufheben",
-                            symbol: "doc"
-                        )
-                    }
-                    .foregroundStyle(.primary)
-                }
-            }
-
-            if !model.connectivity.isOnline {
-                Section {
-                    Label(
-                        "Fragen benötigen eine Serververbindung. Das Buch bleibt verfügbar.",
-                        systemImage: "wifi.slash"
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Color(.systemBackground))
-    }
-
-    private func actionButton(
-        _ title: String,
-        detail: String,
-        symbol: String,
-        request: String
-    ) -> some View {
-        Button {
-            send(title, request: request)
-        } label: {
-            actionLabel(title, detail: detail, symbol: symbol)
-        }
-        .foregroundStyle(.primary)
-        .disabled(!canAsk)
-    }
-
-    private func actionLabel(_ title: String, detail: String, symbol: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.body)
-                .foregroundStyle(.tint)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.body)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-
-    private var exerciseEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Label("Aufgabe lösen", systemImage: "function")
-                    .font(.headline)
+    private var messagesArea: some View {
+        if store.turns.isEmpty, store.pending == nil {
+            VStack {
+                Text("Unterhaltung beginnen")
+                    .font(.title.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 72)
                 Spacer()
-                Button("Abbrechen", systemImage: "xmark", action: dismissExercise)
-                    .labelStyle(.iconOnly)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .accessibilityHint("Schließt die Aufgabeneingabe")
             }
-
-            Text("Gib die Nummer der Aufgabe auf \(contextLabel.lowercased()) ein.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 10) {
-                TextField("z. B. 4b", text: $exerciseNumber)
-                    .focused($exerciseFocused)
-                    .submitLabel(.send)
-                    .onSubmit(sendExercise)
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
-                    .background(
-                        Color(.tertiarySystemFill),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    )
-
-                Button("Lösen", systemImage: "arrow.up", action: sendExercise)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canAsk)
-            }
-        }
-        .padding(14)
-        .background(
-            Color(.secondarySystemBackground),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .transition(.opacity.combined(with: .move(edge: .top)))
-    }
-
-    // MARK: - Conversation
-
-    private var thread: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    ForEach(store.turns) { turn in
-                        exchange(turn)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 32)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 18) {
+                        ForEach(Array(store.turns.enumerated()), id: \.element.id) { index, turn in
+                            exchange(
+                                turn,
+                                isLast: index == store.turns.count - 1
+                            )
                             .id(turn.id)
+                        }
+                        if let pending = store.pending {
+                            userBubble(pending.question)
+                        }
+                        if store.sending {
+                            ChatThinkingIndicator()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        Color.clear.frame(height: 1).id(Self.bottomID)
                     }
-                    if showingExercise {
-                        exerciseEditor
-                    }
-                    if let pending = store.pending {
-                        working(pending.question)
-                    }
-                    if let error = store.errorMessage {
-                        failure(error)
-                    }
-                    Color.clear.frame(height: 1).id(Self.bottomID)
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 12)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Theme.Space.inset)
-            }
-            .background(Color(.systemBackground))
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: store.turns.count) { _, _ in scrollToEnd(proxy) }
-            .onChange(of: store.sending) { _, _ in scrollToEnd(proxy) }
-            .onChange(of: showingExercise) { _, visible in
-                guard visible else { return }
-                DispatchQueue.main.async { scrollToEnd(proxy) }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: store.turns.count) { scrollToBottom(proxy) }
+                .onChange(of: store.sending) { scrollToBottom(proxy) }
             }
         }
     }
 
-    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
             proxy.scrollTo(Self.bottomID, anchor: .bottom)
         }
     }
 
-    private func exchange(_ turn: BookAIStore.Turn) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Spacer(minLength: 48)
-                Text(turn.question)
-                    .font(.callout)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    private func exchange(_ turn: BookAIStore.Turn, isLast: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            userBubble(turn.question)
+            assistantMessage(turn, isLast: isLast)
+        }
+    }
+
+    private func userBubble(_ text: String) -> some View {
+        Text(renderedMarkdown(text))
+            .font(.body)
+            .lineSpacing(3)
+            .textSelection(.enabled)
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .frame(maxWidth: 640, alignment: .trailing)
+            .padding(.leading, 48)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .contextMenu {
+                Button {
+                    UIPasteboard.general.string = text
+                } label: {
+                    Label("Kopieren", systemImage: "doc.on.doc")
+                }
             }
+    }
 
-            Label("Echo", systemImage: "sparkles")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            BookAIAnswerView(text: turn.text)
+    private func assistantMessage(_ turn: BookAIStore.Turn, isLast: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(renderedMarkdown(turn.text))
+                .font(.body)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             let citations = sources(for: turn)
             if !citations.isEmpty {
                 citationDisclosure(turn, citations: citations)
             }
 
-            responseActions(turn)
+            HStack(spacing: 4) {
+                Button {
+                    copy(turn)
+                } label: {
+                    Image(systemName: copiedTurn == turn.id ? "checkmark" : "doc.on.doc")
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(copiedTurn == turn.id ? "Kopiert" : "Antwort kopieren")
+
+                if isLast, !store.sending {
+                    Button {
+                        store.retry(turn, bookID: bookID, api: api)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Antwort neu erstellen")
+                }
+                Spacer()
+            }
+
+            if isLast {
+                Text("KI kann Fehler machen. Prüfe wichtige Informationen.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
+        .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    private func copy(_ turn: BookAIStore.Turn) {
+        UIPasteboard.general.string = turn.text
+        withAnimation { copiedTurn = turn.id }
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            if copiedTurn == turn.id {
+                withAnimation { copiedTurn = nil }
+            }
+        }
+    }
+
+    // MARK: - Citations
 
     private func citationDisclosure(
         _ turn: BookAIStore.Turn,
@@ -431,7 +303,11 @@ struct BookAIPanel: View {
             get: { expandedCitations.contains(id) },
             set: { expanded in
                 withAnimation(reduceMotion ? nil : .default) {
-                    if expanded { expandedCitations.insert(id) } else { expandedCitations.remove(id) }
+                    if expanded {
+                        expandedCitations.insert(id)
+                    } else {
+                        expandedCitations.remove(id)
+                    }
                 }
             }
         )
@@ -453,195 +329,122 @@ struct BookAIPanel: View {
         return result.sorted { $0.pdfPage < $1.pdfPage }
     }
 
-    private func responseActions(_ turn: BookAIStore.Turn) -> some View {
-        HStack(spacing: 2) {
-            Button {
-                UIPasteboard.general.string = turn.text
-                copiedTurn = turn.id
-                Task {
-                    try? await Task.sleep(for: .seconds(1.5))
-                    if copiedTurn == turn.id { copiedTurn = nil }
-                }
-            } label: {
-                Image(systemName: copiedTurn == turn.id ? "checkmark" : "doc.on.doc")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel(copiedTurn == turn.id ? "Antwort kopiert" : "Antwort kopieren")
-
-            Button {
-                speaker.speak(turn.text)
-            } label: {
-                Image(systemName: "speaker.wave.2")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("Antwort vorlesen")
-
-            ShareLink(item: shareText(turn)) {
-                Image(systemName: "square.and.arrow.up")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("Antwort teilen")
-
-            Menu {
-                Button("Kürzer erklären", systemImage: "text.badge.minus") {
-                    store.ask(
-                        "Kürzer erklären",
-                        bookID: bookID,
-                        api: api,
-                        request: BookAIPrompts.shorterFollowUp,
-                        after: turn
-                    )
-                }
-                Button("Erneut versuchen", systemImage: "arrow.clockwise") {
-                    store.retry(turn, bookID: bookID, api: api)
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("Weitere Antwortaktionen")
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .sensoryFeedback(.success, trigger: copiedTurn)
-    }
-
-    private func shareText(_ turn: BookAIStore.Turn) -> String {
-        let sources = sources(for: turn).map {
-            numbering.citationLabel(pdfPage: $0.pdfPage)
-        }.joined(separator: ", ")
-        return sources.isEmpty
-            ? "\(turn.text)\n\nMit Echo aus \(bookTitle)"
-            : "\(turn.text)\n\nQuellen: \(sources)\nMit Echo aus \(bookTitle)"
-    }
-
-    private func working(_ question: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Spacer(minLength: 48)
-                Text(question)
-                    .font(.callout)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text(activeRegion == nil
-                    ? "Analysiert Seite \(pageLabel)…"
-                    : "Analysiert den markierten Bereich…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-                Button("Stoppen") { store.cancel() }
-                    .font(.caption)
-                    .frame(minHeight: 44)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func failure(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.footnote)
-                .foregroundStyle(.red)
-            if store.lastFailed != nil, model.connectivity.isOnline {
-                Button("Erneut versuchen") {
-                    store.retryLastFailure(bookID: bookID, api: api)
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     // MARK: - Composer
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !model.connectivity.isOnline {
-                Label("Ohne Serververbindung — Lesen geht weiter, Fragen nicht.", systemImage: "wifi.slash")
-                    .font(.caption)
+        VStack(spacing: 7) {
+            composerStatus
+
+            VStack(spacing: 0) {
+                TextField(
+                    store.turns.isEmpty ? "Was möchtest du wissen?" : "Nachricht",
+                    text: draftBinding,
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .lineLimit(1 ... 5)
+                .focused($inputFocused)
+                .submitLabel(.send)
+                .onSubmit(sendDraft)
+                .padding(.horizontal, 16)
+                .padding(.top, 15)
+                .padding(.bottom, 10)
+                .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
+
+                HStack(spacing: 10) {
+                    contextMenu
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        if voiceInput.isRecording {
+                            voiceInput.stop()
+                        } else {
+                            voiceError = nil
+                            dictationPrefix = store.draft.isEmpty ? "" : store.draft + " "
+                            Task { await voiceInput.start() }
+                        }
+                    } label: {
+                        ZStack {
+                            if voiceInput.isRecording {
+                                Circle()
+                                    .fill(.red.opacity(0.16))
+                                    .frame(width: 38, height: 38)
+                            }
+                            Image(systemName: voiceInput.isRecording ? "stop.fill" : "mic.fill")
+                                .font(.system(size: 19))
+                                .foregroundStyle(voiceInput.isRecording ? .red : .secondary)
+                                .frame(width: 30, height: 30)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.sending || model.phase == .recording)
+                    .accessibilityLabel(voiceInput.isRecording ? "Diktat beenden" : "Frage diktieren")
+
+                    Button {
+                        if store.sending { store.cancel() } else { sendDraft() }
+                    } label: {
+                        Image(systemName: store.sending ? "stop.fill" : "arrow.up")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.regular)
+                    .disabled(!store.sending && !canSend)
+                    .accessibilityLabel(store.sending ? "Antwort stoppen" : "Nachricht senden")
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
+            }
+            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
+        }
+        .frame(maxWidth: 620)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
+    }
+
+    private var contextMenu: some View {
+        Menu {
+            Button("Aktuelle Seite", systemImage: activeRegion == nil ? "checkmark" : "doc") {
+                useCurrentPage()
+            }
+            .disabled(activeRegion == nil && context.pages == visiblePages)
+
+            Button("Bereich markieren", systemImage: "rectangle.dashed") {
+                requestRegion()
+            }
+        } label: {
+            if activeRegion != nil {
+                Label("Ausschnitt", systemImage: "rectangle.dashed")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .padding(.horizontal, 9)
+                    .frame(height: 32)
+                    .background(Theme.accent.opacity(0.1), in: Capsule())
+            } else {
+                Image(systemName: "text.book.closed")
+                    .font(.system(size: 18))
                     .foregroundStyle(.secondary)
-            }
-
-            Menu {
-                Button("Aktuelle Seite", systemImage: "doc", action: useCurrentPage)
-                    .disabled(activeRegion == nil && context.pages == visiblePages)
-                Button("Bereich markieren", systemImage: "rectangle.dashed") { requestRegion() }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: activeRegion == nil ? "doc" : "rectangle.dashed")
-                    Text(contextLabel)
-                    Image(systemName: "chevron.down").font(.caption2)
-                }
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.tint)
-                .frame(minHeight: 36)
-            }
-
-            if !store.sending, !store.turns.isEmpty {
-                followUps
-            }
-
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(fieldPrompt, text: draftBinding, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1 ... 5)
-                    .focused($inputFocused)
-                    .submitLabel(.send)
-                    .onSubmit(sendDraft)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
-
-                Button {
-                    if store.sending { store.cancel() } else { sendDraft() }
-                } label: {
-                    Image(systemName: store.sending ? "stop.fill" : "arrow.up")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.circle)
-                .controlSize(.large)
-                .disabled(!store.sending && !canSend)
-                .accessibilityLabel(store.sending ? "Antwort stoppen" : "Frage senden")
+                    .frame(width: 30, height: 30)
             }
         }
-        .padding(.horizontal, Theme.Space.inset)
-        .padding(.top, 7)
-        .padding(.bottom, 10)
-        .background(.bar)
+        .accessibilityLabel("Kontext: \(contextLabel)")
     }
 
-    private var followUps: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                followUp("Einfacher", BookAIPrompts.simplerFollowUp)
-                followUp("Beispiel", BookAIPrompts.exampleFollowUp)
-                followUp("Schritt für Schritt", BookAIPrompts.stepsFollowUp)
-                followUp("Warum?", BookAIPrompts.whyFollowUp)
-            }
+    @ViewBuilder
+    private var composerStatus: some View {
+        if let error = voiceError ?? store.errorMessage {
+            ChatStatusPill(error, systemImage: "exclamationmark.triangle.fill", tint: .red)
+        } else if !model.connectivity.isOnline {
+            ChatStatusPill("Offline — Senden ist gerade nicht möglich.", systemImage: "wifi.slash")
         }
-        .scrollIndicators(.hidden)
-    }
-
-    private func followUp(_ label: String, _ request: String) -> some View {
-        Button(label) { send(label, request: request) }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .frame(minHeight: 44)
-            .disabled(!canAsk)
     }
 
     private var draftBinding: Binding<String> {
         Binding(get: { store.draft }, set: { store.draft = $0 })
-    }
-
-    private var fieldPrompt: String {
-        store.turns.isEmpty ? "Frage zu \(contextLabel.lowercased())…" : "Nachfragen…"
     }
 
     private var canAsk: Bool {
@@ -650,44 +453,15 @@ struct BookAIPanel: View {
 
     private var canSend: Bool { store.canSend && canAsk }
 
-    private func send(_ question: String, request: String? = nil) {
-        guard canAsk else { return }
-        inputFocused = false
-        exerciseFocused = false
-        withAnimation(reduceMotion ? nil : .default) {
-            showingExercise = false
-            detent = .large
-        }
-        store.ask(question, bookID: bookID, api: api, request: request)
-    }
-
     private func sendDraft() {
         guard canSend else { return }
-        send(store.draft)
-    }
-
-    private func sendExercise() {
-        let number = exerciseNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !number.isEmpty, canAsk else { return }
-        exerciseNumber = ""
-        send("Aufgabe \(number) lösen", request: BookAIPrompts.solveExercise(number))
-    }
-
-    private func presentExercise() {
-        guard canAsk else { return }
-        exerciseNumber = ""
-        withAnimation(reduceMotion ? nil : .snappy) {
-            showingExercise = true
+        voiceInput.stop()
+        voiceError = nil
+        inputFocused = false
+        withAnimation(reduceMotion ? nil : .default) {
             detent = .large
         }
-        DispatchQueue.main.async { exerciseFocused = true }
-    }
-
-    private func dismissExercise() {
-        exerciseFocused = false
-        withAnimation(reduceMotion ? nil : .snappy) {
-            showingExercise = false
-        }
+        store.ask(store.draft, bookID: bookID, api: api)
     }
 
     private func useCurrentPage() {
@@ -696,19 +470,5 @@ struct BookAIPanel: View {
         scopedContext = pageContext
         store.activate(pageContext)
         clearRegion()
-    }
-}
-
-/// Kept alive while the panel is presented; recreating the synthesizer on
-/// every redraw can swallow the beginning of an utterance.
-private final class BookAnswerSpeaker {
-    private let synthesizer = AVSpeechSynthesizer()
-
-    func speak(_ text: String) {
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "de-DE")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        synthesizer.speak(utterance)
     }
 }

@@ -161,17 +161,17 @@ numbers, and tapping one turns the reader without throwing the answer away.
 Reading a downloaded book stays offline; asking about it needs the server.
 
 Each page or spread has its own short thread. Turning the page switches context
-instead of quietly attaching a follow-up to the previous page. The first view
-offers full-size actions to explain, summarize or inspect an illustration, plus
-a dedicated exercise-number field. After an answer, compact follow-ups can make
-it simpler, shorter or step-by-step; answers can also be copied, shared, retried
-and read aloud. Sources stay collapsed until wanted.
+instead of quietly attaching a follow-up to the previous page. The panel uses
+the same conversation layout and composer as Chat: questions are free-form,
+can be typed or dictated, and answers can be copied or generated again. There
+are no preset task, explanation, summary or illustration actions. Sources stay
+collapsed until wanted.
 
-For something more precise than an exercise number, **Bereich markieren** closes
-the panel and lets the student draw a rectangle directly on the PDF with a finger
-or Apple Pencil. Echo sends only the page number and normalized rectangle
-coordinates, not a screenshot. That marked region gets its own thread and remains
-outlined while the answer is compared with the book.
+For something more precise than the current page, **Bereich markieren** closes
+the panel and lets the student draw a rectangle directly on the PDF with a
+finger or Apple Pencil. Echo sends only the page number and normalized rectangle
+coordinates, not a screenshot. That marked region gets its own thread and
+remains outlined while the answer is compared with the book.
 
 <p align="center">
   <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">

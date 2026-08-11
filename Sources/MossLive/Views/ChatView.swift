@@ -599,7 +599,7 @@ private struct ChatMessageRow: View {
     }
 }
 
-private struct ChatThinkingIndicator: View {
+struct ChatThinkingIndicator: View {
     @State private var activeDot = 0
 
     var body: some View {
@@ -623,7 +623,7 @@ private struct ChatThinkingIndicator: View {
     }
 }
 
-private struct ChatStatusPill: View {
+struct ChatStatusPill: View {
     let text: String
     let systemImage: String
     let tint: Color
