@@ -25,7 +25,6 @@ struct MossLiveApp: App {
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var pendingNoteImportCount = 0
 
     /// Which place the sidebar is on. It lives on the model rather than in this
@@ -34,8 +33,12 @@ struct MainTabView: View {
         Binding(get: { model.selectedTab }, set: { model.selectedTab = $0 })
     }
 
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(get: { model.columnVisibility }, set: { model.columnVisibility = $0 })
+    }
+
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: columnVisibility) {
             List(AppTab.navigation, selection: selection) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)

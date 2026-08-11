@@ -52,6 +52,10 @@ final class AppModel {
     /// state ("Zur Aufnahme") instead of describing it.
     var selectedTab: AppTab? = .aufnahme
 
+    /// Shared with pushed detail screens so they can preserve the system's
+    /// reveal affordance when the split view has been collapsed.
+    var columnVisibility: NavigationSplitViewVisibility = .all
+
     let settings = AppSettings()
     let timetable: TimetableStore
     let chat = ChatStore()

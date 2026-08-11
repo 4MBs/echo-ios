@@ -1,14 +1,21 @@
 import PDFKit
 import SwiftUI
 
+private let bookTitleCharacterLimit = 32
+
 /// One book, presented like the web reader the schoolbooks come from: a page —
 /// or a spread — fills the screen, you flick sideways to turn, and a bottom bar
 /// carries page navigation plus the one-page / two-page switcher. The first
 /// open downloads the PDF from the server once; after that the persistent
 /// on-device copy opens instantly.
 struct BookReaderView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let api: BackendAPI
     let book: BackendAPI.Book
+
+    @AppStorage private var renamedTitle: String
 
     private enum Phase {
         case downloading(Double)
@@ -17,6 +24,16 @@ struct BookReaderView: View {
     }
 
     @State private var phase: Phase?
+    @State private var askingBookAI = false
+    @State private var bookAIDetent: PresentationDetent = .medium
+    @State private var renamingBook = false
+    @State private var typedBookTitle = ""
+
+    init(api: BackendAPI, book: BackendAPI.Book) {
+        self.api = api
+        self.book = book
+        _renamedTitle = AppStorage(wrappedValue: "", "library.bookTitle.\(book.id)")
+    }
 
     var body: some View {
         // Keep the task attached to one concrete container. `Group` is
@@ -28,15 +45,121 @@ struct BookReaderView: View {
             case .none, .downloading:
                 downloadProgress
             case .ready(let url):
-                PDFReader(url: url, book: book)
+                PDFReader(
+                    url: url,
+                    book: book,
+                    bookTitle: displayedTitle,
+                    askingBookAI: $askingBookAI,
+                    bookAIDetent: $bookAIDetent
+                )
             case .failed(let error):
                 ErrorState(error) { await open() }
                     .groupedScreen()
             }
         }
-        .navigationTitle(book.title)
+        .navigationTitle(displayedTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // Install the assistant control for the destination's full lifetime.
+        // It now participates in the navigation push instead of popping into
+        // place after the PDF loads, and the leading slot remains available
+        // for iPadOS' back and collapsed-sidebar controls.
+        .toolbar {
+            if sidebarCollapsed {
+                ToolbarItem(placement: .topBarLeading) { revealSidebarButton }
+            }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                bookAIButton
+                bookMenu
+            }
+        }
         .task(id: book.id) { await open() }
+        .onChange(of: typedBookTitle) { _, title in
+            let limited = String(title.prefix(bookTitleCharacterLimit))
+            if limited != title { typedBookTitle = limited }
+        }
+        .alert("Buch umbenennen", isPresented: $renamingBook) {
+            TextField("Buchname", text: $typedBookTitle)
+            Button("Abbrechen", role: .cancel) {}
+            Button("Sichern", action: saveBookTitle)
+                .disabled(typedBookTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Der Name darf höchstens \(bookTitleCharacterLimit) Zeichen lang sein.")
+        }
+    }
+
+    private var displayedTitle: String {
+        let custom = renamedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = custom.isEmpty ? book.title : custom
+        guard source.count > bookTitleCharacterLimit else { return source }
+        return String(source.prefix(bookTitleCharacterLimit - 1)) + "…"
+    }
+
+    private var assistantAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.42)
+    }
+
+    private var sidebarCollapsed: Bool {
+        if case .detailOnly = model.columnVisibility { return true }
+        return false
+    }
+
+    private var revealSidebarButton: some View {
+        Button {
+            withAnimation(assistantAnimation) {
+                model.columnVisibility = .all
+            }
+        } label: {
+            Image(systemName: "sidebar.leading")
+        }
+        .accessibilityLabel("Seitenleiste einblenden")
+    }
+
+    private var bookAIButton: some View {
+        Button {
+            if !askingBookAI {
+                bookAIDetent = .medium
+            }
+            withAnimation(assistantAnimation) {
+                askingBookAI.toggle()
+            }
+        } label: {
+            Label("Seite fragen", systemImage: "sparkles")
+                .labelStyle(.titleAndIcon)
+        }
+        .accessibilityLabel(askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
+    }
+
+    private var bookMenu: some View {
+        Menu {
+            Button(action: beginRenamingBook) {
+                Label("Buch umbenennen…", systemImage: "pencil")
+            }
+
+            if !renamedTitle.isEmpty {
+                Button(role: .destructive) {
+                    renamedTitle = ""
+                } label: {
+                    Label("Originalnamen wiederherstellen", systemImage: "arrow.uturn.backward")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel("Buchoptionen")
+    }
+
+    private func beginRenamingBook() {
+        let source = renamedTitle.isEmpty ? book.title : renamedTitle
+        typedBookTitle = String(source.prefix(bookTitleCharacterLimit))
+        renamingBook = true
+    }
+
+    private func saveBookTitle() {
+        renamedTitle = String(
+            typedBookTitle
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(bookTitleCharacterLimit)
+        )
     }
 
     private var downloadProgress: some View {
@@ -73,28 +196,41 @@ struct BookReaderView: View {
             }
             phase = .ready(url)
         } catch {
+            askingBookAI = false
             phase = .failed(error)
         }
     }
 }
 
 /// The reader itself: a PDFKit page view with page controls underneath and
-/// "Seite fragen" in the upper-left toolbar.
+/// "Seite fragen" in the reader's stable navigation toolbar.
 private struct PDFReader: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let url: URL
     let book: BackendAPI.Book
+    let bookTitle: String
+    @Binding var askingBookAI: Bool
+    @Binding var bookAIDetent: PresentationDetent
 
     /// Printed page number minus PDF page number. Schoolbooks put a cover and
     /// often a few unnumbered pages in front, so the two rarely line up — and
     /// the shift differs per book, which is why it is stored per book.
     @AppStorage private var pageOffset: Int
 
-    init(url: URL, book: BackendAPI.Book) {
+    init(
+        url: URL,
+        book: BackendAPI.Book,
+        bookTitle: String,
+        askingBookAI: Binding<Bool>,
+        bookAIDetent: Binding<PresentationDetent>
+    ) {
         self.url = url
         self.book = book
+        self.bookTitle = bookTitle
+        _askingBookAI = askingBookAI
+        _bookAIDetent = bookAIDetent
         _pageOffset = AppStorage(wrappedValue: 0, "reader.pageOffset.\(book.id)")
     }
 
@@ -105,8 +241,6 @@ private struct PDFReader: View {
     @State private var pageCount = 0
     @State private var proxy = PDFViewProxy()
     @State private var bookAI = BookAIStore()
-    @State private var askingBookAI = false
-    @State private var bookAIDetent: PresentationDetent = .medium
     @State private var selectedRegion: BackendAPI.BookPageRegion?
     @State private var selectingRegion = false
     @State private var askingForPage = false
@@ -151,12 +285,6 @@ private struct PDFReader: View {
                 document = await Task.detached(priority: .userInitiated) {
                     LoadedDocument(document: PDFDocument(url: url))
                 }.value.document
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { bookAIButton }
-                if model.settings.showPageNumberEditor {
-                    ToolbarItem(placement: .topBarTrailing) { readerMenu }
-                }
             }
             // One adaptive presentation, not a hand-switched HStack and sheet.
             // SwiftUI keeps the panel as a trailing column on an iPad and adapts
@@ -219,31 +347,10 @@ private struct PDFReader: View {
 
     // MARK: - Seite fragen
 
-    /// Only ever here, inside an open book: the assistant answers questions on
-    /// "this page", which the shelf outside has no answer for.
-    ///
-    /// The sparkle is the assistant's single open/close control. The assistant
-    /// itself deliberately has no duplicate close button.
-    private var bookAIButton: some View {
-        Button(action: toggleBookAI) {
-            Label("Seite fragen", systemImage: "sparkles")
-                .labelStyle(.titleAndIcon)
-        }
-        .accessibilityLabel(askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
-    }
-
-    private func toggleBookAI() {
-        if !askingBookAI {
-            bookAIDetent = .medium
-        }
-        withAnimation(assistantAnimation) {
-            askingBookAI.toggle()
-        }
-    }
-
     private var bookAIPanel: some View {
         BookAIPanel(
             bookID: book.id,
+            bookTitle: bookTitle,
             numbering: numbering,
             visiblePages: visiblePages,
             region: selectedRegion,
@@ -325,34 +432,6 @@ private struct PDFReader: View {
         selectingRegion = false
         proxy.cancelRegionSelection()
         proxy.clearRegionSelection()
-    }
-
-    /// Set once per book and then forgotten, so it belongs in the navigation
-    /// bar's overflow menu rather than anywhere near the reading controls — and
-    /// can be taken off the screen entirely from Einstellungen once every book
-    /// has been lined up.
-    private var readerMenu: some View {
-        Menu {
-            Button {
-                numberingPage = currentPage
-                numberingPlaceholder = printedLabel(currentPage)
-                typedNumbering = ""
-                adjustingNumbering = true
-            } label: {
-                Label("Seitenzahlen anpassen…", systemImage: "textformat.123")
-            }
-
-            if pageOffset != 0 {
-                Button(role: .destructive) {
-                    pageOffset = 0
-                } label: {
-                    Label("Nummerierung zurücksetzen", systemImage: "arrow.uturn.backward")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-        }
-        .popover(isPresented: $adjustingNumbering) { numberingEditor }
     }
 
     /// Teach the reader where the printed numbering starts: turn to a page whose
@@ -534,11 +613,33 @@ private struct PDFReader: View {
                     .tag(true)
             }
             .pickerStyle(.inline)
+
+            if model.settings.showPageNumberEditor {
+                Divider()
+
+                Button {
+                    numberingPage = currentPage
+                    numberingPlaceholder = printedLabel(currentPage)
+                    typedNumbering = ""
+                    adjustingNumbering = true
+                } label: {
+                    Label("Seitenzahlen anpassen…", systemImage: "textformat.123")
+                }
+
+                if pageOffset != 0 {
+                    Button(role: .destructive) {
+                        pageOffset = 0
+                    } label: {
+                        Label("Nummerierung zurücksetzen", systemImage: "arrow.uturn.backward")
+                    }
+                }
+            }
         } label: {
             Image(systemName: twoUp ? "rectangle.portrait.on.rectangle.portrait" : "rectangle.portrait")
         }
         .buttonStyle(.glass)
         .accessibilityLabel("Seitendarstellung")
+        .popover(isPresented: $adjustingNumbering) { numberingEditor }
     }
 }
 

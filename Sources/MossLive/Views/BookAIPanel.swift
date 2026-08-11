@@ -9,6 +9,7 @@ struct BookAIPanel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let bookID: String
+    let bookTitle: String
     let numbering: BookPageNumbering
     let visiblePages: [Int]
     let region: BackendAPI.BookPageRegion?
@@ -58,7 +59,10 @@ struct BookAIPanel: View {
             messagesArea
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
                 .background(Color.black.ignoresSafeArea())
-                .navigationTitle(contextLabel)
+                // The adaptive inspector briefly shares navigation updates
+                // with its presenting reader while attaching. Keeping the same
+                // title prevents a page label from replacing the book name.
+                .navigationTitle(bookTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(Color.black, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
