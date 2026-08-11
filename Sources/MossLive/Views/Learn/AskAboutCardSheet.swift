@@ -16,6 +16,7 @@ struct AskAboutCardSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var question = ""
     @State private var turns: [Turn] = []
@@ -27,6 +28,7 @@ struct AskAboutCardSheet: View {
         let id = UUID()
         let mine: Bool
         let text: String
+        let date = Date()
     }
 
     /// Openers that are worth a tap because they are the three things a student
@@ -65,9 +67,12 @@ struct AskAboutCardSheet: View {
                     .frame(maxWidth: .infinity)
                     .padding(Theme.Space.screen)
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: turns.count) { _, _ in
                     guard let last = turns.last else { return }
-                    withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
                 }
             }
             .groupedScreen()
@@ -116,17 +121,47 @@ struct AskAboutCardSheet: View {
         return card.lessonTitle?.trimmingCharacters(in: .whitespaces).nilWhenEmpty
     }
 
+    @ViewBuilder
     private func bubble(_ turn: Turn) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(turn.mine ? "Du" : "Echo")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(turn.mine ? AttributedString(turn.text) : renderedMarkdown(turn.text))
-                .font(.body)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        if turn.mine {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(AttributedString(turn.text))
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        Theme.accent,
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    )
+                    .frame(maxWidth: Theme.Width.readable * 0.85, alignment: .trailing)
+                messageMetadata(turn, copyLabel: "Frage kopieren")
+            }
+            .padding(.leading, 48)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(renderedMarkdown(turn.text))
+                    .font(.body)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                messageMetadata(turn, copyLabel: "Antwort kopieren")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func messageMetadata(_ turn: Turn, copyLabel: String) -> some View {
+        HStack(spacing: 2) {
+            if turn.mine { Spacer(minLength: 0) }
+            CopyFeedbackButton(text: turn.text, accessibilityLabel: copyLabel)
+            Text(turn.date.formatted(date: .omitted, time: .shortened))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
+            if !turn.mine { Spacer(minLength: 0) }
+        }
     }
 
     // MARK: - Asking
@@ -148,28 +183,34 @@ struct AskAboutCardSheet: View {
                 }
                 .scrollIndicators(.hidden)
             }
-            HStack(spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
                 TextField("Frag zu dieser Karte", text: $question, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .lineLimit(1 ... 4)
                     .focused($writing)
+                    .submitLabel(.send)
                     .onSubmit { send(question) }
+                    .padding(.leading, 8)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
                 Button {
                     send(question)
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                    Image(systemName: "arrow.up")
+                        .font(.subheadline.weight(.semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.circle)
+                .controlSize(.large)
                 .disabled(sending || question.trimmingCharacters(in: .whitespaces).isEmpty)
                 .accessibilityLabel("Frage senden")
             }
+            .padding(6)
+            .floatingComposerSurface(cornerRadius: writing ? 22 : 28)
             .padding(.horizontal, Theme.Space.screen)
+            .animation(reduceMotion ? nil : .snappy, value: writing)
         }
         .padding(.vertical, 10)
-        .background(.bar)
     }
 
     private func send(_ text: String) {

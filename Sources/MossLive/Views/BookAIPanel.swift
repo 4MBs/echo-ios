@@ -601,9 +601,9 @@ struct BookAIPanel: View {
                     .focused($inputFocused)
                     .submitLabel(.send)
                     .onSubmit(sendDraft)
-                    .padding(.horizontal, 14)
+                    .padding(.leading, 8)
                     .padding(.vertical, 10)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
+                    .frame(minHeight: 44)
 
                 Button {
                     if store.sending { store.cancel() } else { sendDraft() }
@@ -618,10 +618,12 @@ struct BookAIPanel: View {
                 .accessibilityLabel(store.sending ? "Antwort stoppen" : "Frage senden")
             }
         }
+        .padding(10)
+        .floatingComposerSurface(cornerRadius: inputFocused ? 20 : 24)
         .padding(.horizontal, Theme.Space.inset)
-        .padding(.top, 7)
+        .padding(.top, 8)
         .padding(.bottom, 10)
-        .background(.bar)
+        .animation(reduceMotion ? nil : .snappy, value: inputFocused)
     }
 
     private var followUps: some View {

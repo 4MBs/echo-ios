@@ -135,11 +135,13 @@ struct RecordDeck: View {
 /// by two sine waves, so it can be animated by moving their phase, and it stays
 /// sharp at any size.
 ///
-/// The phase is read from a timeline rather than driven by a repeating
-/// animation. The shape is identical; what goes away is the jump every time such
-/// an animation reaches its end and starts over.
+/// While active, the phase is read from a timeline rather than driven by a
+/// repeating animation. The shape is identical; what goes away is the jump
+/// every time such an animation reaches its end and starts over. At rest it
+/// settles into a single frame rather than spending battery on decoration.
 struct RecordButton: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The shot's palette, as hue/saturation/brightness so the tint setting can
     /// turn all four together and keep them related to each other.
@@ -176,23 +178,19 @@ struct RecordButton: View {
                 Task { await model.startRecording() }
             }
         } label: {
-            // One timeline for everything that moves, at sixty frames rather
-            // than the thirty this was pinned to. Thirty was justified by the
-            // microphone reporting sixteen times a second, but the phase is a
-            // continuous drift and not a sampled signal, and thirty steps of it
-            // are visible.
-            //
-            // Not the display's full rate: each frame costs a blur, a shadow
-            // and a rasterisation, and everything driven from this clock is
-            // slow — a seven-second turn, a one-second sway. The one fast thing
-            // on the control is the height of the bars, and that is interpolated
-            // by the render server at whatever the display runs at, timeline or
-            // no timeline.
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
-                let time = context.date.timeIntervalSinceReferenceDate
-                ZStack {
-                    blob(at: time)
-                    Waveform(color: tint(Self.deep).opacity(0.85), time: time)
+            Group {
+                // Continuous decorative timelines are expensive on a ProMotion
+                // display. Motion is useful while the microphone is active,
+                // because it carries state; at rest it is decoration, so the
+                // same control settles into one sharp frame. Reduce Motion gets
+                // that calm frame throughout while live level updates still
+                // reshape the waveform as samples arrive.
+                if isActive, !reduceMotion {
+                    TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+                        control(at: context.date.timeIntervalSinceReferenceDate)
+                    }
+                } else {
+                    control(at: 0)
                 }
             }
             .frame(width: 108, height: 108)
@@ -203,8 +201,15 @@ struct RecordButton: View {
         .accessibilityLabel(isActive ? "Aufnahme beenden" : "Aufnahme starten")
     }
 
+    private func control(at time: TimeInterval) -> some View {
+        ZStack {
+            blob(at: time)
+            Waveform(color: tint(Self.deep).opacity(0.85), time: time)
+        }
+    }
+
     private func blob(at time: TimeInterval) -> some View {
-        // one slow turn of the phase, forever — the blob never settles
+        // one slow turn of the phase for as long as the control is active
         let phase = time * 2 * .pi / 7
         let heard = glowLevel
 
@@ -236,7 +241,7 @@ struct RecordButton: View {
     }
 
     /// Two paler blobs, larger and slower, turning the wrong way — the halo in
-    /// the shot, and the only thing moving on the screen at rest.
+    /// the shot while recording and a quiet, fixed silhouette at rest.
     ///
     /// It breathes with the room now: louder swells it and softens its edge,
     /// which is what makes it read as a glow rather than as two pale shapes
@@ -296,10 +301,11 @@ struct RecordButton: View {
 /// below, where it belongs — in the level, not in the curve.
 struct Waveform: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let color: Color
-    /// The clock the idle sway is drawn from, handed down from the control's own
-    /// timeline so the bars and the blob move off the same one.
+    /// The clock the active sway is drawn from, handed down from the control's
+    /// own timeline so the bars and the blob move off the same one.
     let time: TimeInterval
 
     /// One bar. Every field differs between the five, so nothing about them can
@@ -348,7 +354,10 @@ struct Waveform: View {
                 Capsule()
                     .fill(color)
                     .frame(width: 5, height: height)
-                    .animation(.interpolatingSpring(duration: 0.18, bounce: 0.1), value: height)
+                    .animation(
+                        reduceMotion ? nil : .interpolatingSpring(duration: 0.18, bounce: 0.1),
+                        value: height
+                    )
                     // Outside that animation's scope on purpose. The sway is a
                     // pure function of the clock, already continuous at the
                     // display's rate, and it must not be animated on top of —

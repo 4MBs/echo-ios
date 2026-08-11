@@ -142,4 +142,16 @@ extension View {
         frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground).ignoresSafeArea())
     }
+
+    /// Floating chrome for a composer or another control that stays pinned over
+    /// scrolling content. Liquid Glass is reserved for controls rather than
+    /// content cards: the material responds to the page behind it while the
+    /// shadow keeps the edge legible over text and images.
+    func floatingComposerSurface(cornerRadius: CGFloat = 24) -> some View {
+        glassEffect(
+            .regular.interactive(),
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
+    }
 }

@@ -10,6 +10,27 @@ struct MossLiveApp: App {
             MainTabView()
                 .environment(model)
         }
+        // Make the iPad's top-level places reachable without leaving the page.
+        // These appear in the system shortcut HUD when Command is held.
+        .commands {
+            CommandMenu("Bereiche") {
+                Button("Aufnahme", systemImage: "waveform") { model.selectedTab = .aufnahme }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button("Stunden", systemImage: "folder") { model.selectedTab = .stunden }
+                    .keyboardShortcut("2", modifiers: .command)
+                Button("Lernen", systemImage: "brain.head.profile") { model.selectedTab = .lernen }
+                    .keyboardShortcut("3", modifiers: .command)
+                Button("Bibliothek", systemImage: "book.closed") { model.selectedTab = .bibliothek }
+                    .keyboardShortcut("4", modifiers: .command)
+                Button("Chat mit KI", systemImage: "bubble.left.and.text.bubble.right") {
+                    model.selectedTab = .chat
+                }
+                .keyboardShortcut("5", modifiers: .command)
+                Divider()
+                Button("Einstellungen", systemImage: "gearshape") { model.selectedTab = .einstellungen }
+                    .keyboardShortcut("6", modifiers: .command)
+            }
+        }
     }
 }
 
@@ -43,6 +64,8 @@ struct MainTabView: View {
                     .badge(tab == .stunden ? pendingNoteImportCount : 0)
             }
             .listStyle(.sidebar)
+            .navigationTitle("Echo")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 sidebarFooter
