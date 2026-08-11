@@ -160,10 +160,12 @@ final class ChatStore {
         if loadPersisted,
            let saved = OfflineCache.load(SavedState.self, key: Self.storageKey),
            !saved.conversations.isEmpty {
-            conversations = saved.conversations.sorted { $0.updatedAt > $1.updatedAt }
-            selectedConversationID = conversations.contains(where: { $0.id == saved.selectedConversationID })
+            let restored = saved.conversations.sorted { $0.updatedAt > $1.updatedAt }
+            let restoredSelection = restored.contains(where: { $0.id == saved.selectedConversationID })
                 ? saved.selectedConversationID
-                : conversations[0].id
+                : restored[0].id
+            conversations = restored
+            selectedConversationID = restoredSelection
         } else {
             let conversation = Conversation()
             conversations = [conversation]
