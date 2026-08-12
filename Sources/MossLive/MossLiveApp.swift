@@ -24,6 +24,7 @@ struct MossLiveApp: App {
 /// and anything pinned to last year's numbers stops adapting with it.
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingNoteImportCount = 0
 
@@ -36,12 +37,27 @@ struct MainTabView: View {
     private var columnVisibility: Binding<NavigationSplitViewVisibility> {
         Binding(
             get: { model.columnVisibility },
-            set: { visibility in
+            set: { visibility, transaction in
                 guard visibility != model.columnVisibility else { return }
                 // NotificationCenter publishes synchronously, so the open
                 // reader can snapshot its PDF before the first resize frame.
                 NotificationCenter.default.post(name: .readerContainerWillResize, object: nil)
-                model.columnVisibility = visibility
+
+                // A custom binding does not automatically carry the system
+                // sidebar button's transaction across an observable model
+                // write. That is visible when the button is tapped just after
+                // a navigation push: the column otherwise jumps straight to
+                // its final width. Preserve the supplied transaction and give
+                // transaction-less updates their own animation.
+                var resizeTransaction = transaction
+                if !reduceMotion {
+                    resizeTransaction.disablesAnimations = false
+                    resizeTransaction.animation = resizeTransaction.animation
+                        ?? .smooth(duration: 0.38)
+                }
+                withTransaction(resizeTransaction) {
+                    model.columnVisibility = visibility
+                }
             }
         )
     }
