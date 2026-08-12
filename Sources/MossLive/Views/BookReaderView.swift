@@ -753,6 +753,9 @@ private final class BookPDFView: PDFView {
     private var resizeCompletion: DispatchWorkItem?
     private var hiddenDuringResize: [UIView] = []
     private var holdsPDFLayout = false
+    private var resizeSnapshotBaseBounds = CGRect.zero
+    private var resizeSnapshotContentFrame = CGRect.zero
+    private var resizeSnapshotFollowsFit = false
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
     private lazy var deselectionTap = UITapGestureRecognizer(
@@ -782,7 +785,7 @@ private final class BookPDFView: PDFView {
         // of a split-view animation. Keep its hierarchy at the last stable
         // layout while a lightweight snapshot follows the system animation.
         if holdsPDFLayout {
-            resizeSnapshot?.frame = bounds
+            updateResizeSnapshotLayout()
             if let resizeSnapshot { bringSubviewToFront(resizeSnapshot) }
             return
         }
@@ -1019,17 +1022,30 @@ private final class BookPDFView: PDFView {
     }
 
     /// Freeze only PDFKit's expensive internal layout during a known animated
-    /// container resize. The snapshot remains inside this view, so SwiftUI and
-    /// the system sidebar animate normally; the live PDF is laid out once at
-    /// the final size and cross-faded back in.
+    /// container resize. The page snapshot scales uniformly to the new fit;
+    /// assigning it the changing bounds directly would squeeze the spread only
+    /// horizontally. The live PDF is laid out once at the final size and then
+    /// cross-faded back in.
     func prepareForAnimatedResize(duration: TimeInterval) {
         resizeCompletion?.cancel()
-        if !holdsPDFLayout, let snapshot = snapshotView(afterScreenUpdates: false) {
+        if !holdsPDFLayout {
+            discardResizeSnapshot()
+        }
+        if !holdsPDFLayout,
+           bounds.width > 0,
+           bounds.height > 0,
+           let snapshot = snapshotView(afterScreenUpdates: false) {
+            resizeSnapshotBaseBounds = bounds
+            resizeSnapshotContentFrame = visiblePageFrame ?? bounds
+            resizeSnapshotFollowsFit = restingScale == 0 || abs(scaleFactor - restingScale) < 0.001
             hiddenDuringResize = subviews.filter { !$0.isHidden }
             hiddenDuringResize.forEach { $0.isHidden = true }
-            snapshot.frame = bounds
-            snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            snapshot.bounds = CGRect(origin: .zero, size: bounds.size)
+            snapshot.center = CGPoint(x: bounds.midX, y: bounds.midY)
+            snapshot.autoresizingMask = []
             snapshot.isUserInteractionEnabled = false
+            snapshot.layer.minificationFilter = .trilinear
+            snapshot.layer.magnificationFilter = .linear
             addSubview(snapshot)
             resizeSnapshot = snapshot
             holdsPDFLayout = true
@@ -1041,6 +1057,65 @@ private final class BookPDFView: PDFView {
         }
         resizeCompletion = completion
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: completion)
+    }
+
+    private var visiblePageFrame: CGRect? {
+        let frames = visiblePages.map { page in
+            convert(page.bounds(for: .cropBox), from: page).standardized
+        }.filter { !$0.isNull && !$0.isEmpty }
+        guard var frame = frames.first else { return nil }
+        for next in frames.dropFirst() {
+            frame = frame.union(next)
+        }
+        return frame
+    }
+
+    /// Keeps both axes at one scale throughout the resize. The scale is based
+    /// on the visible page rectangle rather than the whole PDFView, whose large
+    /// black margins would incorrectly prevent a narrow spread from growing
+    /// again when the assistant closes.
+    private func updateResizeSnapshotLayout() {
+        guard let snapshot = resizeSnapshot,
+              resizeSnapshotBaseBounds.width > 0,
+              resizeSnapshotBaseBounds.height > 0
+        else { return }
+
+        let scale: CGFloat
+        if resizeSnapshotFollowsFit {
+            let originalFit = snapshotFit(in: resizeSnapshotBaseBounds.size)
+            let currentFit = snapshotFit(in: bounds.size)
+            scale = originalFit > 0 ? currentFit / originalFit : 1
+        } else {
+            // Preserve a deliberately zoomed page instead of snapping it back
+            // to the minimum fit merely because a panel was opened.
+            scale = 1
+        }
+
+        let baseCenter = CGPoint(
+            x: resizeSnapshotBaseBounds.midX,
+            y: resizeSnapshotBaseBounds.midY
+        )
+        let contentOffset = CGPoint(
+            x: resizeSnapshotContentFrame.midX - baseCenter.x,
+            y: resizeSnapshotContentFrame.midY - baseCenter.y
+        )
+        snapshot.transform = CGAffineTransform(scaleX: scale, y: scale)
+        snapshot.center = CGPoint(
+            x: bounds.midX + (1 - scale) * contentOffset.x,
+            y: bounds.midY + (1 - scale) * contentOffset.y
+        )
+    }
+
+    private func snapshotFit(in size: CGSize) -> CGFloat {
+        guard resizeSnapshotContentFrame.width > 0,
+              resizeSnapshotContentFrame.height > 0,
+              size.width > 2 * margin,
+              size.height > 2 * margin
+        else { return 1 }
+        return min(
+            (size.width - 2 * margin) / resizeSnapshotContentFrame.width,
+            (size.height - 2 * margin) / resizeSnapshotContentFrame.height
+        )
     }
 
     private func finishAnimatedResize() {
@@ -1059,12 +1134,22 @@ private final class BookPDFView: PDFView {
             UIView.animate(withDuration: 0.12, animations: {
                 snapshot.alpha = 0
             }, completion: { _ in
-                snapshot.removeFromSuperview()
                 if self?.resizeSnapshot === snapshot {
-                    self?.resizeSnapshot = nil
+                    self?.discardResizeSnapshot()
+                } else {
+                    snapshot.removeFromSuperview()
                 }
             })
         }
+    }
+
+    private func discardResizeSnapshot() {
+        resizeSnapshot?.layer.removeAllAnimations()
+        resizeSnapshot?.removeFromSuperview()
+        resizeSnapshot = nil
+        resizeSnapshotBaseBounds = .zero
+        resizeSnapshotContentFrame = .zero
+        resizeSnapshotFollowsFit = false
     }
 
     deinit {
