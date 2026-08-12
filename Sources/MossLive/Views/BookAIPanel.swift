@@ -364,6 +364,9 @@ struct BookAIPanel: View {
 
                     Spacer(minLength: 0)
 
+                    AIModelMenu()
+                        .disabled(store.sending)
+
                     Button {
                         if voiceInput.isRecording {
                             voiceInput.stop()

@@ -282,6 +282,9 @@ struct ChatView: View {
 
                     Spacer(minLength: 0)
 
+                    AIModelMenu()
+                        .disabled(chat.sending)
+
                     Button {
                         if voiceInput.isRecording {
                             voiceInput.stop()

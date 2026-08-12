@@ -38,10 +38,7 @@ struct AISettingsView: View {
 struct AIModelSection: View {
     @Environment(AppModel.self) private var model
 
-    @State private var settings: BackendAPI.AnswerSettings?
-    @State private var loadFailed = false
-    @State private var errorMessage: String?
-    @State private var saveTask: Task<Void, Never>?
+    private var configuration: AIConfigurationStore { model.aiConfiguration }
 
     var body: some View {
         Section {
@@ -69,7 +66,7 @@ struct AIModelSection: View {
                 if let errorMessage {
                     Text(errorMessage).font(.footnote).foregroundStyle(.red)
                 }
-            } else if loadFailed {
+            } else if configuration.errorMessage != nil {
                 Text("Server nicht erreichbar.")
                     .foregroundStyle(.secondary)
             } else {
@@ -80,7 +77,7 @@ struct AIModelSection: View {
         } footer: {
             Text(footerText)
         }
-        .task { await load() }
+        .task { await configuration.load(api: api, force: true) }
     }
 
     private var api: BackendAPI {
@@ -95,64 +92,39 @@ struct AIModelSection: View {
     // stay a valid tag, or the picker silently shows nothing selected.
     private var modelChoices: [BackendAPI.ModelChoice] {
         guard let settings else { return [] }
-        var choices = settings.chatgptModels
-        if !choices.contains(where: { $0.id == settings.chatgptModel }) {
-            choices.append(.init(id: settings.chatgptModel, label: "", efforts: []))
-        }
-        return choices
+        return configuration.modelChoices(for: settings)
     }
 
     /// "" (Standard) plus what the selected model supports; a custom model
     /// without catalog data falls back to the full list.
     private var effortChoices: [String] {
         guard let settings else { return [""] }
-        let known = supportedEfforts(for: settings.chatgptModel, in: settings)
-        let efforts = known.isEmpty ? settings.reasoningEfforts.filter { !$0.isEmpty } : known
-        var choices = [""] + efforts
-        if !choices.contains(settings.chatgptReasoningEffort) {
-            choices.append(settings.chatgptReasoningEffort)
-        }
-        return choices
-    }
-
-    private func supportedEfforts(for modelID: String, in settings: BackendAPI.AnswerSettings) -> [String] {
-        settings.chatgptModels.first { $0.id == modelID }?.efforts ?? []
+        return configuration.effortChoices(for: settings)
     }
 
     private var modelBinding: Binding<String> {
         Binding(
-            get: { settings?.chatgptModel ?? "" },
+            get: { configuration.settings?.chatgptModel ?? "" },
             set: { value in
-                guard var updated = settings else { return }
-                updated.chatgptModel = value
-                // an effort the new model doesn't support goes back to Standard
-                let known = supportedEfforts(for: value, in: updated)
-                if !known.isEmpty, !updated.chatgptReasoningEffort.isEmpty,
-                   !known.contains(updated.chatgptReasoningEffort) {
-                    updated.chatgptReasoningEffort = ""
-                }
-                settings = updated
-                save()
+                configuration.selectModel(value, api: api)
             }
         )
     }
 
     private var providerBinding: Binding<String> {
         Binding(
-            get: { settings?.provider ?? "chatgpt" },
+            get: { configuration.settings?.provider ?? "chatgpt" },
             set: { value in
-                settings?.provider = value
-                save()
+                configuration.selectProvider(value, api: api)
             }
         )
     }
 
     private var effortBinding: Binding<String> {
         Binding(
-            get: { settings?.chatgptReasoningEffort ?? "" },
+            get: { configuration.settings?.chatgptReasoningEffort ?? "" },
             set: { value in
-                settings?.chatgptReasoningEffort = value
-                save()
+                configuration.selectReasoningEffort(value, api: api)
             }
         )
     }
@@ -197,33 +169,7 @@ struct AIModelSection: View {
         }
     }
 
-    private func save() {
-        guard let settings else { return }
-        errorMessage = nil
-        saveTask?.cancel()
-        saveTask = Task {
-            do {
-                try await api.updateAnswerSettings(
-                    provider: settings.provider,
-                    model: settings.chatgptModel,
-                    reasoningEffort: settings.chatgptReasoningEffort
-                )
-                guard !Task.isCancelled else { return }
-            } catch {
-                guard !Task.isCancelled else { return }
-                errorMessage = error.localizedDescription
-                await load()
-            }
-        }
-    }
+    private var settings: BackendAPI.AnswerSettings? { configuration.settings }
 
-    private func load() async {
-        do {
-            settings = try await api.answerSettings()
-            loadFailed = false
-            errorMessage = nil
-        } catch {
-            loadFailed = settings == nil
-        }
-    }
+    private var errorMessage: String? { configuration.errorMessage }
 }

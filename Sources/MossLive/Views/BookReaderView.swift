@@ -356,11 +356,15 @@ private struct PDFReader: View {
             if selectingRegion {
                 regionSelectionBanner
                     .padding(.top, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             } else if selectedRegion != nil {
                 selectedRegionBanner
                     .padding(.top, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .animation(assistantAnimation, value: selectingRegion)
+        .animation(assistantAnimation, value: selectedRegion != nil)
         .safeAreaInset(edge: .bottom, spacing: 0) { controlBar }
     }
 
@@ -422,22 +426,20 @@ private struct PDFReader: View {
     }
 
     private func beginRegionSelection() {
-        withAnimation(assistantAnimation) {
-            askingBookAI = false
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
             selectingRegion = true
             selectedRegion = nil
         }
         proxy.clearRegionSelection()
-        // Begin on the next run loop. The overlay follows the reader's live
-        // bounds throughout the panel animation, so it cannot be mapped to a
-        // stale size.
+        // The chat remains visible while its reader enters selection mode. As
+        // the reader no longer changes width here, the overlay starts against
+        // stable bounds and there is no panel-close/reopen animation to fight.
         DispatchQueue.main.async {
             proxy.beginRegionSelection { region in
                 bookAIDetent = .medium
-                withAnimation(assistantAnimation) {
+                withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
                     selectedRegion = region
                     selectingRegion = false
-                    askingBookAI = true
                 }
             }
         }
@@ -1029,6 +1031,10 @@ private final class BookPDFView: PDFView {
     func prepareForAnimatedResize(duration: TimeInterval) {
         resizeCompletion?.cancel()
         if !holdsPDFLayout {
+            // A second toggle can arrive during the one-run-loop hand-off to
+            // live PDFKit. Complete that hand-off before capturing the next
+            // snapshot so no hidden selection overlay is inherited.
+            if resizeSnapshot != nil { finishResizeHandoff() }
             discardResizeSnapshot()
         }
         if !holdsPDFLayout,
@@ -1100,10 +1106,14 @@ private final class BookPDFView: PDFView {
             y: resizeSnapshotContentFrame.midY - baseCenter.y
         )
         snapshot.transform = CGAffineTransform(scaleX: scale, y: scale)
-        snapshot.center = CGPoint(
-            x: bounds.midX + (1 - scale) * contentOffset.x,
-            y: bounds.midY + (1 - scale) * contentOffset.y
-        )
+        if resizeSnapshotFollowsFit {
+            snapshot.center = CGPoint(
+                x: bounds.midX - scale * contentOffset.x,
+                y: bounds.midY - scale * contentOffset.y
+            )
+        } else {
+            snapshot.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        }
     }
 
     private func snapshotFit(in size: CGSize) -> CGFloat {
@@ -1122,25 +1132,81 @@ private final class BookPDFView: PDFView {
         guard holdsPDFLayout else { return }
         resizeCompletion = nil
         holdsPDFLayout = false
-        hiddenDuringResize.forEach { $0.isHidden = false }
-        hiddenDuringResize.removeAll(keepingCapacity: true)
+
+        // Restore PDFKit's tiles for the final layout, but keep live selection
+        // controls hidden while the snapshot still contains their old copy.
+        // Showing both copies during the hand-off produced the doubled blue
+        // rectangle visible in the recording.
+        let regionViews: [UIView] = [
+            selectionOverlay as UIView?,
+            adjustmentOverlay as UIView?,
+        ].compactMap { $0 }
+        hiddenDuringResize
+            .filter { hidden in !regionViews.contains(where: { $0 === hidden }) }
+            .forEach { $0.isHidden = false }
         setNeedsLayout()
         layoutIfNeeded()
-        guard let snapshot = resizeSnapshot else { return }
-        bringSubviewToFront(snapshot)
-        // Give PDFKit one display pass to populate its final tiles behind the
-        // snapshot, then reveal them without flashing an empty page.
-        DispatchQueue.main.async { [weak self] in
-            UIView.animate(withDuration: 0.12, animations: {
-                snapshot.alpha = 0
-            }, completion: { _ in
-                if self?.resizeSnapshot === snapshot {
-                    self?.discardResizeSnapshot()
-                } else {
-                    snapshot.removeFromSuperview()
-                }
-            })
+        regionViews.forEach { $0.isHidden = true }
+
+        guard let snapshot = resizeSnapshot else {
+            finishResizeHandoff()
+            return
         }
+        alignResizeSnapshot(to: visiblePageFrame)
+        bringSubviewToFront(snapshot)
+
+        // Give PDFKit one display pass to populate its final tiles. The old
+        // cross-fade exposed tiny fit differences as a last-frame zoom; after
+        // aligning both page rectangles, a direct hand-off is seamless.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if resizeSnapshot === snapshot, !holdsPDFLayout {
+                layoutIfNeeded()
+                alignResizeSnapshot(to: visiblePageFrame)
+                discardResizeSnapshot()
+                finishResizeHandoff()
+            } else {
+                snapshot.removeFromSuperview()
+            }
+        }
+    }
+
+    /// Match the snapshot's captured page rectangle to PDFKit's exact final
+    /// page rectangle. This removes the tiny correction zoom at the end of an
+    /// otherwise smooth assistant/sidebar animation.
+    private func alignResizeSnapshot(to finalContentFrame: CGRect?) {
+        guard let snapshot = resizeSnapshot,
+              let finalContentFrame,
+              resizeSnapshotContentFrame.width > 0,
+              resizeSnapshotContentFrame.height > 0
+        else { return }
+
+        let scale = min(
+            finalContentFrame.width / resizeSnapshotContentFrame.width,
+            finalContentFrame.height / resizeSnapshotContentFrame.height
+        )
+        guard scale > 0, scale.isFinite else { return }
+
+        let snapshotCenter = CGPoint(
+            x: resizeSnapshotBaseBounds.midX,
+            y: resizeSnapshotBaseBounds.midY
+        )
+        let contentOffset = CGPoint(
+            x: resizeSnapshotContentFrame.midX - snapshotCenter.x,
+            y: resizeSnapshotContentFrame.midY - snapshotCenter.y
+        )
+        snapshot.transform = CGAffineTransform(scaleX: scale, y: scale)
+        snapshot.center = CGPoint(
+            x: finalContentFrame.midX - scale * contentOffset.x,
+            y: finalContentFrame.midY - scale * contentOffset.y
+        )
+    }
+
+    private func finishResizeHandoff() {
+        hiddenDuringResize.forEach { $0.isHidden = false }
+        hiddenDuringResize.removeAll(keepingCapacity: true)
+        updateDisplayedRegion()
+        if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
     }
 
     private func discardResizeSnapshot() {

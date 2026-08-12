@@ -63,6 +63,7 @@ final class AppModel {
     var columnVisibility: NavigationSplitViewVisibility = .all
 
     let settings = AppSettings()
+    let aiConfiguration = AIConfigurationStore()
     let timetable: TimetableStore
     let chat = ChatStore()
     /// Whether the server can be reached — every screen asks this before it
