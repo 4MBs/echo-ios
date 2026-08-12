@@ -2,7 +2,6 @@ import SwiftUI
 
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
-    @Namespace private var bookTransition
     @State private var books: [BackendAPI.Book] = []
     @State private var downloadedBookIDs: Set<String> = []
     @State private var loading = true
@@ -70,10 +69,8 @@ struct LibraryView: View {
             BookReaderView(api: api, book: book) {
                 downloadedBookIDs.insert(book.id)
             }
-            .navigationTransition(.zoom(sourceID: book.id, in: bookTransition))
         } label: {
             BookCover(api: api, book: book, unavailable: needsConnection)
-                .matchedTransitionSource(id: book.id, in: bookTransition)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(needsConnection ? "\(book.title), Download benötigt" : book.title)
@@ -186,7 +183,7 @@ private struct BookCover: View {
 
     /// `preparingForDisplay` performs decompression on the worker rather than
     /// on the first animation frame that happens to draw the cover.
-    nonisolated private static func decode(_ data: Data) -> UIImage? {
+    private nonisolated static func decode(_ data: Data) -> UIImage? {
         guard let source = UIImage(data: data) else { return nil }
         return source.preparingForDisplay() ?? source
     }
