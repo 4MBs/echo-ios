@@ -21,6 +21,7 @@ struct AIModelMenu: View {
             if let settings = configuration.settings {
                 if settings.provider == "chatgpt" {
                     modelSubmenu(settings)
+                    speedSubmenu(settings)
 
                     Divider()
 
@@ -29,7 +30,7 @@ struct AIModelMenu: View {
                             Button {
                                 configuration.selectReasoningEffort(effort, api: api)
                             } label: {
-                                if effort == settings.chatgptReasoningEffort {
+                                if effort == configuration.reasoningEffort(for: settings) {
                                     Label(Self.intelligenceLabel(effort), systemImage: "checkmark")
                                 } else {
                                     Text(Self.intelligenceLabel(effort))
@@ -51,16 +52,23 @@ struct AIModelMenu: View {
                     ProgressView()
                         .controlSize(.mini)
                 } else {
-                    Text(compactSelectionLabel)
-                        .font(.caption.weight(.medium))
-                        .lineLimit(1)
+                    HStack(spacing: 3) {
+                        Text(compactSelectionLabel)
+                            .lineLimit(1)
+                        if let settings = configuration.settings,
+                           configuration.serviceTier(for: settings) != "default" {
+                            Image(systemName: "bolt.fill")
+                        }
+                    }
+                    .font(.caption.weight(.medium))
                 }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
             .frame(minHeight: 30)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .menuOrder(.fixed)
         .disabled(configuration.settings == nil)
         .accessibilityLabel("KI-Modell: \(compactSelectionLabel)")
         .task { await configuration.load(api: api) }
@@ -73,19 +81,57 @@ struct AIModelMenu: View {
                     configuration.selectModel(choice.id, api: api)
                 } label: {
                     if choice.id == settings.chatgptModel {
-                        Label(Self.modelLabel(choice), systemImage: "checkmark")
+                        Label(Self.menuModelLabel(choice), systemImage: "checkmark")
                     } else {
-                        Text(Self.modelLabel(choice))
+                        Text(Self.menuModelLabel(choice))
                     }
                 }
             }
         } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Modell")
-                Text(Self.modelLabel(for: settings))
+                Text(Self.menuModelLabel(for: settings))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .menuOrder(.fixed)
+    }
+
+    private func speedSubmenu(_ settings: BackendAPI.AnswerSettings) -> some View {
+        Menu {
+            ForEach(configuration.serviceTierChoices(for: settings)) { choice in
+                Button {
+                    configuration.selectServiceTier(choice.id, api: api)
+                } label: {
+                    if choice.id == configuration.serviceTier(for: settings) {
+                        Label {
+                            speedChoiceLabel(choice)
+                        } icon: {
+                            Image(systemName: "checkmark")
+                        }
+                    } else {
+                        speedChoiceLabel(choice)
+                    }
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Geschwindigkeit")
+                Text(Self.speedLabel(configuration.serviceTier(for: settings)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .menuOrder(.fixed)
+    }
+
+    private func speedChoiceLabel(_ choice: BackendAPI.ServiceTierChoice) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(Self.speedLabel(choice.id, fallback: choice.label))
+            Text(Self.speedDescription(choice.id, fallback: choice.description))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -94,23 +140,22 @@ struct AIModelMenu: View {
         guard settings.provider == "chatgpt" else { return "Gemini" }
         let modelName = Self.modelLabel(for: settings)
             .replacingOccurrences(of: "GPT-", with: "")
-        return "\(modelName) \(Self.intelligenceLabel(settings.chatgptReasoningEffort))"
+        let effort = configuration.reasoningEffort(for: settings)
+        return "\(modelName) \(Self.intelligenceLabel(effort))"
     }
 
-    /// ChatGPT presents intelligence from strongest to lightest. Keep an
-    /// explicit "Standard" at the end for the server/model default.
+    /// ChatGPT presents intelligence from strongest to lightest. Its picker
+    /// exposes the five visible levels from the recording, without a Standard
+    /// row or Codex's advanced Minimal/Ultra aliases.
     private func sortedEfforts(for settings: BackendAPI.AnswerSettings) -> [String] {
         let rank = [
-            "ultra": 7,
-            "max": 6,
-            "xhigh": 5,
-            "high": 4,
-            "medium": 3,
-            "low": 2,
-            "minimal": 1,
-            "": 0,
+            "max": 5,
+            "xhigh": 4,
+            "high": 3,
+            "medium": 2,
+            "low": 1,
         ]
-        return configuration.effortChoices(for: settings).sorted {
+        return configuration.effortChoices(for: settings).filter { rank[$0] != nil }.sorted {
             rank[$0, default: 0] > rank[$1, default: 0]
         }
     }
@@ -125,7 +170,34 @@ struct AIModelMenu: View {
 
     private static func modelLabel(_ choice: BackendAPI.ModelChoice) -> String {
         if choice.id.isEmpty { return "Standard" }
+        if choice.id.lowercased().hasPrefix("gpt-") {
+            return AIModelSection.modelLabel(choice.id)
+        }
         return choice.label.isEmpty ? AIModelSection.modelLabel(choice.id) : choice.label
+    }
+
+    private static func menuModelLabel(for settings: BackendAPI.AnswerSettings) -> String {
+        modelLabel(for: settings).replacingOccurrences(of: "GPT-", with: "")
+    }
+
+    private static func menuModelLabel(_ choice: BackendAPI.ModelChoice) -> String {
+        modelLabel(choice).replacingOccurrences(of: "GPT-", with: "")
+    }
+
+    private static func speedLabel(_ serviceTier: String, fallback: String = "") -> String {
+        switch serviceTier {
+        case "default": "Standard"
+        case "priority", "fast": "Schnell"
+        default: fallback.isEmpty ? serviceTier : fallback
+        }
+    }
+
+    private static func speedDescription(_ serviceTier: String, fallback: String) -> String {
+        switch serviceTier {
+        case "default": "Standardnutzung"
+        case "priority", "fast": "Erhöhter Verbrauch"
+        default: fallback
+        }
     }
 
     /// The compact language from the ChatGPT menu in the reference recording.

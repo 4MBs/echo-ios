@@ -31,8 +31,8 @@ struct AISettingsView: View {
 }
 
 /// Which AI backend the server uses. With ChatGPT, the model and the
-/// reasoning effort are picked here; the choice is stored on the server (like
-/// the WebUntis login) and applies immediately, no restart needed. The model
+/// reasoning effort and speed are picked here; the choice is stored on the
+/// server (like the WebUntis login) and applies immediately, no restart needed. The model
 /// list — including which reasoning efforts each model supports — comes from
 /// the server, so new models appear without an app update.
 struct AIModelSection: View {
@@ -52,6 +52,12 @@ struct AIModelSection: View {
                     Picker("Modell", selection: modelBinding) {
                         ForEach(modelChoices) { choice in
                             Text(displayName(for: choice)).tag(choice.id)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    Picker("Geschwindigkeit", selection: serviceTierBinding) {
+                        ForEach(serviceTierChoices) { choice in
+                            Text(speedLabel(choice)).tag(choice.id)
                         }
                     }
                     .pickerStyle(.navigationLink)
@@ -95,10 +101,11 @@ struct AIModelSection: View {
         return configuration.modelChoices(for: settings)
     }
 
-    /// "" (Standard) plus what the selected model supports; a custom model
-    /// without catalog data falls back to the full list.
+    /// What the selected model supports; a custom model without catalog data
+    /// falls back to the full list. The model default is resolved by the server,
+    /// so Reasoning never needs a separate Standard row.
     private var effortChoices: [String] {
-        guard let settings else { return [""] }
+        guard let settings else { return [] }
         return configuration.effortChoices(for: settings)
     }
 
@@ -122,9 +129,29 @@ struct AIModelSection: View {
 
     private var effortBinding: Binding<String> {
         Binding(
-            get: { configuration.settings?.chatgptReasoningEffort ?? "" },
+            get: {
+                guard let settings = configuration.settings else { return "" }
+                return configuration.reasoningEffort(for: settings)
+            },
             set: { value in
                 configuration.selectReasoningEffort(value, api: api)
+            }
+        )
+    }
+
+    private var serviceTierChoices: [BackendAPI.ServiceTierChoice] {
+        guard let settings else { return [] }
+        return configuration.serviceTierChoices(for: settings)
+    }
+
+    private var serviceTierBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let settings = configuration.settings else { return "default" }
+                return configuration.serviceTier(for: settings)
+            },
+            set: { value in
+                configuration.selectServiceTier(value, api: api)
             }
         )
     }
@@ -141,7 +168,16 @@ struct AIModelSection: View {
 
     private func displayName(for choice: BackendAPI.ModelChoice) -> String {
         if choice.id.isEmpty { return "Standard (empfohlen)" }
+        if choice.id.lowercased().hasPrefix("gpt-") { return Self.modelLabel(choice.id) }
         return choice.label.isEmpty ? Self.modelLabel(choice.id) : choice.label
+    }
+
+    private func speedLabel(_ choice: BackendAPI.ServiceTierChoice) -> String {
+        switch choice.id {
+        case "default": "Standard – Standardnutzung"
+        case "priority", "fast": "Schnell – erhöhter Verbrauch"
+        default: choice.description.isEmpty ? choice.label : "\(choice.label) – \(choice.description)"
+        }
     }
 
     /// Fallback prettifier for models the server has no label for:
@@ -157,7 +193,6 @@ struct AIModelSection: View {
 
     static func effortLabel(_ effort: String) -> String {
         switch effort {
-        case "": "Standard"
         case "minimal": "Minimal – am schnellsten"
         case "low": "Niedrig – schnell"
         case "medium": "Mittel"

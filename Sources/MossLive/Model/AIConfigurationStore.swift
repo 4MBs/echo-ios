@@ -15,6 +15,7 @@ final class AIConfigurationStore {
 
     func load(api: BackendAPI, force: Bool = false) async {
         guard force || settings == nil else { return }
+        guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -35,13 +36,25 @@ final class AIConfigurationStore {
         guard var updated = settings, updated.chatgptModel != modelID else { return }
         updated.chatgptModel = modelID
 
-        // A reasoning level unsupported by the new model falls back to that
-        // model's default instead of making the server reject the change.
-        let supported = supportedEfforts(for: modelID, in: updated)
-        if !supported.isEmpty,
-           !updated.chatgptReasoningEffort.isEmpty,
-           !supported.contains(updated.chatgptReasoningEffort) {
-            updated.chatgptReasoningEffort = ""
+        // ChatGPT resets reasoning to the new model's advertised default when
+        // switching models (Sol/Low -> Luna/Medium in the reference).
+        if let choice = modelChoice(for: modelID, in: updated),
+           let defaultEffort = choice.defaultEffort,
+           !defaultEffort.isEmpty {
+            updated.chatgptReasoningEffort = defaultEffort
+        } else {
+            let supported = supportedEfforts(for: modelID, in: updated)
+            if !supported.isEmpty,
+               !supported.contains(updated.chatgptReasoningEffort) {
+                updated.chatgptReasoningEffort = ""
+            }
+        }
+
+        let serviceTiers = modelChoice(for: modelID, in: updated)?.serviceTiers ?? []
+        let selectedTier = serviceTier(for: updated)
+        if selectedTier != "default",
+           !serviceTiers.contains(where: { $0.id == selectedTier }) {
+            updated.chatgptServiceTier = "default"
         }
         persist(updated, api: api)
     }
@@ -52,10 +65,24 @@ final class AIConfigurationStore {
         persist(updated, api: api)
     }
 
+    func selectServiceTier(_ serviceTier: String, api: BackendAPI) {
+        guard var updated = settings, self.serviceTier(for: updated) != serviceTier else { return }
+        updated.chatgptServiceTier = serviceTier
+        persist(updated, api: api)
+    }
+
     func modelChoices(for settings: BackendAPI.AnswerSettings) -> [BackendAPI.ModelChoice] {
         var choices = settings.chatgptModels
         if !choices.contains(where: { $0.id == settings.chatgptModel }) {
-            choices.append(.init(id: settings.chatgptModel, label: "", efforts: []))
+            choices.append(
+                .init(
+                    id: settings.chatgptModel,
+                    label: "",
+                    efforts: [],
+                    defaultEffort: nil,
+                    serviceTiers: nil
+                )
+            )
         }
         return choices
     }
@@ -65,11 +92,46 @@ final class AIConfigurationStore {
         let available = supported.isEmpty
             ? settings.reasoningEfforts.filter { !$0.isEmpty }
             : supported
-        var choices = [""] + available
-        if !choices.contains(settings.chatgptReasoningEffort) {
-            choices.append(settings.chatgptReasoningEffort)
+        var choices = available.filter { !$0.isEmpty }
+        let selected = reasoningEffort(for: settings)
+        if !selected.isEmpty, !choices.contains(selected) {
+            choices.append(selected)
         }
         return choices
+    }
+
+    func serviceTierChoices(for settings: BackendAPI.AnswerSettings) -> [BackendAPI.ServiceTierChoice] {
+        let standard = BackendAPI.ServiceTierChoice(
+            id: "default",
+            label: "Standard",
+            description: "Standardnutzung"
+        )
+        let advertised = modelChoice(for: settings.chatgptModel, in: settings)?.serviceTiers ?? []
+        var choices = [standard] + advertised.filter { $0.id != standard.id }
+        let selected = serviceTier(for: settings)
+        if !choices.contains(where: { $0.id == selected }) {
+            choices.append(.init(id: selected, label: selected, description: ""))
+        }
+        return choices
+    }
+
+    func reasoningEffort(for settings: BackendAPI.AnswerSettings) -> String {
+        if !settings.chatgptReasoningEffort.isEmpty {
+            return settings.chatgptReasoningEffort
+        }
+        return modelChoice(for: settings.chatgptModel, in: settings)?.defaultEffort ?? ""
+    }
+
+    func serviceTier(for settings: BackendAPI.AnswerSettings) -> String {
+        let tier = settings.chatgptServiceTier ?? "default"
+        return tier.isEmpty ? "default" : tier
+    }
+
+    private func modelChoice(
+        for modelID: String,
+        in settings: BackendAPI.AnswerSettings
+    ) -> BackendAPI.ModelChoice? {
+        settings.chatgptModels.first { $0.id == modelID }
     }
 
     private func supportedEfforts(
@@ -83,12 +145,14 @@ final class AIConfigurationStore {
         settings = updated
         errorMessage = nil
         saveTask?.cancel()
+        let serviceTier = serviceTier(for: updated)
         saveTask = Task { [weak self] in
             do {
                 try await api.updateAnswerSettings(
                     provider: updated.provider,
                     model: updated.chatgptModel,
-                    reasoningEffort: updated.chatgptReasoningEffort
+                    reasoningEffort: updated.chatgptReasoningEffort,
+                    serviceTier: serviceTier
                 )
             } catch {
                 guard !Task.isCancelled else { return }
