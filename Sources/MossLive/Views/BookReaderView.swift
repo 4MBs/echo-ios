@@ -1471,7 +1471,7 @@ private final class BookPDFView: PDFView {
     private func installFinalQualityOverlay() {
         guard let document, let cache = pageCache else { return }
         let dimension = renderPixelDimension
-        let pageFrames = visiblePages.compactMap { page -> (Int, CGRect) in
+        let pageFrames = visiblePages.compactMap { page -> (Int, CGRect)? in
             let index = document.index(for: page)
             let frame = convert(page.bounds(for: .cropBox), from: page).standardized
             return frame.isEmpty ? nil : (index, frame)
