@@ -86,7 +86,7 @@ enum UITestRuntime {
             try await Task.sleep(for: .milliseconds(120))
         }
         if path == "/answer" || path.hasSuffix("/ask") {
-            try await Task.sleep(for: .milliseconds(1_500))
+            try await Task.sleep(for: .milliseconds(1500))
         }
         switch scenario {
         case .offline:
