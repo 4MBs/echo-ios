@@ -448,7 +448,7 @@ final class AppModel {
             peakDBFS: -8,
             noiseFloorDBFS: -48,
             clippedSamplePercent: 0.1,
-            hardwareSampleRate: 48_000,
+            hardwareSampleRate: 48000,
             hardwareChannels: 1,
             route: "Testmikrofon",
             voiceProcessing: true,

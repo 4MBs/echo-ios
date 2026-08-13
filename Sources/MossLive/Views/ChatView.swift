@@ -377,7 +377,7 @@ struct ChatView: View {
                     kind: .image,
                     fileName: "Kamerafoto.jpg",
                     mimeType: "image/jpeg",
-                    byteCount: 24_000,
+                    byteCount: 24000,
                     extractedText: "Fotografierte Testnotiz: Ursache führt zur Wirkung."
                 )
             case .photos:
@@ -385,7 +385,7 @@ struct ChatView: View {
                     kind: .image,
                     fileName: "Testfoto.jpg",
                     mimeType: "image/jpeg",
-                    byteCount: 18_000,
+                    byteCount: 18000,
                     extractedText: "Deterministischer Text aus der Fotomediathek."
                 )
             case .files:
@@ -393,7 +393,7 @@ struct ChatView: View {
                     kind: .document,
                     fileName: "Testdokument.pdf",
                     mimeType: "application/pdf",
-                    byteCount: 42_000,
+                    byteCount: 42000,
                     extractedText: "Deterministischer Dokumentinhalt für den Chat."
                 )
             }

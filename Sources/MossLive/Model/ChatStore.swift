@@ -177,8 +177,8 @@ final class ChatStore {
             conversations = Self.uiTestConversations
             selectedConversationID = conversations[0].id
         } else if loadPersisted,
-           let saved = OfflineCache.load(SavedState.self, key: Self.storageKey),
-           !saved.conversations.isEmpty {
+                  let saved = OfflineCache.load(SavedState.self, key: Self.storageKey),
+                  !saved.conversations.isEmpty {
             let restored = saved.conversations.sorted { $0.updatedAt > $1.updatedAt }
             let restoredSelection = restored.contains(where: { $0.id == saved.selectedConversationID })
                 ? saved.selectedConversationID
@@ -508,7 +508,7 @@ final class ChatStore {
             kind: .document,
             fileName: "Versuchsprotokoll.pdf",
             mimeType: "application/pdf",
-            byteCount: 42_000,
+            byteCount: 42000,
             extractedText: "Beobachtung: Der Test ist reproduzierbar."
         )
         return [

@@ -254,11 +254,11 @@ enum UITestRuntime {
     }
 
     private static func makeWAV() -> Data {
-        let sampleRate: UInt32 = 8_000
+        let sampleRate: UInt32 = 8000
         let sampleCount = Int(sampleRate)
         var pcm = Data(capacity: sampleCount * 2)
         for index in 0 ..< sampleCount {
-            var sample = Int16(sin(Double(index) * 2 * .pi * 220 / Double(sampleRate)) * 2_000).littleEndian
+            var sample = Int16(sin(Double(index) * 2 * .pi * 220 / Double(sampleRate)) * 2000).littleEndian
             Swift.withUnsafeBytes(of: &sample) { pcm.append(contentsOf: $0) }
         }
         var data = Data("RIFF".utf8)
@@ -298,7 +298,7 @@ private extension JSONDecoder {
 }
 
 private extension Data {
-    mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+    mutating func appendLittleEndian(_ value: some FixedWidthInteger) {
         var value = value.littleEndian
         Swift.withUnsafeBytes(of: &value) { append(contentsOf: $0) }
     }
@@ -306,6 +306,7 @@ private extension Data {
 
 private extension UITestRuntime {
     static let nowMilliseconds: Int64 = 1_775_702_400_000
+
     static var lessonSegments: [[String: Any]] {
         [
             ["t0": 0.0, "t1": 8.0, "speaker": "Lehrkraft", "text": "Willkommen zur Teststunde."],
@@ -334,11 +335,13 @@ private extension UITestRuntime {
         ["short": "BIO", "long": "Biologie", "name": "Biologie", "teachers": ["Herr Muster"]],
         ["short": "PHY", "long": "Physik", "name": "Physik", "teachers": []],
     ]]
+
     static let booksObject: [String: Any] = ["books": [
         ["id": "book-1", "title": "Echo Testbuch", "file_name": "echo-test.pdf", "size_bytes": 120_000],
         ["id": "book-2", "title": "Sehr langer Testbuchtitel für Kürzung und Layout",
          "file_name": "lang.pdf", "size_bytes": 120_000],
     ]]
+
     static var lessonDetailObject: [String: Any] {
         ["id": "lesson-1", "started_at_ms": nowMilliseconds - 3_600_000, "ended_at_ms": nowMilliseconds,
          "summary": "Die Stunde erklärt **Ursache und Wirkung** anhand eines Beispiels.",
@@ -346,12 +349,15 @@ private extension UITestRuntime {
          "title": "Teststunde Mathematik", "subject": "Mathematik", "teacher": "Frau Beispiel",
          "room": "A12", "segments": lessonSegments]
     }
+
     static var timetableNowObject: [String: Any] {
         ["enabled": true, "current": timetableLesson, "next": timetableLesson]
     }
+
     static var timetableDayObject: [String: Any] {
         ["enabled": true, "date": ISO8601DateFormatter.day.string(from: Date()), "lessons": [timetableLesson]]
     }
+
     static var timetableLesson: [String: Any] {
         ["date": ISO8601DateFormatter.day.string(from: Date()), "start": "08:00", "end": "09:00",
          "start_ms": nowMilliseconds - 1_800_000, "end_ms": nowMilliseconds + 1_800_000,
@@ -359,6 +365,7 @@ private extension UITestRuntime {
          "teacher": "Frau Beispiel", "room": "A12", "cancelled": false, "substitution": false,
          "info": "Deterministische Stunde", "type": "LESSON"]
     }
+
     static let answerSettingsObject: [String: Any] = [
         "provider": "chatgpt", "chatgpt_model": "gpt-5.6-luna", "chatgpt_reasoning_effort": "medium",
         "chatgpt_service_tier": "fast", "reasoning_efforts": ["minimal", "low", "medium", "high", "max"],
@@ -380,6 +387,7 @@ private extension UITestRuntime {
         ["term": "Kausalität", "source": "manual", "created_at": "2026-08-13T08:00:00Z"],
         ["term": "Korrelation", "source": "suggested", "created_at": "2026-08-13T08:01:00Z"],
     ]
+
     static var transcriptHistoryObject: [String: Any] {
         ["current_revision": 2, "has_manual_edits": true, "revisions": [
             ["id": 2, "revision": 2, "created_at": "2026-08-13T08:20:00Z", "reason": "manual_edit"],

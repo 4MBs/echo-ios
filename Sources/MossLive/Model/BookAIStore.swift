@@ -112,9 +112,9 @@ final class BookAIStore {
             conversations = Self.uiTestConversations
             selectedConversationID = conversations[0].id
         } else if loadPersisted,
-           let key,
-           let saved = OfflineCache.load(SavedState.self, key: key),
-           !saved.conversations.isEmpty {
+                  let key,
+                  let saved = OfflineCache.load(SavedState.self, key: key),
+                  !saved.conversations.isEmpty {
             let restored = saved.conversations.sorted { $0.updatedAt > $1.updatedAt }
             let restoredSelection = restored.contains(where: { $0.id == saved.selectedConversationID })
                 ? saved.selectedConversationID
