@@ -2,6 +2,7 @@ name: Exhaustive iOS Simulator UI Tests
 
 on:
   push:
+    branches: [main]
     paths:
       - "Sources/**"
       - "Tests/MossLiveUITests/**"
