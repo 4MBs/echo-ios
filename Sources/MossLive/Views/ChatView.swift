@@ -563,6 +563,14 @@ private struct ChatMessageRow: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(copied ? "Kopiert" : "Antwort kopieren")
 
+                    if copied {
+                        Text("Kopiert")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            .accessibilityIdentifier("chat.copy.confirmation")
+                    }
+
                     if isLastAssistant && !isSending {
                         Button(action: onRegenerate) {
                             Image(systemName: "arrow.clockwise")
@@ -590,8 +598,9 @@ private struct ChatMessageRow: View {
         UIPasteboard.general.string = message.text
         withAnimation { copied = true }
         Task {
-            // Keep confirmation perceivable after the system pasteboard work.
-            try? await Task.sleep(for: .seconds(30))
+            // Keep the visible and spoken confirmation perceivable without
+            // permanently occupying message-action space.
+            try? await Task.sleep(for: .seconds(5))
             withAnimation { copied = false }
         }
     }

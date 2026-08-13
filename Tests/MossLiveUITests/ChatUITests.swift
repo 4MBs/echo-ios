@@ -78,7 +78,7 @@ final class ChatUITests: EchoUITestCase {
             XCTAssertTrue(app.buttons["Antwort neu erstellen"].waitForExistence(timeout: 25))
         }
         tap(app.buttons["Antwort kopieren"].firstMatch)
-        XCTAssertTrue(app.buttons["Kopiert"].firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["chat.copy.confirmation"].waitForExistence(timeout: 3))
 
         tap(app.buttons["Neue Unterhaltung"])
         XCTAssertFalse(app.staticTexts["Erkläre Ursache und Wirkung."].exists)

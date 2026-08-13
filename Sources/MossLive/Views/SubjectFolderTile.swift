@@ -125,9 +125,14 @@ struct SubjectFolderTile: View {
                 .minimumScaleFactor(0.75)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 2)
-                .padding(.vertical, 1)
+                .padding(.vertical, 3)
+                .accessibilityIdentifier("subject-folder-count-visual")
                 .accessibilityHidden(true)
         }
+        // The folder is a fixed-proportion graphical tile. Cap only its visual
+        // decoration; the parent still exposes the complete untruncated name
+        // and count to VoiceOver at every Dynamic Type size.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .padding(.top, FolderGeometry.tabHeight + 14)
         .padding(.horizontal, 16)
         .padding(.bottom, 16)

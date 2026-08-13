@@ -105,7 +105,10 @@ struct PDFReader: View {
                         .presentationDetents([.medium, .large], selection: $bookAIDetent)
                         .presentationDragIndicator(.visible)
                         .presentationBackground(Color.black)
-                        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                        // Region selection is performed on the book behind the
+                        // assistant. Keep that surface interactive even if the
+                        // user expanded the sheet before choosing the tool.
+                        .presentationBackgroundInteraction(.enabled)
                 }
         } else {
             GeometryReader { geometry in
@@ -225,6 +228,9 @@ struct PDFReader: View {
     }
 
     private func beginRegionSelection() {
+        // A medium sheet leaves a useful portion of the page visible. This is
+        // also the detent at which the result returns after the drag.
+        bookAIDetent = .medium
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
             selectingRegion = true
             selectedRegion = nil

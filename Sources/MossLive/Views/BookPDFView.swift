@@ -23,6 +23,7 @@ final class BookPDFView: PDFView {
     private var layoutGeneration = 0
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
+    private var scrollEnabledBeforeRegionSelection: Bool?
     private lazy var deselectionTap = UITapGestureRecognizer(
         target: self,
         action: #selector(tappedOutsideSelection)
@@ -65,6 +66,7 @@ final class BookPDFView: PDFView {
 
     func beginRegionSelection(onSelected: @escaping (BackendAPI.BookPageRegion) -> Void) {
         cancelRegionSelection()
+        setReaderGesturesEnabled(false)
         let overlay = BookRegionSelectionOverlay(frame: bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.onFinished = { [weak self, weak overlay] rect in
@@ -84,6 +86,25 @@ final class BookPDFView: PDFView {
     func cancelRegionSelection() {
         selectionOverlay?.removeFromSuperview()
         selectionOverlay = nil
+        setReaderGesturesEnabled(true)
+    }
+
+    private func setReaderGesturesEnabled(_ enabled: Bool) {
+        for swipe in gestureRecognizers?.compactMap({ $0 as? PageSwipeGestureRecognizer }) ?? [] {
+            swipe.isEnabled = enabled
+        }
+        guard let scrollView = descendantScrollView(in: self) else { return }
+        if enabled {
+            if let previous = scrollEnabledBeforeRegionSelection {
+                scrollView.isScrollEnabled = previous
+            }
+            scrollEnabledBeforeRegionSelection = nil
+        } else {
+            if scrollEnabledBeforeRegionSelection == nil {
+                scrollEnabledBeforeRegionSelection = scrollView.isScrollEnabled
+            }
+            scrollView.isScrollEnabled = false
+        }
     }
 
     func display(region: BackendAPI.BookPageRegion?) {

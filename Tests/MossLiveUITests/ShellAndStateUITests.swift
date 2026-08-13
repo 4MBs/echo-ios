@@ -82,7 +82,17 @@ final class ShellAndStateUITests: EchoUITestCase {
                 // audit still snapshots its accessibility-hidden visual title
                 // and reports an intact final glyph as clipped.
                 let isHiddenFolderTitle = issue.element?.identifier == "subject-folder-title-visual"
-                return issue.auditType == .textClipped && (isSystemSidebarNode || isHiddenFolderTitle)
+                let isHiddenFolderCount = issue.element?.identifier == "subject-folder-count-visual"
+                // `.searchable` is rendered by iOS as UISearchBarTextField.
+                // The audit reports its own one-line field as clipped even
+                // though the captured glyphs and ellipsis fit its system frame.
+                let isSystemSearchField = issue.element?.elementType == .searchField
+                    && issue.element?.label == "Fach oder Stunde suchen"
+                return issue.auditType == .textClipped
+                    && (isSystemSidebarNode
+                        || isHiddenFolderTitle
+                        || isHiddenFolderCount
+                        || isSystemSearchField)
             }
             shot("accessibility-audit-\(tab)")
         }

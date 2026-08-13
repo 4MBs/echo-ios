@@ -698,7 +698,6 @@ final class BookRegionSelectionOverlay: UIView {
         shape.lineWidth = 2
         shape.lineDashPattern = [7, 5]
         layer.addSublayer(shape)
-        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(dragged)))
     }
 
     @available(*, unavailable)
@@ -706,21 +705,30 @@ final class BookRegionSelectionOverlay: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    @objc private func dragged(_ recognizer: UIPanGestureRecognizer) {
-        let point = recognizer.location(in: self)
-        switch recognizer.state {
-        case .began:
-            start = point
-            shape.path = nil
-        case .changed:
-            shape.path = UIBezierPath(roundedRect: rectangle(to: point), cornerRadius: 6).cgPath
-        case .ended:
-            onFinished?(rectangle(to: point))
-        case .cancelled, .failed:
-            shape.path = nil
-        default:
-            break
-        }
+    // Handle the drawing surface's touches directly. A pan recognizer here
+    // still had to arbitrate with PDFKit's private scroll recognizers and could
+    // lose the first drag after the assistant changed the reader's width. The
+    // temporary overlay is the topmost interactive view while selection is
+    // active, so direct touch tracking is deterministic and keeps PDFKit from
+    // scrolling underneath the rectangle.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let point = touches.first?.location(in: self) else { return }
+        start = point
+        shape.path = nil
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let point = touches.first?.location(in: self) else { return }
+        shape.path = UIBezierPath(roundedRect: rectangle(to: point), cornerRadius: 6).cgPath
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let point = touches.first?.location(in: self) else { return }
+        onFinished?(rectangle(to: point))
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        shape.path = nil
     }
 
     private func rectangle(to point: CGPoint) -> CGRect {
