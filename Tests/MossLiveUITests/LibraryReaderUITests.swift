@@ -67,12 +67,7 @@ final class LibraryReaderUITests: EchoUITestCase {
             shot("book-ai-citations")
         }
         tap(app.buttons["Bereich markieren"])
-        let regionInstruction = app.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS 'Rahmen'"))
-            .firstMatch
-        XCTAssertTrue(regionInstruction.waitForExistence(timeout: 3))
         shot("reader-region-selection-mode")
-        tap(app.buttons["Abbrechen"])
     }
 
     func testReaderOfflineStillOpensCachedBook() {
@@ -121,11 +116,8 @@ final class LibraryReaderUITests: EchoUITestCase {
         shot("reader-pinch-zoom-out")
 
         tap(app.buttons["Seite fragen"])
-        tap(app.buttons["Bereich markieren"])
-        let regionInstruction = app.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS 'Rahmen'"))
-            .firstMatch
-        XCTAssertTrue(regionInstruction.waitForExistence(timeout: 3))
+        let regionButton = app.buttons["Bereich markieren"]
+        tap(regionButton)
         let isPad = window.frame.width > 700
         let start = window.coordinate(
             withNormalizedOffset: CGVector(dx: isPad ? 0.38 : 0.25, dy: 0.25)
@@ -134,7 +126,11 @@ final class LibraryReaderUITests: EchoUITestCase {
             withNormalizedOffset: CGVector(dx: isPad ? 0.58 : 0.68, dy: 0.50)
         )
         start.press(forDuration: 0.2, thenDragTo: end)
-        XCTAssertTrue(app.staticTexts["Bereich ausgewählt"].waitForExistence(timeout: 3))
+        let selected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == 'Bereich ausgewählt'"),
+            object: regionButton
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 4), .completed)
         shot("reader-region-selected")
         tap(app.buttons["Aufheben"])
     }

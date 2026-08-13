@@ -162,7 +162,11 @@ enum UITestRuntime {
             var terms = vocabularyObject
             if method == "POST", let additions = body?["terms"] as? [String] {
                 terms.append(contentsOf: additions.map { term in
-                    ["term": term, "source": "manual"] as [String: Any]
+                    [
+                        "term": term,
+                        "source": "manual",
+                        "created_at": "2026-08-13T08:02:00Z",
+                    ] as [String: Any]
                 })
             }
             return try json(["terms": terms])

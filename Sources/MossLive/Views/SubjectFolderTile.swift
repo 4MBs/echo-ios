@@ -125,6 +125,10 @@ struct SubjectFolderTile: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The tile itself already exposes one complete, localized label. Keep
+        // its visual text out of the child accessibility tree so VoiceOver and
+        // the system audit do not inspect cropped glyph snapshots separately.
+        .accessibilityHidden(true)
     }
 
     /// An empty folder says so rather than showing a nought: a subject you have

@@ -419,6 +419,7 @@ struct BookAIPanel: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Bereich markieren")
+        .accessibilityValue(region == nil ? "Ganze Seite" : "Bereich ausgewählt")
     }
 
     @ViewBuilder

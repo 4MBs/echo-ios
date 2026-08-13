@@ -213,6 +213,8 @@ struct QuickSwitchSettingsView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityLabel("URL-Schema")
+                        .accessibilityIdentifier("URL-Schema")
                 }
             } footer: {
                 Text("Mit drei Fingern tippen wechselt sofort in diese App. Die Aufnahme läuft weiter.")

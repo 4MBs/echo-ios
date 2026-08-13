@@ -78,6 +78,8 @@ struct MainTabView: View {
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
                     .badge(tab == .stunden ? pendingNoteImportCount : 0)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(tab.title)
                     .accessibilityIdentifier("tab.\(tab.rawValue)")
             }
             .listStyle(.sidebar)
@@ -125,6 +127,8 @@ struct MainTabView: View {
             List(selection: selection) {
                 Label(AppTab.einstellungen.title, systemImage: AppTab.einstellungen.systemImage)
                     .tag(AppTab.einstellungen)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(AppTab.einstellungen.title)
                     .accessibilityIdentifier("tab.\(AppTab.einstellungen.rawValue)")
             }
             .listStyle(.sidebar)
