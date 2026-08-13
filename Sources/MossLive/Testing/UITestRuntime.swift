@@ -34,7 +34,7 @@ enum UITestRuntime {
     /// Deleting a lesson has to stay deleted: the list is reloaded from the
     /// fake server right after the request, so a purely static fixture would
     /// resurrect it and make a working feature look broken.
-    nonisolated(unsafe) private static var deletedSessionIDs: Set<String> = []
+    private nonisolated(unsafe) static var deletedSessionIDs: Set<String> = []
 
     @MainActor
     static func installFixtures() {

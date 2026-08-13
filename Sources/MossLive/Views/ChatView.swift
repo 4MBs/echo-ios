@@ -304,7 +304,6 @@ struct ChatView: View {
         .padding(.bottom, 6)
     }
 
-    @ViewBuilder
     /// The composer's controls sit on one line until the labels need more room
     /// than the composer has. They then take a second line rather than putting
     /// a ceiling on how large the student may set their text.
@@ -314,6 +313,7 @@ struct ChatView: View {
             : AnyLayout(HStackLayout(spacing: 8))
     }
 
+    @ViewBuilder
     private var contextMenu: some View {
         if model.phase == .recording {
             Label("Live", systemImage: "record.circle")
