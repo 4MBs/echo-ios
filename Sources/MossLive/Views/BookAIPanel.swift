@@ -352,6 +352,7 @@ struct BookAIPanel: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1 ... 5)
                 .focused($inputFocused)
+                .accessibilityIdentifier("bookAI.input")
                 .submitLabel(.send)
                 .onSubmit(sendDraft)
                 .padding(.horizontal, 16)
@@ -390,6 +391,7 @@ struct BookAIPanel: View {
                         .controlSize(.regular)
                         .disabled(!store.sending && !canSend)
                         .accessibilityLabel(store.sending ? "Antwort stoppen" : "Nachricht senden")
+                        .accessibilityIdentifier("bookAI.send")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)

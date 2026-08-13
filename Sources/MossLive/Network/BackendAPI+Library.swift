@@ -55,6 +55,10 @@ extension BackendAPI {
     }
 
     func bookCover(_ book: Book) async throws -> Data {
+        if UITestRuntime.isEnabled,
+           let data = OfflineCache.loadData(key: OfflineCache.Key.cover(book.id)) {
+            return data
+        }
         var coverRequest = try URLRequest(url: url("/library/\(book.id)/cover"))
         coverRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         coverRequest.cachePolicy = .returnCacheDataElseLoad
@@ -80,6 +84,10 @@ extension BackendAPI {
         _ book: Book,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
+        if UITestRuntime.isEnabled, let cached = Self.cachedBook(id: book.id) {
+            progress(1)
+            return cached
+        }
         if let cached = Self.cachedBook(id: book.id) { return cached }
         var request = try URLRequest(url: url("/library/\(book.id)/file"), timeoutInterval: 3600)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

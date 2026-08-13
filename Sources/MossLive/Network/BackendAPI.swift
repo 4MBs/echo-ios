@@ -217,6 +217,9 @@ struct BackendAPI {
         query: [URLQueryItem]? = nil,
         jsonBody: [String: Any]? = nil
     ) async throws -> Data {
+        if UITestRuntime.isEnabled {
+            return try await UITestRuntime.response(path: path, method: method, body: jsonBody)
+        }
         var request = try URLRequest(url: url(path, query: query), timeoutInterval: 100)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -416,6 +419,9 @@ struct BackendAPI {
     /// stream an authenticated URL, so we fetch it once and reuse it). The file
     /// is either .m4a or .wav depending on what the server produced.
     func downloadAudio(id: String) async throws -> URL {
+        if UITestRuntime.isEnabled, let cached = Self.cachedAudio(id: id) {
+            return cached
+        }
         let dir = Self.audioDirectory()
         if let cached = Self.cachedAudio(id: id) { return cached }
         var req = try URLRequest(url: url("/sessions/\(id)/audio"), timeoutInterval: 120)

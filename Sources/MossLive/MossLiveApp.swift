@@ -1,9 +1,18 @@
 import Combine
 import SwiftUI
+import UIKit
 
 @main
 struct MossLiveApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        UITestRuntime.installFixtures()
+        _model = State(initialValue: AppModel())
+        if UITestRuntime.isEnabled {
+            UIView.setAnimationsEnabled(false)
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -68,6 +77,7 @@ struct MainTabView: View {
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
                     .badge(tab == .stunden ? pendingNoteImportCount : 0)
+                    .accessibilityIdentifier("tab.\(tab.rawValue)")
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
@@ -114,6 +124,7 @@ struct MainTabView: View {
             List(selection: selection) {
                 Label(AppTab.einstellungen.title, systemImage: AppTab.einstellungen.systemImage)
                     .tag(AppTab.einstellungen)
+                    .accessibilityIdentifier("tab.\(AppTab.einstellungen.rawValue)")
             }
             .listStyle(.sidebar)
             .scrollDisabled(true)

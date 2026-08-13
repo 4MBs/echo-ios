@@ -1,0 +1,132 @@
+name: Exhaustive iOS Simulator UI Tests
+
+on:
+  push:
+    paths:
+      - "Sources/**"
+      - "Tests/MossLiveUITests/**"
+      - "LocalPackages/**"
+      - "project.yml"
+      - ".github/workflows/ui-tests.yml"
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "Tests/MossLiveUITests/**"
+      - "LocalPackages/**"
+      - "project.yml"
+      - ".github/workflows/ui-tests.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ui-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_PATH: /Applications/Xcode_26.5.app
+
+jobs:
+  simulator-suite:
+    name: ${{ matrix.form-factor }} complete suite
+    runs-on: macos-26
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        form-factor: [iphone, ipad]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode and print environment
+        run: |
+          if [ -d "$XCODE_PATH" ]; then
+            sudo xcode-select -s "$XCODE_PATH"
+          fi
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .spm-packages
+          key: ui-spm-${{ runner.os }}-${{ hashFiles('project.yml', 'LocalPackages/OpusShim/Package.swift') }}
+          restore-keys: ui-spm-${{ runner.os }}-
+
+      - name: Resolve dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project MossLive.xcodeproj \
+            -scheme MossLiveUITests \
+            -clonedSourcePackagesDirPath .spm-packages
+
+      - name: Pick simulator
+        id: simulator
+        env:
+          FORM_FACTOR: ${{ matrix.form-factor }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import subprocess
+
+          devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))["devices"]
+          family = os.environ["FORM_FACTOR"]
+          preferred = "iPhone 17 Pro" if family == "iphone" else "iPad Pro 13-inch (M5)"
+          prefix = "iPhone" if family == "iphone" else "iPad"
+          matches = [device for runtime in devices.values() for device in runtime if device["name"].startswith(prefix)]
+          if not matches:
+              raise SystemExit(f"No available {prefix} simulator")
+          picked = next((device for device in matches if device["name"] == preferred), matches[0])
+          print(f"name={picked['name']}")
+          print(f"udid={picked['udid']}")
+          PY
+          echo "Selected ${{ steps.simulator.outputs.name }} (${{ steps.simulator.outputs.udid }})"
+
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
+          open -a Simulator
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
+
+      - name: Run complete XCUITest suite
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project MossLive.xcodeproj \
+            -scheme MossLiveUITests \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -clonedSourcePackagesDirPath .spm-packages \
+            -resultBundlePath UIResults.xcresult \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 180 \
+            -maximum-test-execution-time-allowance 600 \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-test.log
+
+      - name: Export screenshots
+        if: always()
+        run: |
+          mkdir -p UIScreenshots
+          if [ -d UIResults.xcresult ]; then
+            xcrun xcresulttool export attachments \
+              --path UIResults.xcresult \
+              --output-path UIScreenshots || true
+          fi
+          find UIScreenshots -type f -maxdepth 2 -print | sort || true
+
+      - name: Upload result bundle, screenshots, and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-${{ matrix.form-factor }}-${{ github.run_number }}
+          path: |
+            UIResults.xcresult
+            UIScreenshots
+            ui-test.log
+          if-no-files-found: warn
+          retention-days: 30

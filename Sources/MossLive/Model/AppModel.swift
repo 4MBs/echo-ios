@@ -62,10 +62,10 @@ final class AppModel {
     /// PDF surface before the system starts resizing the split view.
     var columnVisibility: NavigationSplitViewVisibility = .all
 
-    let settings = AppSettings()
-    let aiConfiguration = AIConfigurationStore()
+    let settings: AppSettings
+    let aiConfiguration: AIConfigurationStore
     let timetable: TimetableStore
-    let chat = ChatStore()
+    let chat: ChatStore
     /// Whether the server can be reached — every screen asks this before it
     /// decides between live content and what it has stored.
     let connectivity = Connectivity.shared
@@ -83,7 +83,24 @@ final class AppModel {
     private var lastNotificationSyncDay = Date.distantPast
 
     init() {
+        settings = AppSettings()
+        if UITestRuntime.isEnabled {
+            aiConfiguration = AIConfigurationStore(
+                settings: UITestRuntime.answerSettings,
+                persistOperation: { _, _ in
+                    try? await Task.sleep(for: .milliseconds(80))
+                }
+            )
+            chat = ChatStore(loadPersisted: false)
+        } else {
+            aiConfiguration = AIConfigurationStore()
+            chat = ChatStore()
+        }
         timetable = TimetableStore(settings: settings)
+        if UITestRuntime.isEnabled {
+            configureUITestState()
+            return
+        }
         audio.onPacket = { [client] packet in
             client.sendAudioFrame(
                 WireProtocol.packAudioFrame(
@@ -191,6 +208,10 @@ final class AppModel {
     // MARK: - User intents
 
     func startRecording() async {
+        if UITestRuntime.isEnabled {
+            await startUITestRecording()
+            return
+        }
         bannerMessage = nil
         guard settings.isConfigured, let url = settings.websocketURL else {
             phase = .error("Zuerst Serveradresse und Token in den Einstellungen setzen.")
@@ -220,6 +241,14 @@ final class AppModel {
     }
 
     func stopRecording() {
+        if UITestRuntime.isEnabled {
+            wantsRecording = false
+            phase = .disconnected
+            isTranscribing = false
+            recordingStartedAt = nil
+            bufferedSeconds = 0
+            return
+        }
         wantsRecording = false
         recordingStartedAt = nil
         lastRoundTripMs = nil
@@ -369,5 +398,69 @@ final class AppModel {
         if audioEvents.count > 100 {
             audioEvents.removeLast(audioEvents.count - 100)
         }
+    }
+
+    private func configureUITestState() {
+        selectedTab = UITestRuntime.requestedTab ?? .aufnahme
+        connectivity.configureForUITests(online: UITestRuntime.scenario != .offline)
+        switch UITestRuntime.scenario {
+        case .recording:
+            applyUITestRecordingState()
+        case .reconnecting:
+            applyUITestRecordingState()
+            phase = .reconnecting
+            bufferedSeconds = 83
+            bannerMessage = "Die Verbindung wird im Test wiederhergestellt."
+        case .serverError:
+            phase = .error("Deterministischer Testfehler.")
+        case .unauthorized:
+            phase = .error("Testzugang abgelehnt.")
+        case .offline:
+            connectivity.configureForUITests(online: false)
+        default:
+            break
+        }
+    }
+
+    private func startUITestRecording() async {
+        bannerMessage = nil
+        phase = .connecting
+        try? await Task.sleep(for: .milliseconds(180))
+        applyUITestRecordingState()
+    }
+
+    private func applyUITestRecordingState() {
+        wantsRecording = true
+        phase = .recording
+        isTranscribing = true
+        recordingStartedAt = Date().addingTimeInterval(-67)
+        lastRoundTripMs = 42
+        sessionId = "ui-test-session"
+        micLevels = (0 ..< 48).map { Float(($0 % 11) + 1) / 14 }
+        segments = [
+            TranscriptSegment(t0: 0, t1: 5, speaker: "Lehrkraft", text: "Das ist eine Testaufnahme."),
+            TranscriptSegment(t0: 5, t1: 11, speaker: "Schüler", text: "Alle Zustände bleiben deterministisch."),
+        ]
+        partial = [TranscriptSegment(t0: 11, t1: 14, speaker: "Lehrkraft", text: "Gerade wird …")]
+        audioDiagnostics = AudioDiagnosticsSnapshot(
+            level: 0.48,
+            rmsDBFS: -22,
+            peakDBFS: -8,
+            noiseFloorDBFS: -48,
+            clippedSamplePercent: 0.1,
+            hardwareSampleRate: 48_000,
+            hardwareChannels: 1,
+            route: "Testmikrofon",
+            voiceProcessing: true,
+            automaticGainControl: true,
+            capturedSeconds: 67,
+            lostBuffers: 1,
+            interruptions: 1,
+            routeChanges: 1
+        )
+        audioEvents = [
+            AudioDiagnosticEvent(kind: .routeChanged, message: "Testaudio auf internes Mikrofon gewechselt"),
+            AudioDiagnosticEvent(kind: .started, message: "Deterministische Aufnahme gestartet"),
+        ]
     }
 }

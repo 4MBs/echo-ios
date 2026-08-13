@@ -173,7 +173,10 @@ final class ChatStore {
 
     init(loadPersisted: Bool = true) {
         persistenceEnabled = loadPersisted
-        if loadPersisted,
+        if UITestRuntime.isEnabled, UITestRuntime.scenario != .empty {
+            conversations = Self.uiTestConversations
+            selectedConversationID = conversations[0].id
+        } else if loadPersisted,
            let saved = OfflineCache.load(SavedState.self, key: Self.storageKey),
            !saved.conversations.isEmpty {
             let restored = saved.conversations.sorted { $0.updatedAt > $1.updatedAt }
@@ -391,7 +394,29 @@ final class ChatStore {
                       self.activeRequestID == requestID,
                       let index = self.conversations.firstIndex(where: { $0.id == selectedID })
                 else { return }
-                self.conversations[index].messages.append(Message(role: .assistant, text: answer))
+                if UITestRuntime.isEnabled {
+                    let messageID = UUID()
+                    self.conversations[index].messages.append(
+                        Message(id: messageID, role: .assistant, text: "")
+                    )
+                    let words = answer.split(separator: " ", omittingEmptySubsequences: false)
+                    for (wordIndex, word) in words.enumerated() {
+                        try await Task.sleep(for: .milliseconds(28))
+                        guard !Task.isCancelled,
+                              self.activeRequestID == requestID,
+                              let conversationIndex = self.conversations.firstIndex(where: { $0.id == selectedID }),
+                              let messageIndex = self.conversations[conversationIndex].messages.firstIndex(
+                                  where: { $0.id == messageID }
+                              )
+                        else { return }
+                        if wordIndex > 0 {
+                            self.conversations[conversationIndex].messages[messageIndex].text += " "
+                        }
+                        self.conversations[conversationIndex].messages[messageIndex].text += word
+                    }
+                } else {
+                    self.conversations[index].messages.append(Message(role: .assistant, text: answer))
+                }
                 self.conversations[index].updatedAt = Date()
                 self.finishRequest(requestID)
             } catch is CancellationError {
@@ -469,5 +494,61 @@ final class ChatStore {
         Task { [persistenceWriter] in
             await persistenceWriter.save(snapshot, revision: revision, key: Self.storageKey)
         }
+    }
+
+    private static var uiTestConversations: [Conversation] {
+        let firstID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+        let secondID = UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
+        let base = Date(timeIntervalSince1970: 1_775_702_400)
+        let longSuffix = UITestRuntime.scenario == .longContent
+            ? String(repeating: " Dieser lange Absatz prüft Umbruch, Scrollen und dynamische Textgrößen.", count: 18)
+            : ""
+        let attachment = Attachment(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
+            kind: .document,
+            fileName: "Versuchsprotokoll.pdf",
+            mimeType: "application/pdf",
+            byteCount: 42_000,
+            extractedText: "Beobachtung: Der Test ist reproduzierbar."
+        )
+        return [
+            Conversation(
+                id: firstID,
+                title: "Ursache und Wirkung",
+                messages: [
+                    Message(role: .user, text: "Erkläre Ursache und Wirkung.", date: base),
+                    Message(
+                        role: .assistant,
+                        text: "Eine Ursache löst unter bestimmten Bedingungen eine Wirkung aus.\(longSuffix)",
+                        date: base.addingTimeInterval(1)
+                    ),
+                    Message(
+                        role: .user,
+                        text: "Beziehe das Dokument ein.",
+                        date: base.addingTimeInterval(2),
+                        attachments: [attachment]
+                    ),
+                    Message(
+                        role: .assistant,
+                        text: "Das Versuchsprotokoll bestätigt den reproduzierbaren Zusammenhang.",
+                        date: base.addingTimeInterval(3)
+                    ),
+                ],
+                context: .lesson(id: "lesson-1", title: "Teststunde Mathematik"),
+                createdAt: base,
+                updatedAt: base.addingTimeInterval(3)
+            ),
+            Conversation(
+                id: secondID,
+                title: "Ohne Kontext",
+                messages: [
+                    Message(role: .user, text: "Was kannst du?", date: base.addingTimeInterval(-60)),
+                    Message(role: .assistant, text: "Ich helfe beim Lernen.", date: base.addingTimeInterval(-59)),
+                ],
+                context: .none,
+                createdAt: base.addingTimeInterval(-60),
+                updatedAt: base.addingTimeInterval(-59)
+            ),
+        ]
     }
 }

@@ -73,7 +73,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showAddSheet, onDismiss: presentPendingPicker) {
             ChatAddSheet(
-                canUseCamera: UIImagePickerController.isSourceTypeAvailable(.camera),
+                canUseCamera: UITestRuntime.isEnabled || UIImagePickerController.isSourceTypeAvailable(.camera),
                 onCamera: { choose(.camera) },
                 onPhotos: { choose(.photos) },
                 onFiles: { choose(.files) }
@@ -225,6 +225,7 @@ struct ChatView: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1 ... 5)
                 .focused($inputFocused)
+                .accessibilityIdentifier("chat.input")
                 .submitLabel(.send)
                 .onSubmit(send)
                 .padding(.horizontal, 16)
@@ -245,6 +246,7 @@ struct ChatView: View {
                         .foregroundStyle(.secondary)
                         .disabled(chat.sending || processingAttachmentCount > 0)
                         .accessibilityLabel("Zum Chat hinzufügen")
+                        .accessibilityIdentifier("chat.add")
 
                         contextMenu
                     }
@@ -274,6 +276,7 @@ struct ChatView: View {
                         .controlSize(.regular)
                         .disabled(!chat.sending && !canSend)
                         .accessibilityLabel(chat.sending ? "Antwort stoppen" : "Nachricht senden")
+                        .accessibilityIdentifier("chat.send")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -365,6 +368,38 @@ struct ChatView: View {
     // MARK: - Attachments
 
     private func choose(_ action: PickerAction) {
+        if UITestRuntime.isEnabled {
+            pendingPickerAction = nil
+            showAddSheet = false
+            let attachment: ChatStore.Attachment = switch action {
+            case .camera:
+                .init(
+                    kind: .image,
+                    fileName: "Kamerafoto.jpg",
+                    mimeType: "image/jpeg",
+                    byteCount: 24_000,
+                    extractedText: "Fotografierte Testnotiz: Ursache führt zur Wirkung."
+                )
+            case .photos:
+                .init(
+                    kind: .image,
+                    fileName: "Testfoto.jpg",
+                    mimeType: "image/jpeg",
+                    byteCount: 18_000,
+                    extractedText: "Deterministischer Text aus der Fotomediathek."
+                )
+            case .files:
+                .init(
+                    kind: .document,
+                    fileName: "Testdokument.pdf",
+                    mimeType: "application/pdf",
+                    byteCount: 42_000,
+                    extractedText: "Deterministischer Dokumentinhalt für den Chat."
+                )
+            }
+            pendingAttachments.append(attachment)
+            return
+        }
         pendingPickerAction = action
         showAddSheet = false
     }

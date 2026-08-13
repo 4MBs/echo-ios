@@ -157,6 +157,19 @@ targets:
     dependencies:
       - target: MossLive
 
+  MossLiveUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - Tests/MossLiveUITests
+    dependencies:
+      - target: MossLive
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fourmbs.mosslive.uitests
+        TEST_TARGET_NAME: MossLive
+        CODE_SIGN_STYLE: Automatic
+
 schemes:
   MossLive:
     build:
@@ -165,4 +178,13 @@ schemes:
         MossLiveTests: [test]
     test:
       targets: [MossLiveTests]
+      gatherCoverageData: false
+
+  MossLiveUITests:
+    build:
+      targets:
+        MossLive: all
+        MossLiveUITests: [test]
+    test:
+      targets: [MossLiveUITests]
       gatherCoverageData: false

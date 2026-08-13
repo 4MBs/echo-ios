@@ -27,6 +27,7 @@ final class Connectivity {
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
+            guard !UITestRuntime.isEnabled else { return }
             let satisfied = path.status == .satisfied
             Task { @MainActor in
                 guard let self else { return }
@@ -48,6 +49,12 @@ final class Connectivity {
     func note(failure error: Error) {
         guard Self.meansUnreachable(error) else { return }
         serverAnswers = false
+    }
+
+    func configureForUITests(online: Bool) {
+        guard UITestRuntime.isEnabled else { return }
+        hasNetwork = online
+        serverAnswers = online
     }
 
     /// Deliberately not isolated: it is a pure test on an error value, and the
