@@ -63,7 +63,12 @@ final class SettingsUITests: EchoUITestCase {
         back()
 
         openSettingsPage("Über Echo", title: "Über Echo")
-        XCTAssertTrue(app.staticTexts["Qwen3-ASR 1.7B"].exists)
+        // LabeledContent combines its title and value into one accessibility
+        // node on compact-width iOS, while regular width exposes child text.
+        let transcriptionModel = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Qwen3-ASR 1.7B'"))
+            .firstMatch
+        XCTAssertTrue(transcriptionModel.waitForExistence(timeout: 3))
         shot("settings-about")
         rotateAndCapture("settings-about")
     }

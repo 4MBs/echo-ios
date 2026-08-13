@@ -12,6 +12,7 @@ struct BookAIPanel: View {
     let numbering: BookPageNumbering
     let visiblePages: [Int]
     let region: BackendAPI.BookPageRegion?
+    let isSelectingRegion: Bool
     let store: BookAIStore
     @Binding var detent: PresentationDetent
     let goToPage: (Int) -> Void
@@ -419,7 +420,13 @@ struct BookAIPanel: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Bereich markieren")
-        .accessibilityValue(region == nil ? "Ganze Seite" : "Bereich ausgewählt")
+        .accessibilityValue(regionSelectionValue)
+    }
+
+    private var regionSelectionValue: String {
+        if region != nil { return "Bereich ausgewählt" }
+        if isSelectingRegion { return "Auswahl aktiv" }
+        return "Ganze Seite"
     }
 
     @ViewBuilder

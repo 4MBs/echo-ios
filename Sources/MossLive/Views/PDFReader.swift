@@ -174,6 +174,7 @@ struct PDFReader: View {
             numbering: numbering,
             visiblePages: visiblePages,
             region: selectedRegion,
+            isSelectingRegion: selectingRegion,
             store: bookAI,
             detent: $bookAIDetent,
             goToPage: { page in
@@ -229,16 +230,14 @@ struct PDFReader: View {
             selectedRegion = nil
         }
         proxy.clearRegionSelection()
-        // The chat remains visible while its reader enters selection mode. As
-        // the reader no longer changes width here, the overlay starts against
-        // stable bounds and there is no panel-close/reopen animation to fight.
-        DispatchQueue.main.async {
-            proxy.beginRegionSelection { region in
-                bookAIDetent = .medium
-                withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
-                    selectedRegion = region
-                    selectingRegion = false
-                }
+        // The button action already runs on the main actor. Install the UIKit
+        // overlay immediately so the first drag after activation cannot land
+        // on the PDF view during a one-run-loop gap.
+        proxy.beginRegionSelection { region in
+            bookAIDetent = .medium
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                selectedRegion = region
+                selectingRegion = false
             }
         }
     }

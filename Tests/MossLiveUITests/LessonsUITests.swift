@@ -64,7 +64,11 @@ final class LessonsUITests: EchoUITestCase {
         else if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
 
         tapToolbarAction("Teilen")
-        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 4))
+        // UIActivityViewController is exposed by XCTest as a popover-backed
+        // ActivityListView on current iOS, even on iPhone. It is not an
+        // XCUIElementTypeSheet.
+        let shareSheet = app.otherElements["ActivityListView"]
+        XCTAssertTrue(shareSheet.waitForExistence(timeout: 4))
         shot("lesson-share-sheet")
         app.swipeDown()
     }
