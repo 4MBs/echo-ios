@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 final class ChatUITests: EchoUITestCase {
@@ -73,12 +74,21 @@ final class ChatUITests: EchoUITestCase {
         XCTAssertTrue(app.buttons["Nachricht senden"].waitForExistence(timeout: 4))
         shot("chat-stream-cancelled")
 
-        if app.buttons["Antwort neu erstellen"].exists {
-            tap(app.buttons["Antwort neu erstellen"])
-            XCTAssertTrue(app.buttons["Antwort neu erstellen"].waitForExistence(timeout: 25))
+        if app.buttons["chat.regenerate"].exists {
+            tap(app.buttons["chat.regenerate"])
+            XCTAssertTrue(app.buttons["chat.regenerate"].waitForExistence(timeout: 25))
         }
-        tap(app.buttons["Antwort kopieren"].firstMatch)
-        XCTAssertTrue(app.staticTexts["chat.copy.confirmation"].waitForExistence(timeout: 3))
+        UIPasteboard.general.items = []
+        tap(app.buttons["chat.copy"].firstMatch)
+        shot("chat-copy-confirmation")
+        // The visible "Kopiert" state is deliberately short-lived, and XCTest's
+        // own idle wait after the tap can outlast it on a loaded hosted runner.
+        // Assert the result the student depends on instead of the toast's timing.
+        let pasted = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in UIPasteboard.general.hasStrings },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [pasted], timeout: 5), .completed)
 
         tap(app.buttons["Neue Unterhaltung"])
         XCTAssertFalse(app.staticTexts["Erkläre Ursache und Wirkung."].exists)

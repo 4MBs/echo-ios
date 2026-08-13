@@ -75,8 +75,27 @@ struct SubjectFolderTile: View {
     let style: SubjectStyle
 
     @ScaledMetric(relativeTo: .headline) private var iconSize: CGFloat = 24
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        folder
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name), \(countLabel)")
+    }
+
+    /// The folder keeps its squarish proportion at normal text sizes, because a
+    /// grid of equal cards is what makes it read as a shelf. At accessibility
+    /// sizes it grows to whatever the name and the count need instead: the text
+    /// scales the whole way rather than being capped or cropped by the tile.
+    @ViewBuilder private var folder: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            silhouette
+        } else {
+            silhouette.aspectRatio(1.04, contentMode: .fit)
+        }
+    }
+
+    private var silhouette: some View {
         ZStack(alignment: .topLeading) {
             FolderShape()
                 .fill(
@@ -93,9 +112,6 @@ struct SubjectFolderTile: View {
                 )
             label
         }
-        .aspectRatio(1.04, contentMode: .fit)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(name), \(countLabel)")
     }
 
     private var label: some View {
@@ -111,9 +127,12 @@ struct SubjectFolderTile: View {
             Text(name)
                 .font(.headline)
                 .foregroundStyle(.primary)
-                .lineLimit(2)
+                // Two lines are the tile's budget while it holds its shape. Once
+                // it grows with the text, nothing has to be dropped at all.
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .minimumScaleFactor(0.75)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 2)
                 .padding(.vertical, 2)
                 .accessibilityIdentifier("subject-folder-title-visual")
@@ -121,7 +140,7 @@ struct SubjectFolderTile: View {
             Text(countLabel)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .minimumScaleFactor(0.75)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 2)
@@ -129,10 +148,6 @@ struct SubjectFolderTile: View {
                 .accessibilityIdentifier("subject-folder-count-visual")
                 .accessibilityHidden(true)
         }
-        // The folder is a fixed-proportion graphical tile. Cap only its visual
-        // decoration; the parent still exposes the complete untruncated name
-        // and count to VoiceOver at every Dynamic Type size.
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .padding(.top, FolderGeometry.tabHeight + 14)
         .padding(.horizontal, 16)
         .padding(.bottom, 16)

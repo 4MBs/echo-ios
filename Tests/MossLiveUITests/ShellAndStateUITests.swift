@@ -78,21 +78,13 @@ final class ShellAndStateUITests: EchoUITestCase {
                 ]
                 let isSystemSidebarNode = issue.element?.identifier.hasPrefix("tab.") == true
                     || sidebarLabels.contains(issue.element?.label ?? "")
-                // SubjectFolderTile exposes one complete parent label. Apple's
-                // audit still snapshots its accessibility-hidden visual title
-                // and reports an intact final glyph as clipped.
-                let isHiddenFolderTitle = issue.element?.identifier == "subject-folder-title-visual"
-                let isHiddenFolderCount = issue.element?.identifier == "subject-folder-count-visual"
                 // `.searchable` is rendered by iOS as UISearchBarTextField.
                 // The audit reports its own one-line field as clipped even
                 // though the captured glyphs and ellipsis fit its system frame.
                 let isSystemSearchField = issue.element?.elementType == .searchField
                     && issue.element?.label == "Fach oder Stunde suchen"
                 return issue.auditType == .textClipped
-                    && (isSystemSidebarNode
-                        || isHiddenFolderTitle
-                        || isHiddenFolderCount
-                        || isSystemSearchField)
+                    && (isSystemSidebarNode || isSystemSearchField)
             }
             shot("accessibility-audit-\(tab)")
         }

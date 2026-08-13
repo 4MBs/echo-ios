@@ -66,7 +66,7 @@ final class LibraryReaderUITests: EchoUITestCase {
             tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Quelle'")).firstMatch)
             shot("book-ai-citations")
         }
-        tap(app.buttons["Bereich markieren"])
+        tap(app.buttons["bookAI.region"])
         shot("reader-region-selection-mode")
     }
 
@@ -116,7 +116,20 @@ final class LibraryReaderUITests: EchoUITestCase {
         shot("reader-pinch-zoom-out")
 
         tap(app.buttons["Seite fragen"])
-        tap(app.buttons["Bereich markieren"])
+        // The control keeps one stable identifier while its label changes with
+        // the selection state, so the same element can be followed throughout.
+        let regionButton = app.buttons["bookAI.region"]
+        tap(regionButton)
+        let active = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == 'Auswahl aktiv'"),
+            object: regionButton
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [active], timeout: 5),
+            .completed,
+            "Region selection did not become active after tapping the control"
+        )
+        shot("reader-region-selection-active")
         let isPad = window.frame.width > 700
         let start = window.coordinate(
             withNormalizedOffset: CGVector(dx: isPad ? 0.38 : 0.25, dy: 0.25)
@@ -125,12 +138,15 @@ final class LibraryReaderUITests: EchoUITestCase {
             withNormalizedOffset: CGVector(dx: isPad ? 0.58 : 0.68, dy: 0.42)
         )
         start.press(forDuration: 0.35, thenDragTo: end)
-        let regionButton = app.buttons["Bereich markieren"]
         let selected = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == 'Bereich ausgewählt'"),
             object: regionButton
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 4), .completed)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [selected], timeout: 6),
+            .completed,
+            "The drag on the page did not produce a selected region"
+        )
         shot("reader-region-selected")
         tap(app.buttons["Aufheben"])
     }

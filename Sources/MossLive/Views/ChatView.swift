@@ -560,8 +560,13 @@ private struct ChatMessageRow: View {
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
+                    // Message actions are the smallest controls in the thread;
+                    // keep their touch area at the 44-point minimum.
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(copied ? "Kopiert" : "Antwort kopieren")
+                    .accessibilityIdentifier("chat.copy")
 
                     if copied {
                         Text("Kopiert")
@@ -577,8 +582,11 @@ private struct ChatMessageRow: View {
                                 .frame(width: 32, height: 32)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .foregroundStyle(.secondary)
                         .accessibilityLabel("Antwort neu erstellen")
+                        .accessibilityIdentifier("chat.regenerate")
                     }
                     Spacer()
                 }

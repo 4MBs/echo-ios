@@ -419,8 +419,14 @@ struct BookAIPanel: View {
                 .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
+        // A dashed square is mostly empty, so the glyph's own bounds are both
+        // below the 44-point minimum and hollow in the middle. Give the control
+        // a full, solid hit area like the chat composer's attachment button.
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
         .accessibilityLabel(isSelectingRegion ? "Bereichsauswahl aktiv" : "Bereich markieren")
         .accessibilityValue(regionSelectionValue)
+        .accessibilityIdentifier("bookAI.region")
     }
 
     private var regionSelectionValue: String {
