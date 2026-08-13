@@ -52,8 +52,7 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(app.buttons["Neue Unterhaltung"])
         XCTAssertTrue(app.textFields["bookAI.input"].waitForExistence(timeout: 4))
         let field = app.textFields["bookAI.input"]
-        field.tap()
-        field.typeText("Was ist die Kernaussage?")
+        typeText("Was ist die Kernaussage?", into: field)
         tap(app.buttons["bookAI.send"])
         XCTAssertTrue(app.staticTexts["KI denkt nach"].waitForExistence(timeout: 3))
         shot("book-ai-loading")
@@ -81,6 +80,57 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(app.buttons["Echo Testbuch"])
         XCTAssertTrue(app.buttons["Nächste Seite"].waitForExistence(timeout: 8))
         shot("reader-offline-cached")
+    }
+
+    func testBookAssistantDictationKeepsComposerGeometryFixed() {
+        openReader()
+        tap(app.buttons["Seite fragen"])
+        let microphone = app.buttons["Frage diktieren"]
+        let send = app.buttons["bookAI.send"]
+        let input = app.textFields["bookAI.input"]
+        XCTAssertTrue(microphone.waitForExistence(timeout: 5))
+        let microphoneFrame = microphone.frame
+        let sendFrame = send.frame
+        let inputFrame = input.frame
+
+        tap(microphone)
+        let stop = app.buttons["Diktat beenden"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 3))
+        XCTAssertEqual(stop.frame, microphoneFrame)
+        XCTAssertEqual(send.frame, sendFrame)
+        XCTAssertEqual(input.frame, inputFrame)
+        shot("book-ai-dictation-stable-composer")
+
+        tap(stop)
+        XCTAssertTrue(app.buttons["Frage diktieren"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["Frage diktieren"].frame, microphoneFrame)
+        XCTAssertEqual(send.frame, sendFrame)
+        XCTAssertEqual(input.frame, inputFrame)
+    }
+
+    func testReaderSwipePinchAndRegionDragGestures() {
+        openReader()
+        XCTAssertTrue(app.buttons["Nächste Seite"].waitForExistence(timeout: 8))
+        let window = app.windows.firstMatch
+        window.swipeLeft()
+        shot("reader-swipe-left")
+        window.swipeRight()
+        window.pinch(withScale: 1.6, velocity: 2)
+        shot("reader-pinch-zoom-in")
+        window.pinch(withScale: 0.62, velocity: -2)
+        shot("reader-pinch-zoom-out")
+
+        tap(app.buttons["Seite fragen"])
+        tap(app.buttons["Bereich markieren"])
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.18))
+        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.58, dy: 0.38))
+        start.press(forDuration: 0.2, thenDragTo: end)
+        if app.staticTexts["Bereich ausgewählt"].waitForExistence(timeout: 3) {
+            shot("reader-region-selected")
+            tap(app.buttons["Aufheben"])
+        } else {
+            tap(app.buttons["Abbrechen"])
+        }
     }
 
     private func openReader() {

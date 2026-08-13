@@ -224,6 +224,7 @@ struct ChatView: View {
                 )
                 .textFieldStyle(.plain)
                 .lineLimit(1 ... 5)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .focused($inputFocused)
                 .accessibilityIdentifier("chat.input")
                 .submitLabel(.send)
@@ -279,6 +280,7 @@ struct ChatView: View {
                         .accessibilityIdentifier("chat.send")
                     }
                 }
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
@@ -574,7 +576,7 @@ private struct ChatMessageRow: View {
                 if isLastAssistant {
                     Text("KI kann Fehler machen. Prüfe wichtige Informationen.")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 4)
@@ -829,6 +831,7 @@ private struct ChatAddSheet: View {
             .background(.background, in: RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("chat.add.\(title.lowercased())")
     }
 }
 

@@ -13,16 +13,16 @@ final class LessonsUITests: EchoUITestCase {
         let search = app.searchFields.firstMatch
         tap(search)
         search.typeText("Physik")
-        tap(app.buttons["Physik"])
+        tap(button(containing: "Physik"))
         XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 3))
         shot("lessons-empty-subject-alert")
         tap(app.alerts.firstMatch.buttons["OK"])
         search.buttons["Clear text"].tap()
 
-        tap(app.buttons["Mathematik"])
+        tap(button(containing: "Mathematik"))
         XCTAssertTrue(app.staticTexts["Teststunde Mathematik"].waitForExistence(timeout: 5))
         shot("lessons-subject-board")
-        tap(app.buttons["Teststunde Mathematik"])
+        tap(button(containing: "Teststunde Mathematik"))
         let lessonSummary = app.staticTexts
             .matching(NSPredicate(format: "label CONTAINS 'Ursache und Wirkung'"))
             .firstMatch
@@ -44,8 +44,7 @@ final class LessonsUITests: EchoUITestCase {
         XCTAssertTrue(app.navigationBars["Mathematik"].waitForExistence(timeout: 4))
         shot("lesson-vocabulary")
         if app.textFields.firstMatch.exists {
-            app.textFields.firstMatch.tap()
-            app.textFields.firstMatch.typeText("Testbegriff")
+            typeText("Testbegriff", into: app.textFields.firstMatch)
             tap(app.buttons["Hinzufügen"])
             XCTAssertTrue(app.staticTexts["Testbegriff"].waitForExistence(timeout: 4))
         }
@@ -72,8 +71,8 @@ final class LessonsUITests: EchoUITestCase {
 
     private func openLesson() {
         launch(tab: "stunden")
-        tap(app.buttons["Mathematik"])
-        tap(app.buttons["Teststunde Mathematik"])
+        tap(button(containing: "Mathematik"))
+        tap(button(containing: "Teststunde Mathematik"))
         XCTAssertTrue(app.buttons["Transkriptoptionen"].waitForExistence(timeout: 5))
     }
 }

@@ -41,19 +41,18 @@ final class ChatUITests: EchoUITestCase {
 
     func testFakeCameraPhotoDocumentAttachmentsRemoveAndSend() {
         let choices = [
-            ("Kamera", "Kamerafoto.jpg"),
-            ("Fotos", "Testfoto.jpg"),
-            ("Dateien", "Testdokument.pdf"),
+            ("kamera", "Kamera", "Kamerafoto.jpg"),
+            ("fotos", "Fotos", "Testfoto.jpg"),
+            ("dateien", "Dateien", "Testdokument.pdf"),
         ]
-        for (choice, fileName) in choices {
+        for (identifier, choice, fileName) in choices {
             launch(tab: "chat")
             tap(app.buttons["chat.add"])
-            tap(app.buttons[choice])
+            XCTAssertTrue(app.navigationBars["Zum Chat hinzufügen"].waitForExistence(timeout: 4))
+            tap(app.buttons["chat.add.\(identifier)"])
             XCTAssertTrue(app.staticTexts[fileName].waitForExistence(timeout: 4))
             shot("chat-attachment-\(choice)")
-            let input = app.textFields["chat.input"]
-            input.tap()
-            input.typeText("Analysiere diesen Anhang")
+            typeText("Analysiere diesen Anhang", into: app.textFields["chat.input"])
             tap(app.buttons["chat.send"])
             XCTAssertTrue(app.staticTexts["KI denkt nach"].waitForExistence(timeout: 3))
             let answer = app.staticTexts
@@ -66,9 +65,7 @@ final class ChatUITests: EchoUITestCase {
 
     func testStreamingStopRegenerateCopyNewAndClearConversation() {
         launch(tab: "chat", scenario: "longContent")
-        let input = app.textFields["chat.input"]
-        input.tap()
-        input.typeText("Erzeuge eine lange Testantwort")
+        typeText("Erzeuge eine lange Testantwort", into: app.textFields["chat.input"])
         tap(app.buttons["chat.send"])
         XCTAssertTrue(app.buttons["Antwort stoppen"].waitForExistence(timeout: 3))
         shot("chat-streaming")
@@ -98,9 +95,7 @@ final class ChatUITests: EchoUITestCase {
                     .firstMatch
                 XCTAssertTrue(offlineStatus.waitForExistence(timeout: 3))
             } else {
-                let input = app.textFields["chat.input"]
-                input.tap()
-                input.typeText("Fehler auslösen")
+                typeText("Fehler auslösen", into: app.textFields["chat.input"])
                 tap(app.buttons["chat.send"])
                 let errorStatus = app.staticTexts
                     .matching(NSPredicate(format: "label CONTAINS 'Test'"))
@@ -109,5 +104,30 @@ final class ChatUITests: EchoUITestCase {
             }
             shot("chat-error-\(scenario)")
         }
+    }
+
+    func testDictationNeverMovesOrResizesTheComposer() {
+        launch(tab: "chat")
+        let microphone = app.buttons["Frage diktieren"]
+        let send = app.buttons["chat.send"]
+        let input = app.textFields["chat.input"]
+        XCTAssertTrue(microphone.waitForExistence(timeout: 5))
+        let microphoneFrame = microphone.frame
+        let sendFrame = send.frame
+        let inputFrame = input.frame
+
+        tap(microphone)
+        let stop = app.buttons["Diktat beenden"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 3))
+        XCTAssertEqual(stop.frame, microphoneFrame)
+        XCTAssertEqual(send.frame, sendFrame)
+        XCTAssertEqual(input.frame, inputFrame)
+        shot("chat-dictation-stable-composer")
+
+        tap(stop)
+        XCTAssertTrue(app.buttons["Frage diktieren"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["Frage diktieren"].frame, microphoneFrame)
+        XCTAssertEqual(send.frame, sendFrame)
+        XCTAssertEqual(input.frame, inputFrame)
     }
 }

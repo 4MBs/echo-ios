@@ -166,6 +166,7 @@ final class AppModel {
     /// (Re)schedule start-of-lesson notifications from the current settings.
     func syncTimetableNotifications() async {
         lastNotificationSyncDay = Date()
+        if UITestRuntime.isEnabled { return }
         await timetable.syncNotifications(enabled: settings.lessonNotifications)
     }
 

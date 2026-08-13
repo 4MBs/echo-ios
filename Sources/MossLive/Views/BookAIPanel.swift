@@ -351,6 +351,7 @@ struct BookAIPanel: View {
                 )
                 .textFieldStyle(.plain)
                 .lineLimit(1 ... 5)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .focused($inputFocused)
                 .accessibilityIdentifier("bookAI.input")
                 .submitLabel(.send)
@@ -394,6 +395,7 @@ struct BookAIPanel: View {
                         .accessibilityIdentifier("bookAI.send")
                     }
                 }
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)

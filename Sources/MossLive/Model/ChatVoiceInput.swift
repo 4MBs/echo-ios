@@ -16,6 +16,7 @@ final class ChatVoiceInput {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "de-DE"))
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var mockTask: Task<Void, Never>?
     private var hasInputTap = false
 
     func toggle() async {
@@ -29,6 +30,16 @@ final class ChatVoiceInput {
     func start() async {
         guard !isRecording else { return }
         errorMessage = nil
+        if UITestRuntime.isEnabled {
+            transcript = ""
+            isRecording = true
+            mockTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(240))
+                guard !Task.isCancelled else { return }
+                self?.transcript = "Deterministisches Diktat"
+            }
+            return
+        }
 
         guard await requestSpeechPermission() else {
             errorMessage = "Spracherkennung ist nicht erlaubt. Du kannst sie in den iOS-Einstellungen aktivieren."
@@ -87,12 +98,14 @@ final class ChatVoiceInput {
     }
 
     func stop() {
-        guard isRecording || task != nil || hasInputTap else { return }
+        guard isRecording || task != nil || mockTask != nil || hasInputTap else { return }
         request?.endAudio()
         cleanup()
     }
 
     private func cleanup() {
+        mockTask?.cancel()
+        mockTask = nil
         if audioEngine.isRunning { audioEngine.stop() }
         if hasInputTap {
             audioEngine.inputNode.removeTap(onBus: 0)
@@ -102,6 +115,7 @@ final class ChatVoiceInput {
         task = nil
         request = nil
         isRecording = false
+        if UITestRuntime.isEnabled { return }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 

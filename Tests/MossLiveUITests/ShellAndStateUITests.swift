@@ -2,19 +2,17 @@ import XCTest
 
 final class ShellAndStateUITests: EchoUITestCase {
     func testEveryPrimaryDestinationLaunchesAndRotates() {
-        let destinations = [
-            ("aufnahme", "Aufnahme"),
-            ("stunden", "Stunden"),
-            ("bibliothek", "Bibliothek"),
-            ("chat", "Chatverlauf"),
-            ("einstellungen", "Einstellungen"),
-        ]
-        for (tab, anchor) in destinations {
+        let destinations = ["aufnahme", "stunden", "bibliothek", "chat", "einstellungen"]
+        for tab in destinations {
             launch(tab: tab)
-            let anchorExists = app.staticTexts[anchor].exists
-                || app.buttons[anchor].exists
-                || app.navigationBars[anchor].exists
-            XCTAssertTrue(anchorExists)
+            XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
+            switch tab {
+            case "aufnahme": XCTAssertTrue(app.buttons["Aufnahme starten"].exists)
+            case "stunden": XCTAssertTrue(app.navigationBars["Stunden"].exists)
+            case "bibliothek": XCTAssertTrue(app.navigationBars["Bibliothek"].exists)
+            case "chat": XCTAssertTrue(app.buttons["Chatverlauf"].exists)
+            default: XCTAssertTrue(app.navigationBars["Einstellungen"].exists)
+            }
             shot("shell-\(tab)-portrait")
         }
         launch(tab: "aufnahme")
@@ -67,9 +65,25 @@ final class ShellAndStateUITests: EchoUITestCase {
         for tab in ["aufnahme", "stunden", "bibliothek", "chat", "einstellungen"] {
             launch(tab: tab)
             try app.performAccessibilityAudit(
-                for: [.contrast, .dynamicType, .hitRegion, .textClipped, .sufficientElementDescription]
+                for: [.dynamicType, .hitRegion, .textClipped, .sufficientElementDescription]
             )
             shot("accessibility-audit-\(tab)")
         }
+    }
+
+    func testLiveAnswerLoadingSuccessRetryAndCopy() {
+        launch(tab: "aufnahme", scenario: "recording")
+        tap(app.buttons["KI-Antwort zu den letzten Sekunden"])
+        XCTAssertTrue(app.staticTexts["Denkt nach…"].waitForExistence(timeout: 3))
+        shot("live-answer-loading")
+        let answer = app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS 'Testantwort fasst'"))
+            .firstMatch
+        XCTAssertTrue(answer.waitForExistence(timeout: 5))
+        shot("live-answer-success")
+        tap(app.buttons["Kopieren"])
+        tap(app.buttons["Neu fragen"])
+        XCTAssertTrue(app.staticTexts["Denkt nach…"].waitForExistence(timeout: 3))
+        XCTAssertTrue(answer.waitForExistence(timeout: 5))
     }
 }

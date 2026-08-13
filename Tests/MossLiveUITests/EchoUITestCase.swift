@@ -53,7 +53,7 @@ class EchoUITestCase: XCTestCase {
     }
 
     func replaceText(_ field: XCUIElement, with value: String) {
-        tap(field)
+        focus(field)
         field.press(forDuration: 0.8)
         if app.menuItems["Alles auswählen"].waitForExistence(timeout: 1) {
             app.menuItems["Alles auswählen"].tap()
@@ -63,14 +63,22 @@ class EchoUITestCase: XCTestCase {
         field.typeText(value)
     }
 
+    func typeText(_ value: String, into field: XCUIElement) {
+        focus(field)
+        field.typeText(value)
+    }
+
+    private func focus(_ field: XCUIElement) {
+        tap(field)
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
     func assertVisibleElementsStayOnScreen(file: StaticString = #filePath, line: UInt = #line) {
         let window = app.windows.firstMatch
         guard window.exists else { return }
         let bounds = window.frame.insetBy(dx: -2, dy: -2)
-        let controls = app.descendants(matching: .any).matching(
-            NSPredicate(format: "exists == YES AND hittable == YES")
-        ).allElementsBoundByIndex
-        for control in controls.prefix(120) where !control.frame.isEmpty {
+        let controls = app.descendants(matching: .any).allElementsBoundByIndex
+        for control in controls.prefix(120) where control.exists && control.isHittable && !control.frame.isEmpty {
             XCTAssertTrue(
                 bounds.intersects(control.frame),
                 "Visible control is outside the window: \(control)",
@@ -78,6 +86,10 @@ class EchoUITestCase: XCTestCase {
                 line: line
             )
         }
+    }
+
+    func button(containing text: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
     func rotateAndCapture(_ prefix: String) {

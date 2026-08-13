@@ -12,6 +12,18 @@ final class SettingsUITests: EchoUITestCase {
         back()
 
         openSettingsPage("Stundenplan", title: "Stundenplan")
+        XCTAssertTrue(app.staticTexts["Mit WebUntis verbunden"].waitForExistence(timeout: 4))
+        let reminder = app.switches["Erinnerung bei Stundenbeginn"]
+        tap(reminder)
+        let autoStop = app.switches["Aufnahme bei Stundenende stoppen"]
+        tap(autoStop)
+        tap(autoStop)
+        tap(app.buttons["Anmeldung ändern"])
+        typeText("testschule", into: app.textFields["Schule (z. B. avs-itzehoe)"])
+        typeText("testnutzer", into: app.textFields["Benutzername"])
+        typeText("testpasswort", into: app.secureTextFields["Passwort"])
+        tap(app.buttons["Anmelden"])
+        XCTAssertTrue(app.staticTexts["Verbunden."].waitForExistence(timeout: 5))
         shot("settings-timetable")
         back()
 
@@ -46,8 +58,7 @@ final class SettingsUITests: EchoUITestCase {
         tap(app.buttons["App"])
         tap(app.buttons["Eigene URL"])
         XCTAssertTrue(app.textFields["URL-Schema"].waitForExistence(timeout: 3))
-        app.textFields["URL-Schema"].tap()
-        app.textFields["URL-Schema"].typeText("echo-test://")
+        typeText("echo-test://", into: app.textFields["URL-Schema"])
         shot("settings-quick-switch-custom")
         back()
 
@@ -63,7 +74,11 @@ final class SettingsUITests: EchoUITestCase {
 
         tap(app.buttons["Anbieter"])
         tap(app.buttons["Gemini"])
-        XCTAssertFalse(app.buttons["Modell"].exists)
+        let modelDisappeared = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["Modell"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [modelDisappeared], timeout: 3), .completed)
         shot("settings-ai-gemini")
 
         tap(app.buttons["Anbieter"])
@@ -94,7 +109,7 @@ final class SettingsUITests: EchoUITestCase {
     }
 
     private func openSettingsPage(_ row: String, title: String) {
-        tap(app.buttons[row])
+        tap(button(containing: row))
         XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5))
     }
 
