@@ -7,11 +7,30 @@ import Observation
 @MainActor
 @Observable
 final class AIConfigurationStore {
+    typealias PersistOperation = @Sendable (BackendAPI.AnswerSettings, BackendAPI) async throws -> Void
+
     private(set) var settings: BackendAPI.AnswerSettings?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    private let persistOperation: PersistOperation
+
+    init(
+        settings: BackendAPI.AnswerSettings? = nil,
+        persistOperation: @escaping PersistOperation = { updated, api in
+            let tier = updated.chatgptServiceTier.flatMap { $0.isEmpty ? nil : $0 } ?? "default"
+            try await api.updateAnswerSettings(
+                provider: updated.provider,
+                model: updated.chatgptModel,
+                reasoningEffort: updated.chatgptReasoningEffort,
+                serviceTier: tier
+            )
+        }
+    ) {
+        self.settings = settings
+        self.persistOperation = persistOperation
+    }
 
     func load(api: BackendAPI, force: Bool = false) async {
         guard force || settings == nil else { return }
@@ -145,15 +164,10 @@ final class AIConfigurationStore {
         settings = updated
         errorMessage = nil
         saveTask?.cancel()
-        let serviceTier = serviceTier(for: updated)
+        let persistOperation = persistOperation
         saveTask = Task { [weak self] in
             do {
-                try await api.updateAnswerSettings(
-                    provider: updated.provider,
-                    model: updated.chatgptModel,
-                    reasoningEffort: updated.chatgptReasoningEffort,
-                    serviceTier: serviceTier
-                )
+                try await persistOperation(updated, api)
             } catch {
                 guard !Task.isCancelled else { return }
                 let message = error.localizedDescription

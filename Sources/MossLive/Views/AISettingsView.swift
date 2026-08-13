@@ -174,9 +174,13 @@ struct AIModelSection: View {
 
     private func speedLabel(_ choice: BackendAPI.ServiceTierChoice) -> String {
         switch choice.id {
-        case "default": "Standard – Standardnutzung"
-        case "priority", "fast": "Schnell – erhöhter Verbrauch"
-        default: choice.description.isEmpty ? choice.label : "\(choice.label) – \(choice.description)"
+        case "default": return "Standard – Standardnutzung"
+        case "priority", "fast": return "Schnell – erhöhter Verbrauch"
+        default:
+            let label = choice.label.localizedCaseInsensitiveCompare("Fast") == .orderedSame
+                ? "Schnell"
+                : choice.label
+            return choice.description.isEmpty ? label : "\(label) – \(choice.description)"
         }
     }
 

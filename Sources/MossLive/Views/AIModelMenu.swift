@@ -47,24 +47,28 @@ struct AIModelMenu: View {
                 Text(configuration.errorMessage ?? "Modelle nicht verfügbar")
             }
         } label: {
-            HStack(spacing: 5) {
-                if configuration.isLoading, configuration.settings == nil {
-                    ProgressView()
-                        .controlSize(.mini)
-                } else {
-                    HStack(spacing: 3) {
-                        Text(compactSelectionLabel)
-                            .lineLimit(1)
-                        if let settings = configuration.settings,
-                           configuration.serviceTier(for: settings) != "default" {
-                            Image(systemName: "bolt.fill")
-                        }
+            if configuration.isLoading, configuration.settings == nil {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(minHeight: 30)
+            } else {
+                ZStack(alignment: .leading) {
+                    // Reserve the exact native width of every possible value.
+                    // Menu dismissal can otherwise update the text one pass
+                    // before its label receives the new intrinsic width.
+                    ForEach(compactSelectionCandidates, id: \.self) { candidate in
+                        compactLabel(candidate, showsSpeed: true)
+                            .hidden()
+                            .accessibilityHidden(true)
                     }
-                    .font(.caption.weight(.medium))
+
+                    compactLabel(compactSelectionLabel, showsSpeed: speedIsSelected)
                 }
+                .fixedSize(horizontal: true, vertical: false)
+                .transaction { $0.animation = nil }
+                .frame(minHeight: 30)
             }
             .foregroundStyle(.primary)
-            .frame(minHeight: 30)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -118,7 +122,7 @@ struct AIModelMenu: View {
         } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Geschwindigkeit")
-                Text(Self.speedLabel(configuration.serviceTier(for: settings)))
+                Text(selectedSpeedLabel(for: settings))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -135,6 +139,12 @@ struct AIModelMenu: View {
         }
     }
 
+    private func selectedSpeedLabel(for settings: BackendAPI.AnswerSettings) -> String {
+        let selected = configuration.serviceTier(for: settings)
+        let advertised = configuration.serviceTierChoices(for: settings).first { $0.id == selected }
+        return Self.speedLabel(selected, fallback: advertised?.label ?? "")
+    }
+
     private var compactSelectionLabel: String {
         guard let settings = configuration.settings else { return "Modell" }
         guard settings.provider == "chatgpt" else { return "Gemini" }
@@ -142,6 +152,32 @@ struct AIModelMenu: View {
             .replacingOccurrences(of: "GPT-", with: "")
         let effort = configuration.reasoningEffort(for: settings)
         return "\(modelName) \(Self.intelligenceLabel(effort))"
+    }
+
+    private var speedIsSelected: Bool {
+        guard let settings = configuration.settings else { return false }
+        return configuration.serviceTier(for: settings) != "default"
+    }
+
+    private var compactSelectionCandidates: [String] {
+        guard let settings = configuration.settings, settings.provider == "chatgpt" else {
+            return [compactSelectionLabel]
+        }
+        let efforts = configuration.effortChoices(for: settings)
+        let candidates = configuration.modelChoices(for: settings).flatMap { choice in
+            let modelName = Self.modelLabel(choice).replacingOccurrences(of: "GPT-", with: "")
+            return efforts.map { "\(modelName) \(Self.intelligenceLabel($0))" }
+        } + [compactSelectionLabel]
+        return Array(Set(candidates)).sorted()
+    }
+
+    private func compactLabel(_ text: String, showsSpeed: Bool) -> some View {
+        HStack(spacing: 3) {
+            Text(text)
+            Image(systemName: "bolt.fill")
+                .opacity(showsSpeed ? 1 : 0)
+        }
+        .font(.caption.weight(.medium))
     }
 
     /// ChatGPT presents intelligence from strongest to lightest. Its picker
@@ -186,9 +222,11 @@ struct AIModelMenu: View {
 
     private static func speedLabel(_ serviceTier: String, fallback: String = "") -> String {
         switch serviceTier {
-        case "default": "Standard"
-        case "priority", "fast": "Schnell"
-        default: fallback.isEmpty ? serviceTier : fallback
+        case "default": return "Standard"
+        case "priority", "fast": return "Schnell"
+        default:
+            if fallback.localizedCaseInsensitiveCompare("Fast") == .orderedSame { return "Schnell" }
+            return fallback.isEmpty ? serviceTier : fallback
         }
     }
 

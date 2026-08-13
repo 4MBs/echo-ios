@@ -46,8 +46,6 @@ struct ChatView: View {
             messagesArea
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
                 .background(Color(.systemBackground).ignoresSafeArea())
-                .navigationTitle("Chat mit KI")
-                .navigationBarTitleDisplayMode(.inline)
                 .toolbar { chatToolbar }
         }
         .task { await loadLessons() }
@@ -158,15 +156,8 @@ struct ChatView: View {
     @ViewBuilder
     private var messagesArea: some View {
         if chat.messages.isEmpty {
-            VStack {
-                Text("Unterhaltung beginnen")
-                    .font(.title.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 72)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 32)
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -256,25 +247,27 @@ struct ChatView: View {
                     .accessibilityLabel("Zum Chat hinzufügen")
 
                     Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
                             isWebSearchEnabled.toggle()
                         }
                     } label: {
-                        if isWebSearchEnabled {
-                            Label("Websuche", systemImage: "globe")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.blue)
-                                .padding(.horizontal, 10)
-                                .frame(height: 32)
-                                .background(.blue.opacity(0.1), in: Capsule())
-                        } else {
+                        ZStack {
                             Image(systemName: "globe")
                                 .font(.system(size: 19))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 30, height: 30)
+                                .offset(x: isWebSearchEnabled ? -29 : 0)
+
+                            Text("Websuche")
+                                .font(.caption.weight(.semibold))
+                                .offset(x: 12)
+                                .opacity(isWebSearchEnabled ? 1 : 0)
                         }
+                        .foregroundStyle(isWebSearchEnabled ? .blue : .secondary)
+                        .frame(width: 92, height: 34)
+                        .background(.blue.opacity(isWebSearchEnabled ? 0.12 : 0), in: Capsule())
+                        .contentShape(Capsule())
+                        .animation(reduceMotion ? nil : .snappy(duration: 0.24), value: isWebSearchEnabled)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ComposerControlButtonStyle())
                     .disabled(chat.sending)
                     .accessibilityLabel(isWebSearchEnabled ? "Websuche aktiviert" : "Websuche aktivieren")
 
@@ -294,18 +287,23 @@ struct ChatView: View {
                         }
                     } label: {
                         ZStack {
-                            if voiceInput.isRecording {
-                                Circle()
-                                    .fill(.red.opacity(0.16))
-                                    .frame(width: 38, height: 38)
-                            }
+                            Circle()
+                                .fill(.red.opacity(0.16))
+                                .frame(width: 34, height: 34)
+                                .scaleEffect(voiceInput.isRecording ? 1 : 0.72)
+                                .opacity(voiceInput.isRecording ? 1 : 0)
+
                             Image(systemName: voiceInput.isRecording ? "stop.fill" : "mic.fill")
                                 .font(.system(size: 19))
                                 .foregroundStyle(voiceInput.isRecording ? .red : .secondary)
                                 .frame(width: 30, height: 30)
+                                .contentTransition(.symbolEffect(.replace))
                         }
+                        .frame(width: 38, height: 38)
+                        .contentShape(Circle())
+                        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: voiceInput.isRecording)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ComposerControlButtonStyle())
                     .disabled(chat.sending || model.phase == .recording)
                     .accessibilityLabel(voiceInput.isRecording ? "Diktat beenden" : "Frage diktieren")
 
@@ -494,6 +492,22 @@ struct ChatView: View {
         guard let fresh = try? await api.listLessons().filter({ $0.segmentCount > 0 }) else { return }
         lessons = fresh
         OfflineCache.save(fresh, as: OfflineCache.Key.lessons)
+    }
+}
+
+/// Press feedback stays inside a fixed control frame, so interaction never
+/// participates in the composer's layout calculation.
+private struct ComposerControlButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.93 : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(
+                reduceMotion ? nil : .smooth(duration: 0.14),
+                value: configuration.isPressed
+            )
     }
 }
 

@@ -239,12 +239,10 @@ private struct PDFReader: View {
     @State private var selectingRegion = false
     @State private var askingForPage = false
     @State private var typedPage = ""
-    @State private var openedAt = "1"
     @State private var adjustingNumbering = false
     @State private var typedNumbering = ""
     @State private var numberingPage = 1
     @State private var numberingPlaceholder = "1"
-    @FocusState private var pageFieldFocused: Bool
     @FocusState private var numberingFocused: Bool
 
     /// One transaction drives the panel and every part of the reader whose
@@ -343,9 +341,6 @@ private struct PDFReader: View {
                     pageCount: $pageCount,
                     selectedRegion: $selectedRegion
                 )
-                // Switching layout needs a freshly built PDFView: PDFKit does not
-                // relayout an existing one when displayMode changes.
-                .id(twoUp)
             } else {
                 ProgressView()
             }
@@ -521,10 +516,9 @@ private struct PDFReader: View {
         .background(Color.black.ignoresSafeArea())
     }
 
-    /// Previous/next buttons around the current page, which opens the jump-to
-    /// field. A popover rather than a field sitting in the bar: one tap outside
-    /// takes the keyboard, the caret and the popover away together, and there is
-    /// no field left in the bar to tap a second time.
+    /// Previous/next buttons around the current page. Editing happens directly
+    /// in this stable control row so the first tap can focus the field and show
+    /// the number pad without presenting an unfocused intermediate popover.
     private var pageControls: some View {
         HStack(spacing: 12) {
             Button {
@@ -535,24 +529,37 @@ private struct PDFReader: View {
             .disabled(currentPage <= 1)
             .accessibilityLabel("Vorherige Seite")
 
-            pageIndicator
+            if askingForPage {
+                pageJump
+            } else {
+                pageIndicator
+            }
 
             Button {
-                proxy.step(1)
+                if askingForPage {
+                    confirmPageJump()
+                } else {
+                    proxy.step(1)
+                }
             } label: {
-                Image(systemName: "arrow.right")
+                Image(systemName: askingForPage ? "checkmark" : "arrow.right")
+                    .contentTransition(.symbolEffect(.replace))
             }
-            .disabled(pageCount > 0 && currentPage >= pageCount)
-            .accessibilityLabel("Nächste Seite")
+            .disabled(
+                askingForPage
+                    ? numbering.pdfPage(forPrinted: Int(typedPage) ?? 0) == nil
+                    : pageCount > 0 && currentPage >= pageCount
+            )
+            .accessibilityLabel(askingForPage ? "Seite öffnen" : "Nächste Seite")
         }
         .buttonStyle(.glass)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: askingForPage)
     }
 
     /// The current page, and the way to jump to another one.
     private var pageIndicator: some View {
         Button {
-            typedPage = ""
-            openedAt = printedLabel(currentPage)
+            typedPage = printedLabel(currentPage)
             askingForPage = true
         } label: {
             // Fixed slots either side of the slash: the indicator stays put
@@ -567,43 +574,35 @@ private struct PDFReader: View {
             .font(.subheadline.monospacedDigit().weight(.semibold))
         }
         .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
-        .popover(isPresented: $askingForPage) { pageJump }
     }
 
-    /// Type a page and the book goes there — nothing to confirm. Deliberately
-    /// shows no live page number, so nothing around the field redraws while the
-    /// keyboard is up.
+    /// The current value is selected when the field becomes first responder,
+    /// so typing replaces it immediately. The keyboard's Done button and the
+    /// row's checkmark share the same direct navigation path.
     private var pageJump: some View {
         HStack(spacing: 8) {
-            TextField(openedAt, text: $typedPage)
-                .keyboardType(.numberPad)
-                .focused($pageFieldFocused)
-                .multilineTextAlignment(.center)
-                .font(.title3.monospacedDigit().weight(.semibold))
-                .frame(width: 76)
-                .padding(.vertical, 8)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            AutoFocusPageNumberField(text: $typedPage, onCommit: confirmPageJump)
+                .frame(width: 48, height: 32)
                 .accessibilityLabel("Seitennummer")
 
-            Text("von \(printedLast)")
+            Text("/ \(printedLast)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-        }
-        .padding(16)
-        .presentationCompactAdaptation(.popover)
-        // The popover has to finish presenting before it can take focus,
-        // otherwise the keyboard occasionally never appears.
-        .task {
-            try? await Task.sleep(for: .milliseconds(60))
-            pageFieldFocused = true
         }
         .onChange(of: typedPage) { _, text in
             let digits = String(text.filter(\.isNumber).prefix(5))
             if digits != text { typedPage = digits }
-            if let printed = Int(digits), let pdfPage = numbering.pdfPage(forPrinted: printed) {
-                proxy.go(toPage: pdfPage)
-            }
         }
+    }
+
+    private func confirmPageJump() {
+        guard let requested = Int(typedPage), printedLast > 0 else { return }
+        let first = numbering.printedNumber(1) ?? 1
+        let constrained = min(max(requested, first), printedLast)
+        guard let pdfPage = numbering.pdfPage(forPrinted: constrained) else { return }
+        typedPage = String(constrained)
+        proxy.go(toPage: pdfPage)
+        askingForPage = false
     }
 
     /// The book's own numbering, shared with the assistant panel so a cited page is
@@ -658,6 +657,85 @@ private struct PDFReader: View {
         .buttonStyle(.glass)
         .accessibilityLabel("Seitendarstellung")
         .popover(isPresented: $adjustingNumbering) { numberingEditor }
+    }
+}
+
+/// A number-pad field that becomes first responder as soon as SwiftUI inserts
+/// it into the existing control bar. Unlike a newly presented popover, it has a
+/// window immediately, so one tap on the page indicator reliably shows the
+/// keypad. Selecting the existing value makes the next digit replace it.
+private struct AutoFocusPageNumberField: UIViewRepresentable {
+    @Binding var text: String
+    let onCommit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = FirstResponderNumberField()
+        field.keyboardType = .numberPad
+        field.textAlignment = .center
+        field.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        field.textColor = .label
+        field.tintColor = .systemBlue
+        field.backgroundColor = .clear
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.changed), for: .editingChanged)
+        field.accessibilityLabel = "Seitennummer"
+
+        let toolbar = UIToolbar()
+        toolbar.sizeToFit()
+        toolbar.items = [
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(
+                title: "Fertig",
+                style: .done,
+                target: context.coordinator,
+                action: #selector(Coordinator.commit)
+            ),
+        ]
+        field.inputAccessoryView = toolbar
+        context.coordinator.field = field
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.parent = self
+        if field.text != text { field.text = text }
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: AutoFocusPageNumberField
+        weak var field: UITextField?
+
+        init(parent: AutoFocusPageNumberField) {
+            self.parent = parent
+        }
+
+        @objc func changed(_ sender: UITextField) {
+            parent.text = sender.text ?? ""
+        }
+
+        @objc func commit() {
+            parent.onCommit()
+            field?.resignFirstResponder()
+        }
+    }
+
+    private final class FirstResponderNumberField: UITextField {
+        private var focusedOnce = false
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil, !focusedOnce else { return }
+            focusedOnce = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self, window != nil else { return }
+                becomeFirstResponder()
+                selectAll(nil)
+            }
+        }
     }
 }
 
@@ -1023,6 +1101,96 @@ private final class BookPDFView: PDFView {
         restingScale = fit
     }
 
+    /// Change PDFKit's layout in place. Replacing the representable destroys
+    /// the live page hierarchy and is what exposed the white intermediate
+    /// frames in the recording. A snapshot of the already rendered pages stays
+    /// above PDFKit while it lays out the new mode, then moves/scales to the new
+    /// page frame and hands off to the live tiles underneath.
+    func setPageLayout(twoUp: Bool, anchorPage: Int, animated: Bool) {
+        let targetMode: PDFDisplayMode = twoUp ? .twoUp : .singlePage
+        guard displayMode != targetMode || displaysAsBook != twoUp else { return }
+
+        completePendingResize()
+        let oldContentFrame = visiblePageFrame ?? bounds
+        // Reduced Motion still keeps a snapshot until PDFKit's final tiles are
+        // ready; it simply performs a direct hand-off instead of animating it.
+        let snapshot = snapshotView(afterScreenUpdates: false)
+        let zoomRatio = restingScale > 0 ? max(scaleFactor / restingScale, 1) : 1
+
+        displayMode = targetMode
+        displaysAsBook = twoUp
+        if let document,
+           let page = document.page(at: min(max(anchorPage - 1, 0), max(document.pageCount - 1, 0))) {
+            go(to: page)
+        }
+        restingScale = 0
+        layoutDocumentView()
+        setNeedsLayout()
+        layoutIfNeeded()
+        applyScaleLimits()
+        if zoomRatio > 1.001, restingScale > 0 {
+            scaleFactor = min(restingScale * zoomRatio, maxScaleFactor)
+        }
+
+        guard let snapshot, bounds.width > 0, bounds.height > 0 else { return }
+        snapshot.frame = bounds
+        snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        snapshot.isUserInteractionEnabled = false
+        snapshot.layer.minificationFilter = .trilinear
+        snapshot.layer.magnificationFilter = .linear
+        addSubview(snapshot)
+
+        // PDFKit posts its visible-page update on the next run loop. Keep the
+        // old rendered pages fully opaque until that final page frame exists.
+        DispatchQueue.main.async { [weak self, weak snapshot] in
+            guard let self, let snapshot, snapshot.superview === self else { return }
+            layoutDocumentView()
+            layoutIfNeeded()
+            applyScaleLimits()
+            let finalContentFrame = visiblePageFrame ?? bounds
+            let scale = min(
+                finalContentFrame.width / max(oldContentFrame.width, 1),
+                finalContentFrame.height / max(oldContentFrame.height, 1)
+            )
+            let baseCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+            let oldOffset = CGPoint(
+                x: oldContentFrame.midX - baseCenter.x,
+                y: oldContentFrame.midY - baseCenter.y
+            )
+
+            guard animated else {
+                snapshot.removeFromSuperview()
+                return
+            }
+
+            UIView.animate(
+                withDuration: 0.34,
+                delay: 0.06,
+                options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+            ) {
+                snapshot.transform = CGAffineTransform(scaleX: scale, y: scale)
+                snapshot.center = CGPoint(
+                    x: finalContentFrame.midX - scale * oldOffset.x,
+                    y: finalContentFrame.midY - scale * oldOffset.y
+                )
+                snapshot.alpha = 0
+            } completion: { _ in
+                snapshot.removeFromSuperview()
+            }
+        }
+    }
+
+    private func completePendingResize() {
+        resizeCompletion?.cancel()
+        resizeCompletion = nil
+        guard holdsPDFLayout || resizeSnapshot != nil else { return }
+        holdsPDFLayout = false
+        hiddenDuringResize.forEach { $0.isHidden = false }
+        hiddenDuringResize.removeAll(keepingCapacity: true)
+        discardResizeSnapshot()
+        super.layoutSubviews()
+    }
+
     /// Freeze only PDFKit's expensive internal layout during a known animated
     /// container resize. The page snapshot scales uniformly to the new fit;
     /// assigning it the changing bounds directly would squeeze the spread only
@@ -1276,6 +1444,14 @@ private struct PDFKitView: UIViewRepresentable {
     func updateUIView(_ view: PDFView, context: Context) {
         context.coordinator.onPageChange = { updatePageState($0) }
         guard let bookView = view as? BookPDFView else { return }
+        let targetMode: PDFDisplayMode = twoUp ? .twoUp : .singlePage
+        if bookView.displayMode != targetMode || bookView.displaysAsBook != twoUp {
+            bookView.setPageLayout(
+                twoUp: twoUp,
+                anchorPage: currentPage,
+                animated: !UIAccessibility.isReduceMotionEnabled
+            )
+        }
         bookView.onRegionChanged = { region in
             context.coordinator.record(region: region)
             selectedRegion = region
