@@ -7,6 +7,7 @@ import UIKit
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let bookID: String
     let numbering: BookPageNumbering
@@ -160,6 +161,9 @@ struct BookAIPanel: View {
                     .padding(.bottom, 12)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // The assistant opens on its most recent answer, like the chat.
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: store.selectedConversationID) { scrollToBottom(proxy) }
                 .onChange(of: store.turns.count) { scrollToBottom(proxy) }
                 .onChange(of: store.sending) { scrollToBottom(proxy) }
             }
@@ -362,7 +366,7 @@ struct BookAIPanel: View {
                 .padding(.bottom, 10)
                 .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
 
-                HStack(spacing: 8) {
+                composerControlLayout {
                     HStack(spacing: 8) {
                         regionSelectionButton
                     }
@@ -396,7 +400,6 @@ struct BookAIPanel: View {
                         .accessibilityIdentifier("bookAI.send")
                     }
                 }
-                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
@@ -409,6 +412,14 @@ struct BookAIPanel: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .padding(.bottom, 6)
+    }
+
+    /// One line while the labels fit, two when the student's text is larger
+    /// than the panel — never a ceiling on the text itself.
+    private var composerControlLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
     }
 
     private var regionSelectionButton: some View {

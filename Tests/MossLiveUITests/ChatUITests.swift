@@ -79,7 +79,11 @@ final class ChatUITests: EchoUITestCase {
             XCTAssertTrue(app.buttons["chat.regenerate"].waitForExistence(timeout: 25))
         }
         UIPasteboard.general.items = []
-        tap(app.buttons["chat.copy"].firstMatch)
+        // Every assistant message has one, and the regenerated answer is the
+        // last: the earlier ones can be scrolled out of reach by then.
+        let copyButtons = app.buttons.matching(identifier: "chat.copy")
+        XCTAssertGreaterThan(copyButtons.count, 0, "The assistant answer has no copy action")
+        tap(copyButtons.element(boundBy: copyButtons.count - 1))
         shot("chat-copy-confirmation")
         // The visible "Kopiert" state is deliberately short-lived, and XCTest's
         // own idle wait after the tap can outlast it on a loaded hosted runner.

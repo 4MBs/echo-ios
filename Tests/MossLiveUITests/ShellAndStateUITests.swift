@@ -57,13 +57,25 @@ final class ShellAndStateUITests: EchoUITestCase {
 
     func testExtraLargeTextDoesNotHidePrimaryControls() {
         launch(tab: "chat", contentSize: "UICTContentSizeCategoryAccessibilityXXXL")
-        XCTAssertTrue(app.textFields["chat.input"].waitForExistence(timeout: 5))
+        let input = app.textFields["chat.input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["chat.add"].exists)
         XCTAssertTrue(app.buttons["chat.send"].exists)
         shot("chat-accessibility-xxxl")
+
+        // At this text size the seeded conversation is longer than the screen,
+        // so it also proves the thread opens on its newest message.
+        let newest = app.staticTexts["Das Versuchsprotokoll bestätigt den reproduzierbaren Zusammenhang."]
+        XCTAssertTrue(newest.waitForExistence(timeout: 5), "The newest message is not on screen")
+        XCTAssertLessThan(
+            newest.frame.minY,
+            input.frame.minY,
+            "The chat opened above its newest message instead of at the end of the thread"
+        )
     }
 
     func testAccessibilityAuditOnEveryPrimaryDestination() throws {
+        var findings: [String] = []
         for tab in ["aufnahme", "stunden", "bibliothek", "chat", "einstellungen"] {
             launch(tab: tab)
             try app.performAccessibilityAudit(
@@ -83,11 +95,26 @@ final class ShellAndStateUITests: EchoUITestCase {
                 // though the captured glyphs and ellipsis fit its system frame.
                 let isSystemSearchField = issue.element?.elementType == .searchField
                     && issue.element?.label == "Fach oder Stunde suchen"
-                return issue.auditType == .textClipped
-                    && (isSystemSidebarNode || isSystemSearchField)
+                if issue.auditType == .textClipped, isSystemSidebarNode || isSystemSearchField {
+                    return true
+                }
+                // Collected instead of thrown one at a time, so a single run
+                // reports every remaining issue rather than only the first.
+                findings.append("""
+                [\(tab)] \(String(describing: issue.auditType)): \(issue.compactDescription)
+                \(String(issue.element?.debugDescription.prefix(400) ?? "unknown element"))
+                """)
+                return true
             }
             shot("accessibility-audit-\(tab)")
         }
+
+        guard !findings.isEmpty else { return }
+        let report = XCTAttachment(string: findings.joined(separator: "\n\n"))
+        report.name = "accessibility-audit-findings"
+        report.lifetime = .keepAlways
+        add(report)
+        XCTFail("Accessibility audit reported \(findings.count) issue(s):\n\n\(findings.joined(separator: "\n\n"))")
     }
 
     func testLiveAnswerLoadingSuccessRetryAndCopy() {

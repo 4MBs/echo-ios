@@ -8,6 +8,7 @@ import UIKit
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var draft = ""
     @State private var lessons: [BackendAPI.LessonInfo] = []
@@ -184,6 +185,13 @@ struct ChatView: View {
                     .padding(.bottom, 12)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // A conversation opens where it left off. Without this the view
+                // starts at the oldest message, which only shows once the thread
+                // is longer than the screen — a large text size is enough.
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: chat.selectedConversationID) {
+                    scrollToBottom(proxy)
+                }
                 .onChange(of: chat.messages.count) {
                     scrollToBottom(proxy)
                 }
@@ -234,7 +242,7 @@ struct ChatView: View {
                 .padding(.bottom, 10)
                 .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
 
-                HStack(spacing: 8) {
+                composerControlLayout {
                     HStack(spacing: 8) {
                         Button {
                             showAddSheet = true
@@ -282,7 +290,6 @@ struct ChatView: View {
                         .accessibilityIdentifier("chat.send")
                     }
                 }
-                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
@@ -298,6 +305,15 @@ struct ChatView: View {
     }
 
     @ViewBuilder
+    /// The composer's controls sit on one line until the labels need more room
+    /// than the composer has. They then take a second line rather than putting
+    /// a ceiling on how large the student may set their text.
+    private var composerControlLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+    }
+
     private var contextMenu: some View {
         if model.phase == .recording {
             Label("Live", systemImage: "record.circle")
@@ -852,48 +868,6 @@ private struct ChatAddSheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("chat.add.\(title.lowercased())")
-    }
-}
-
-private struct ChatMessageEditSheet: View {
-    let message: ChatStore.Message
-    let onSave: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var text: String
-
-    init(message: ChatStore.Message, onSave: @escaping (String) -> Void) {
-        self.message = message
-        self.onSave = onSave
-        _text = State(initialValue: message.text)
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Nachfolgende Antworten werden entfernt und neu erstellt.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                TextField("Nachricht bearbeiten", text: $text, axis: .vertical)
-                    .lineLimit(3 ... 10)
-                    .padding(12)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
-                Spacer()
-            }
-            .padding(20)
-            .navigationTitle("Nachricht bearbeiten")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Senden") {
-                        onSave(text)
-                        dismiss()
-                    }
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-        .presentationDetents([.medium])
     }
 }
 

@@ -120,13 +120,10 @@ final class LibraryReaderUITests: EchoUITestCase {
         // the selection state, so the same element can be followed throughout.
         let regionButton = app.buttons["bookAI.region"]
         tap(regionButton)
-        let active = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == 'Auswahl aktiv'"),
-            object: regionButton
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [active], timeout: 5),
-            .completed,
+        // The instructions live on the reader, which stays visible on both form
+        // factors — the assistant itself steps aside on compact widths.
+        XCTAssertTrue(
+            app.staticTexts["Ziehe einen Rahmen um den gewünschten Bereich."].waitForExistence(timeout: 5),
             "Region selection did not become active after tapping the control"
         )
         shot("reader-region-selection-active")

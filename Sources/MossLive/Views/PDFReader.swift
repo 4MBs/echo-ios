@@ -40,6 +40,7 @@ struct PDFReader: View {
     @State private var bookAI: BookAIStore
     @State private var selectedRegion: BackendAPI.BookPageRegion?
     @State private var selectingRegion = false
+    @State private var resumeAssistantAfterRegion = false
     @State private var askingForPage = false
     @State private var typedPage = ""
     @State private var adjustingNumbering = false
@@ -195,6 +196,7 @@ struct PDFReader: View {
             Button("Abbrechen") {
                 proxy.cancelRegionSelection()
                 selectingRegion = false
+                resumeAssistant()
             }
             .font(.subheadline)
         }
@@ -231,6 +233,14 @@ struct PDFReader: View {
         // A medium sheet leaves a useful portion of the page visible. This is
         // also the detent at which the result returns after the drag.
         bookAIDetent = .medium
+        // A presented sheet keeps every touch on its own screen, so on compact
+        // widths the page behind it never receives the drag — the rectangle
+        // simply cannot be drawn. Step the assistant aside while the student
+        // marks the region and bring it straight back with the result.
+        if horizontalSizeClass == .compact, askingBookAI {
+            resumeAssistantAfterRegion = true
+            withAnimation(assistantAnimation) { askingBookAI = false }
+        }
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
             selectingRegion = true
             selectedRegion = nil
@@ -245,7 +255,15 @@ struct PDFReader: View {
                 selectedRegion = region
                 selectingRegion = false
             }
+            resumeAssistant()
         }
+    }
+
+    /// Brings the assistant back after it stepped aside for region selection.
+    private func resumeAssistant() {
+        guard resumeAssistantAfterRegion else { return }
+        resumeAssistantAfterRegion = false
+        withAnimation(assistantAnimation) { askingBookAI = true }
     }
 
     private func clearRegionSelection() {

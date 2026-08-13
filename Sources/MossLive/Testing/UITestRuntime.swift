@@ -31,9 +31,15 @@ enum UITestRuntime {
         return AppTab(rawValue: arguments[index + 1])
     }()
 
+    /// Deleting a lesson has to stay deleted: the list is reloaded from the
+    /// fake server right after the request, so a purely static fixture would
+    /// resurrect it and make a working feature look broken.
+    nonisolated(unsafe) private static var deletedSessionIDs: Set<String> = []
+
     @MainActor
     static func installFixtures() {
         guard isEnabled else { return }
+        deletedSessionIDs.removeAll()
         if let identifier = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: identifier)
         }
@@ -80,6 +86,9 @@ enum UITestRuntime {
     }
 
     static func response(path: String, method: String, body: [String: Any]?) async throws -> Data {
+        if method == "DELETE", path.hasPrefix("/sessions/") {
+            deletedSessionIDs.insert(String(path.dropFirst("/sessions/".count)))
+        }
         if scenario == .loading {
             try await Task.sleep(for: .seconds(4))
         } else {
@@ -329,7 +338,11 @@ private extension UITestRuntime {
     }
 
     static var sessionsObject: [String: Any] {
-        ["sessions": [
+        ["sessions": allSessions.filter { !deletedSessionIDs.contains($0["id"] as? String ?? "") }]
+    }
+
+    static var allSessions: [[String: Any]] {
+        [
             ["id": "lesson-1", "started_at_ms": nowMilliseconds - 3_600_000, "ended_at_ms": nowMilliseconds,
              "segment_count": 3, "speech_seconds": 30.0, "duration_seconds": 3600.0, "has_summary": true,
              "topic": "Ursache und Wirkung", "summary_excerpt": "Ein reproduzierbares Beispiel.",
@@ -340,7 +353,7 @@ private extension UITestRuntime {
              "segment_count": 2, "speech_seconds": 20.0, "duration_seconds": 3600.0, "has_summary": false,
              "has_audio": false, "title": "Teststunde Biologie", "subject": "Biologie",
              "teacher": "Herr Muster", "room": "B04"],
-        ]]
+        ]
     }
 
     static let subjectsObject: [String: Any] = ["subjects": [
