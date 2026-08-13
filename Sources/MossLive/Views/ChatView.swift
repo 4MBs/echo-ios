@@ -591,7 +591,7 @@ private struct ChatMessageRow: View {
         withAnimation { copied = true }
         Task {
             // Keep confirmation perceivable after the system pasteboard work.
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(30))
             withAnimation { copied = false }
         }
     }

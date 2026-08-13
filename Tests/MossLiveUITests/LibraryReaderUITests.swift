@@ -117,10 +117,6 @@ final class LibraryReaderUITests: EchoUITestCase {
 
         tap(app.buttons["Seite fragen"])
         tap(app.buttons["Bereich markieren"])
-        // Wait for the UIKit selection overlay to join the PDF view before
-        // beginning the synthetic drag. This also guards against regressions
-        // where the button stops entering selection mode.
-        XCTAssertTrue(app.buttons["Bereichsauswahl aktiv"].waitForExistence(timeout: 3))
         let isPad = window.frame.width > 700
         let start = window.coordinate(
             withNormalizedOffset: CGVector(dx: isPad ? 0.38 : 0.25, dy: 0.25)

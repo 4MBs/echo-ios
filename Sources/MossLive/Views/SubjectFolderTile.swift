@@ -116,6 +116,7 @@ struct SubjectFolderTile: View {
                 .multilineTextAlignment(.leading)
                 .padding(.horizontal, 2)
                 .padding(.vertical, 2)
+                .accessibilityIdentifier("subject-folder-title-visual")
                 .accessibilityHidden(true)
             Text(countLabel)
                 .font(.footnote)
