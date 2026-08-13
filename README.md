@@ -173,10 +173,6 @@ finger or Apple Pencil. Echo sends only the page number and normalized rectangle
 coordinates, not a screenshot. That marked region gets its own thread and
 remains outlined while the answer is compared with the book.
 
-<p align="center">
-  <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">
-</p>
-
 ### Dead zones don't cost you the lesson
 
 If the network drops mid-lesson, recording continues and the backlog — up to
