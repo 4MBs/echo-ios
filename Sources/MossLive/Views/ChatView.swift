@@ -590,8 +590,7 @@ private struct ChatMessageRow: View {
         UIPasteboard.general.string = message.text
         withAnimation { copied = true }
         Task {
-            // Keep confirmation visible long enough for VoiceOver to announce
-            // it and for users to perceive it after the system pasteboard work.
+            // Keep confirmation perceivable after the system pasteboard work.
             try? await Task.sleep(for: .seconds(5))
             withAnimation { copied = false }
         }
