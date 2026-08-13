@@ -77,11 +77,8 @@ final class ChatUITests: EchoUITestCase {
             tap(app.buttons["Antwort neu erstellen"])
             XCTAssertTrue(app.buttons["Antwort neu erstellen"].waitForExistence(timeout: 12))
         }
-        // Regeneration leaves the earlier answer in the transcript. Exercise
-        // the newly generated answer instead of whichever copy button happens
-        // to be first in the current scroll hierarchy.
-        tap(app.buttons["Antwort kopieren"].lastMatch)
-        XCTAssertTrue(app.buttons["Kopiert"].lastMatch.waitForExistence(timeout: 2))
+        tap(app.buttons["Antwort kopieren"].firstMatch)
+        XCTAssertTrue(app.buttons["Kopiert"].firstMatch.waitForExistence(timeout: 3))
 
         tap(app.buttons["Neue Unterhaltung"])
         XCTAssertFalse(app.staticTexts["Erkläre Ursache und Wirkung."].exists)
