@@ -244,6 +244,8 @@ struct ChatView: View {
                                 .frame(width: 30, height: 30)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .foregroundStyle(.secondary)
                         .disabled(chat.sending || processingAttachmentCount > 0)
                         .accessibilityLabel("Zum Chat hinzufügen")

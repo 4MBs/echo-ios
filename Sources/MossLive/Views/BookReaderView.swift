@@ -1921,6 +1921,7 @@ private final class BookRegionSelectionOverlay: UIView {
         backgroundColor = .clear
         isAccessibilityElement = true
         accessibilityLabel = "Buchbereich markieren"
+        accessibilityIdentifier = "Buchbereich markieren"
         shape.fillColor = UIColor.systemBlue.withAlphaComponent(0.14).cgColor
         shape.strokeColor = UIColor.systemBlue.cgColor
         shape.lineWidth = 2

@@ -14,6 +14,7 @@ final class ShellAndStateUITests: EchoUITestCase {
             default: XCTAssertTrue(app.navigationBars["Einstellungen"].exists)
             }
             shot("shell-\(tab)-portrait")
+            assertVisibleElementsStayOnScreen()
         }
         launch(tab: "aufnahme")
         rotateAndCapture("shell-recording")

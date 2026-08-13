@@ -85,8 +85,9 @@ final class AppModel {
     init() {
         settings = AppSettings()
         if UITestRuntime.isEnabled {
+            let unavailableScenarios: Set<UITestRuntime.Scenario> = [.offline, .unauthorized, .serverError]
             aiConfiguration = AIConfigurationStore(
-                settings: UITestRuntime.answerSettings,
+                settings: unavailableScenarios.contains(UITestRuntime.scenario) ? nil : UITestRuntime.answerSettings,
                 persistOperation: { _, _ in
                     try? await Task.sleep(for: .milliseconds(80))
                 }

@@ -118,6 +118,8 @@ struct SubjectFolderTile: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .padding(.horizontal, 2)
         }
         .padding(.top, FolderGeometry.tabHeight + 14)
         .padding(.horizontal, 16)

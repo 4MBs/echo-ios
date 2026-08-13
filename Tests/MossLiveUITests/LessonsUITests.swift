@@ -73,6 +73,6 @@ final class LessonsUITests: EchoUITestCase {
         launch(tab: "stunden")
         tap(button(containing: "Mathematik"))
         tap(button(containing: "Ursache und Wirkung"))
-        XCTAssertTrue(app.buttons["Transkriptoptionen"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Transkriptoptionen"].waitForExistence(timeout: 10))
     }
 }

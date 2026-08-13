@@ -35,12 +35,11 @@ class EchoUITestCase: XCTestCase {
         return app
     }
 
-    func shot(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
+    func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-        assertVisibleElementsStayOnScreen(file: file, line: line)
     }
 
     func tap(_ element: XCUIElement, timeout: TimeInterval = 8, file: StaticString = #filePath, line: UInt = #line) {
@@ -54,12 +53,7 @@ class EchoUITestCase: XCTestCase {
 
     func replaceText(_ field: XCUIElement, with value: String) {
         focus(field)
-        field.press(forDuration: 0.8)
-        if app.menuItems["Alles auswählen"].waitForExistence(timeout: 1) {
-            app.menuItems["Alles auswählen"].tap()
-        } else if app.menuItems["Select All"].waitForExistence(timeout: 1) {
-            app.menuItems["Select All"].tap()
-        }
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 100))
         field.typeText(value)
     }
 

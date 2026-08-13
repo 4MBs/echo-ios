@@ -36,6 +36,7 @@ struct MainTabView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingNoteImportCount = 0
+    @ScaledMetric(relativeTo: .body) private var sidebarFooterRowHeight: CGFloat = 52
 
     /// Which place the sidebar is on. It lives on the model rather than in this
     /// view so screens can change the selected destination directly.
@@ -128,7 +129,7 @@ struct MainTabView: View {
             }
             .listStyle(.sidebar)
             .scrollDisabled(true)
-            .frame(height: 52)
+            .frame(height: sidebarFooterRowHeight)
         }
         .padding(.bottom, 4)
     }

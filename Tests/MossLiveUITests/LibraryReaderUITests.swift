@@ -124,7 +124,7 @@ final class LibraryReaderUITests: EchoUITestCase {
 
         tap(app.buttons["Seite fragen"])
         tap(app.buttons["Bereich markieren"])
-        let selectionSurface = app.otherElements["Buchbereich markieren"]
+        let selectionSurface = app.descendants(matching: .any)["Buchbereich markieren"]
         XCTAssertTrue(selectionSurface.waitForExistence(timeout: 3))
         let start = selectionSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.25))
         let end = selectionSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.55))
