@@ -47,26 +47,28 @@ struct AIModelMenu: View {
                 Text(configuration.errorMessage ?? "Modelle nicht verfügbar")
             }
         } label: {
-            if configuration.isLoading, configuration.settings == nil {
-                ProgressView()
-                    .controlSize(.mini)
-                    .frame(minHeight: 30)
-            } else {
-                ZStack(alignment: .leading) {
-                    // Reserve the exact native width of every possible value.
-                    // Menu dismissal can otherwise update the text one pass
-                    // before its label receives the new intrinsic width.
-                    ForEach(compactSelectionCandidates, id: \.self) { candidate in
-                        compactLabel(candidate, showsSpeed: true)
-                            .hidden()
-                            .accessibilityHidden(true)
-                    }
+            Group {
+                if configuration.isLoading, configuration.settings == nil {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .frame(minHeight: 30)
+                } else {
+                    ZStack(alignment: .leading) {
+                        // Reserve the exact native width of every possible value.
+                        // Menu dismissal can otherwise update the text one pass
+                        // before its label receives the new intrinsic width.
+                        ForEach(compactSelectionCandidates, id: \.self) { candidate in
+                            compactLabel(candidate, showsSpeed: true)
+                                .hidden()
+                                .accessibilityHidden(true)
+                        }
 
-                    compactLabel(compactSelectionLabel, showsSpeed: speedIsSelected)
+                        compactLabel(compactSelectionLabel, showsSpeed: speedIsSelected)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .transaction { $0.animation = nil }
+                    .frame(minHeight: 30)
                 }
-                .fixedSize(horizontal: true, vertical: false)
-                .transaction { $0.animation = nil }
-                .frame(minHeight: 30)
             }
             .foregroundStyle(.primary)
             .contentShape(Rectangle())
