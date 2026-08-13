@@ -3,6 +3,7 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @State private var books: [BackendAPI.Book] = []
+    @State private var downloadedBookIDs: Set<String> = []
     @State private var loading = true
     @State private var loadError: Error?
 
@@ -12,9 +13,6 @@ struct LibraryView: View {
         NavigationStack {
             content
                 .navigationTitle("Bibliothek")
-                .navigationDestination(for: BackendAPI.Book.self) { book in
-                    BookReaderView(api: api, book: book)
-                }
         }
         .task { await load() }
     }
@@ -46,18 +44,37 @@ struct LibraryView: View {
         }
     }
 
-    /// A downloaded book opens with or without a server; one that has never
-    /// been fetched cannot, so offline it is shown as what it is rather than
-    /// left to fail on tap.
+    /// Every cover stays a navigation target, and the route is owned by the
+    /// link rather than by a `navigationDestination` on the shelf.
+    ///
+    /// Both halves matter, and both were paid for. A destination declared on
+    /// `content` lives on whichever branch of that `if` is on screen, so a
+    /// refresh that briefly empties the shelf tears the route down under an
+    /// open book — the reader pops and, worse, taps on the covers stop doing
+    /// anything at all, because no destination is registered for the type any
+    /// more. Nothing short of relaunching brings it back.
+    ///
+    /// And `disabled` from a shared connectivity flag strands the whole shelf:
+    /// `Connectivity` goes offline the moment any one request times out, so a
+    /// single failed call elsewhere in the app makes every un-downloaded book
+    /// untappable. A book that cannot be fetched is better off opening a reader
+    /// that says so and offers to try again — which is what it already does.
     @ViewBuilder private func shelfItem(_ book: BackendAPI.Book) -> some View {
-        let downloaded = BackendAPI.cachedBook(id: book.id) != nil
-        let openable = downloaded || model.connectivity.isOnline
-        NavigationLink(value: book) {
-            BookCover(api: api, book: book, unavailable: !openable)
+        let downloaded = downloadedBookIDs.contains(book.id)
+        let needsConnection = !downloaded && !model.connectivity.isOnline
+        NavigationLink {
+            // The destination owns the exact book that was tapped, so a shelf
+            // refresh can replace `books` while a large PDF is opening without
+            // invalidating the active route.
+            BookReaderView(api: api, book: book) {
+                downloadedBookIDs.insert(book.id)
+            }
+        } label: {
+            BookCover(api: api, book: book, unavailable: needsConnection)
         }
         .buttonStyle(.plain)
-        .disabled(!openable)
-        .accessibilityLabel(openable ? book.title : "\(book.title), nicht geladen")
+        .accessibilityLabel(needsConnection ? "\(book.title), Download benötigt" : book.title)
+        .accessibilityHint(needsConnection ? "Öffnet den Download mit einer Möglichkeit zum erneuten Versuch" : "")
     }
 
     private func load() async {
@@ -78,6 +95,21 @@ struct LibraryView: View {
             if books.isEmpty { loadError = error }
         }
         loading = false
+        await refreshDownloadedBooks()
+    }
+
+    /// File-system probes do not belong in `body`: a split-view resize can
+    /// redraw every shelf tile many times per second. Scan once off the main
+    /// actor, then let all redraws use this in-memory set.
+    private func refreshDownloadedBooks() async {
+        let snapshot = books
+        let available = await Task.detached(priority: .utility) {
+            Set(snapshot.compactMap { book in
+                BackendAPI.cachedBook(id: book.id) == nil ? nil : book.id
+            })
+        }.value
+        guard !Task.isCancelled else { return }
+        downloadedBookIDs = available
     }
 }
 
@@ -125,13 +157,40 @@ private struct BookCover: View {
             // A cover never changes, so one fetch per book is the whole story —
             // and it is what makes the shelf look like itself offline.
             let key = OfflineCache.Key.cover(book.id)
-            if let data = OfflineCache.loadData(key: key), let stored = UIImage(data: data) {
-                image = stored
+            if let stored = await Self.cachedImage(key: key) {
+                image = stored.image
                 return
             }
             guard let data = try? await api.bookCover(book), !Task.isCancelled else { return }
-            OfflineCache.saveData(data, as: key)
-            image = UIImage(data: data)
+            let loaded = await Task.detached(priority: .utility) { () -> LoadedCoverImage? in
+                OfflineCache.saveData(data, as: key)
+                guard let image = Self.decode(data) else { return nil }
+                return LoadedCoverImage(image: image)
+            }.value
+            guard !Task.isCancelled else { return }
+            image = loaded?.image
         }
     }
+
+    private static func cachedImage(key: String) async -> LoadedCoverImage? {
+        await Task.detached(priority: .utility) { () -> LoadedCoverImage? in
+            guard let data = OfflineCache.loadData(key: key), let image = decode(data) else {
+                return nil
+            }
+            return LoadedCoverImage(image: image)
+        }.value
+    }
+
+    /// `preparingForDisplay` performs decompression on the worker rather than
+    /// on the first animation frame that happens to draw the cover.
+    private nonisolated static func decode(_ data: Data) -> UIImage? {
+        guard let source = UIImage(data: data) else { return nil }
+        return source.preparingForDisplay() ?? source
+    }
+}
+
+/// UIKit images are immutable for this use. The wrapper makes the deliberate
+/// background decode boundary explicit to Swift concurrency.
+private struct LoadedCoverImage: @unchecked Sendable {
+    let image: UIImage
 }

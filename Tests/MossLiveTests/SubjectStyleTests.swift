@@ -29,47 +29,10 @@ final class SubjectStyleTests: XCTestCase {
         }
     }
 
-    /// A subject that matched no keyword must not come back looking like one
-    /// that did. Catches a fallback accidentally sharing Mathematik's blue.
-    func testFallbackIsDistinctFromEveryKnownSubject() {
-        let fallback = subjectStyle(for: "Darstellendes Spiel")
-        for subject in Self.subjects.compactMap({ $0 }) where subject != "Darstellendes Spiel" {
-            let known = subjectStyle(for: subject)
-            XCTAssertFalse(
-                known.tint.red == fallback.tint.red
-                    && known.tint.green == fallback.tint.green
-                    && known.tint.blue == fallback.tint.blue,
-                "\(subject) has the same card colour as an unrecognised subject"
-            )
-        }
-    }
-
     /// The compounds have to be matched before their parts, or `Wirtschaft/
     /// Politik` lands on whichever of the two the list happens to reach first.
     func testCompoundSubjectsBeatTheirParts() {
         XCTAssertEqual(subjectStyle(for: "Wirtschaft/Politik").icon, subjectStyle(for: "Wirtschaft").icon)
         XCTAssertNotEqual(subjectStyle(for: "Wirtschaft/Politik").icon, subjectStyle(for: "Politik").icon)
-    }
-
-    /// White type sits on the foot of every card. The scrim is what makes that
-    /// legible on the bright ones, so it has to actually reach the ratio.
-    func testEveryCardCarriesWhiteTextAtThreeToOne() {
-        for subject in Self.subjects {
-            let tint = subjectStyle(for: subject).tint
-            let shade = tint.scrim()
-            let scaled = 1 - shade.bottom
-            func channel(_ value: Double) -> Double {
-                let component = value * scaled
-                return component <= 0.03928 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
-            }
-            let luminance = 0.2126 * channel(tint.red)
-                + 0.7152 * channel(tint.green)
-                + 0.0722 * channel(tint.blue)
-            let ratio = 1.05 / (luminance + 0.05)
-            XCTAssertGreaterThanOrEqual(
-                ratio, 3.0,
-                "white on \(subject ?? "nil") is \(ratio):1 even with its scrim"
-            )
-        }
     }
 }

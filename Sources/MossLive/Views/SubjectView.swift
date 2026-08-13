@@ -27,13 +27,7 @@ struct SubjectView: View {
     let folder: SubjectFolder
     let onChanged: () async -> Void
 
-    @Environment(AppModel.self) private var model
-
     @State private var lessons: [BackendAPI.LessonInfo]
-    /// This subject's cards, one pile per lesson, so a row can say what is
-    /// waiting in it. Read from the stored deck first — cards never change once
-    /// written, so the counts are right before any request is made.
-    @State private var decks: [String: LessonDeck] = [:]
     @State private var actionError: String?
     /// The row whose context menu asked for a deletion, held until it is
     /// confirmed. Also what the dialog is presented from.
@@ -103,76 +97,6 @@ struct SubjectView: View {
         } message: {
             Text(actionError ?? "")
         }
-        .task { await loadDecks() }
-        // A round started from this page changes what is due on it, so the
-        // counts are fetched again when the round's modal closes.
-        .onChange(of: model.studySession == nil) { _, ended in
-            if ended { Task { await loadDecks() } }
-        }
-    }
-
-    // MARK: - What is waiting in this subject
-
-    /// What this subject adds up to as cards, and one way into them.
-    ///
-    /// The counts were already on the rows; what was missing was the obvious
-    /// move a student makes on a subject page — "dann üben wir eben Mathe" —
-    /// which previously meant going back to Lernen and finding it in a menu.
-    /// One bordered button: this page is for reading the archive, and studying
-    /// it is the second thing you can do here, not the first.
-    @ViewBuilder
-    private var studyBar: some View {
-        let cards = decks.values.flatMap(\.cards)
-        let due = decks.values.flatMap(\.due)
-        if !cards.isEmpty {
-            HStack(spacing: 12) {
-                Text(studyBarText(total: cards.count, due: due.count))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                Button(due.isEmpty ? "Üben" : "Lernen starten") {
-                    let deck = due.isEmpty
-                        ? Array(cards.sorted { cardReadiness($0) < cardReadiness($1) }.prefix(20))
-                        : StudyPlan.interleaved(due)
-                    model.startStudy(
-                        StudySession(
-                            mode: due.isEmpty ? .practice : .review,
-                            title: folder.name,
-                            cards: deck
-                        )
-                    )
-                }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .controlSize(.regular)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity)
-            .cardSurface(cornerRadius: 20)
-        }
-    }
-
-    private func studyBarText(total: Int, due: Int) -> String {
-        let cards = total == 1 ? "1 Karte" : "\(total) Karten"
-        return due > 0 ? "\(cards) · \(due) fällig" : cards
-    }
-
-    private var scope: SubjectScope {
-        folder.isOther ? .unfiled : .named(folder.name)
-    }
-
-    /// The stored deck immediately, the server's afterwards. Silent on failure:
-    /// what is stored is the same set of cards, only possibly one review behind.
-    private func loadDecks() async {
-        let answered = model.reviews.answeredIDs
-        let stored = storedLearnCards().filter { scope.contains($0) }
-        if !stored.isEmpty {
-            decks = lessonDecks(from: stored, answered: answered)
-        }
-        guard let fetched = try? await api.allCards(subject: scope.query) else { return }
-        let mine = fetched.filter { scope.contains($0) }
-        decks = lessonDecks(from: mine, answered: answered)
     }
 
     // MARK: - The board
@@ -182,7 +106,6 @@ struct SubjectView: View {
             ScrollView {
                 VStack(spacing: 26) {
                     SubjectHoursHeader(total: totalSeconds, week: weekSeconds)
-                    studyBar
                     columns(width: geo.size.width)
                 }
                 .padding(.horizontal, 24)
@@ -202,7 +125,7 @@ struct SubjectView: View {
         let split = splitIntoColumns(rows, count: wide ? 2 : 1)
         return HStack(alignment: .top, spacing: 24) {
             ForEach(Array(split.enumerated()), id: \.offset) { _, column in
-                SubjectLessonCard(api: api, lessons: column, decks: decks) { pendingDelete = $0 }
+                SubjectLessonCard(api: api, lessons: column) { pendingDelete = $0 }
                     .frame(maxWidth: .infinity)
             }
         }
@@ -335,7 +258,6 @@ private struct SubjectHoursHeader: View {
 private struct SubjectLessonCard: View {
     let api: BackendAPI
     let lessons: [BackendAPI.LessonInfo]
-    let decks: [String: LessonDeck]
     let onDelete: (BackendAPI.LessonInfo) -> Void
 
     private static let corner: CGFloat = 20
@@ -346,7 +268,7 @@ private struct SubjectLessonCard: View {
                 NavigationLink {
                     LessonDetailView(api: api, info: lesson)
                 } label: {
-                    SubjectLessonRow(info: lesson, deck: decks[lesson.id])
+                    SubjectLessonRow(info: lesson)
                 }
                 .buttonStyle(RowPressStyle())
                 .contextMenu {
@@ -402,10 +324,6 @@ private struct RowPressStyle: ButtonStyle {
 /// of day rather than repeating that date.
 private struct SubjectLessonRow: View {
     let info: BackendAPI.LessonInfo
-    /// This lesson's cards, when it has any. Shown as a count at the end of the
-    /// meta line, which is what removes the reason for a second subject grid in
-    /// a second tab: what is due is visible where the lessons already are.
-    let deck: LessonDeck?
 
     /// What the three lines say. The topic and the excerpt are two fields when
     /// the server wrote a topic and one field cut in two when it did not, so
@@ -467,10 +385,6 @@ private struct SubjectLessonRow: View {
                     .foregroundStyle(.tertiary)
                     .accessibilityLabel("Mit Aufnahme")
             }
-            if let cards = cardsText {
-                Text("·")
-                Text(cards)
-            }
         }
         // A step below the body size the rest of the app uses. The heading is
         // what the row is for, and at `.subheadline` the three lines were close
@@ -497,15 +411,6 @@ private struct SubjectLessonRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
-    }
-
-    /// What is waiting in this lesson, in the most specific true words there is
-    /// room for. Nothing at all when the lesson has no cards yet — the lesson's
-    /// own page offers to write them.
-    private var cardsText: String? {
-        guard let deck, !deck.cards.isEmpty else { return nil }
-        if !deck.due.isEmpty { return "\(deck.due.count) fällig" }
-        return deck.cards.count == 1 ? "1 Karte" : "\(deck.cards.count) Karten"
     }
 
     /// "12. Okt" — the day, next to the length.

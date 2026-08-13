@@ -8,51 +8,13 @@ enum Theme {
     /// the app tint (system blue); recording state uses `.red` directly,
     /// matching the system convention.
     ///
-    /// The accent means *interactive* and nothing else. A readiness bar, a
-    /// subject dot or a status word never borrows it, or the one colour that
-    /// promises a tap stops promising anything.
+    /// The accent means *interactive* and nothing else.
     static let accent = Color.accentColor
-
-    /// Three radii, and a reason for each.
-    ///
-    /// The Lernen area had eight (26, 24, 22, 20, 16, 15, 14, 12), which is not
-    /// a system but a habit — every new rectangle picked a number that looked
-    /// right next to the last one. A control is small and sits inside things, a
-    /// surface holds a group of rows, and the subject tile in Stunden is the one
-    /// shape that is meant to read as a card rather than as a panel.
-    enum Radius {
-        static let control: CGFloat = 12
-        static let surface: CGFloat = 18
-        static let tile: CGFloat = 26
-    }
 
     /// The 8pt grid, named after what it separates rather than after its size.
     enum Space {
-        /// Screen margin on a phone-width column.
-        static let screen: CGFloat = 20
-        /// Screen margin once the window is wide enough to breathe.
-        static let wideScreen: CGFloat = 24
-        /// Between two sections of a screen.
-        static let section: CGFloat = 28
-        /// Between two rows inside a section.
-        static let row: CGFloat = 12
         /// Inside a raised surface.
         static let inset: CGFloat = 16
-    }
-
-    /// Widths the layout changes its mind at — measured, never asked of a size
-    /// class, because iPadOS windows resize freely.
-    enum Width {
-        /// A comfortable line length for a question.
-        static let readable: CGFloat = 720
-        /// One column of content in a detail panel.
-        static let column: CGFloat = 700
-        /// Where Heute splits into two columns.
-        static let twoColumn: CGFloat = 1000
-        /// Below this the layout is a Slide Over slice.
-        static let narrow: CGFloat = 500
-        /// Above this a question is set one step larger.
-        static let largeQuestion: CGFloat = 900
     }
 }
 
@@ -103,8 +65,7 @@ enum RecordTint: String, CaseIterable, Identifiable {
 /// A tile that answers the finger: it dips a little while held, and comes back.
 ///
 /// `.plain` leaves a card that size with no press state at all, which reads as a
-/// tap that did not register. Shared by both grids, so a folder in Stunden and a
-/// subject in Lernen behave the same under the same finger.
+/// tap that did not register.
 struct PressableCardStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -126,20 +87,5 @@ extension View {
             Color(.secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
-    }
-
-    /// The single raised surface of the Lernen area: one radius, one colour, one
-    /// name — so "how many surfaces does this screen have" is a question with an
-    /// answer rather than a count of rectangles.
-    func learnSurface() -> some View {
-        cardSurface(cornerRadius: Theme.Radius.surface)
-    }
-
-    /// The canvas a study round runs on. Not the grouped background: a round is
-    /// a mode, not a form, and the question has to be the brightest thing on the
-    /// screen.
-    func sessionScreen() -> some View {
-        frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground).ignoresSafeArea())
     }
 }

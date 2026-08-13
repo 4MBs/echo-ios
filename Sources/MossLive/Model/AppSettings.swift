@@ -59,30 +59,6 @@ final class AppSettings {
         didSet { defaults.set(quickSwitchURL, forKey: "quickSwitchURL") }
     }
 
-    /// How much time a day the study plan is cut to.
-    ///
-    /// One number for the whole app. It used to be asked on the Lernen screen
-    /// before anything could be started — a question in front of the task, with
-    /// a server round trip per tap and no memory of the answer — and a second
-    /// time per exam, so two competing budgets decided one round.
-    var dailyLearnMinutes: Int {
-        didSet { defaults.set(dailyLearnMinutes, forKey: "dailyLearnMinutes") }
-    }
-
-    /// The choices the plan line offers. Short enough to be honest about a bus
-    /// ride, long enough for the evening before an exam.
-    static let learnMinuteOptions = [10, 15, 20, 30, 45]
-
-    /// Daily "Zeit zum Lernen" reminder for due spaced-repetition cards.
-    var learnReminderEnabled: Bool {
-        didSet { defaults.set(learnReminderEnabled, forKey: "learnReminderEnabled") }
-    }
-
-    /// Reminder time as minutes since midnight (default 16:00).
-    var learnReminderMinutes: Int {
-        didSet { defaults.set(learnReminderMinutes, forKey: "learnReminderMinutes") }
-    }
-
     /// How far the record control's colours are turned around the wheel. Stored
     /// as the shift itself rather than a name, so the set of offered colours can
     /// change without stranding a saved value.
@@ -97,6 +73,11 @@ final class AppSettings {
         didSet { defaults.set(showPageNumberEditor, forKey: "showPageNumberEditor") }
     }
 
+    /// Whether the reader offers a local display-name editor for books.
+    var showBookRenaming: Bool {
+        didSet { defaults.set(showBookRenaming, forKey: "showBookRenaming") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -109,17 +90,13 @@ final class AppSettings {
         contextSeconds = ctx == 0 ? 30 : ctx
         let rate = defaults.integer(forKey: "bitrate")
         bitrate = rate == 0 ? 24000 : rate
-        let dailyMinutes = defaults.integer(forKey: "dailyLearnMinutes")
-        dailyLearnMinutes = dailyMinutes == 0 ? 20 : dailyMinutes
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
         timetableConnected = defaults.bool(forKey: "timetableConnected")
-        learnReminderEnabled = defaults.bool(forKey: "learnReminderEnabled")
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
+        showBookRenaming = defaults.object(forKey: "showBookRenaming") as? Bool ?? true
         recordButtonHue = defaults.double(forKey: "recordButtonHue") // 0 = the red it was designed in
-        let reminderMinutes = defaults.integer(forKey: "learnReminderMinutes")
-        learnReminderMinutes = reminderMinutes == 0 ? 16 * 60 : reminderMinutes
         // migrate the old default: bare goodnotes:// lands in GoodNotes'
         // file-import handler and shows an "unsupported file type" alert;
         // the legacy launcher scheme opens the app silently

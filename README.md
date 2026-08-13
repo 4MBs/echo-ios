@@ -119,48 +119,6 @@ destination lesson, choose **Unterrichtsnotizen**, then tap the queued document
 under **Aus dem Teilen-Menü**. The extension never guesses which lesson a file
 belongs to and does not upload anything before that explicit choice.
 
-### Lernen
-
-Each lesson becomes a quiz deck, scheduled on a Leitner ladder. A card you get
-wrong returns tomorrow; a card you get right returns after 1, 3, 7, 14 and 30
-days. Only exam-relevant material becomes cards.
-
-The tab is one screen and one button. It opens on today: the date, the number
-of cards due, roughly how long that takes, a bar showing which subjects the
-round is made of, and **Lernen starten**. Under it the same subjects as rows —
-each with its own colour and glyph, the ones the Stunden folders use — then the
-exams that are coming with the days left beside them, and at most three topics
-that are still wobbling. The daily budget sits next to the plan's heading, not
-in front of the work; it is one setting, shared with Einstellungen → Lernen.
-
-A round is a full-screen mode with one way out. Its header carries the subject
-and the lesson the current card came from; the question is the largest thing on
-the screen and stands on the background rather than in a box. One question at a
-time, two interactions for a multiple-choice card and three for a written one,
-pass/fail self-assessment with the finer grades one level down. After each
-answer the card says what it did — *kommt morgen wieder* or *kommt später
-wieder*. Progress survives locking the iPad, switching apps and being killed for
-memory: the round is written to disk after every answer and picked up again
-within half an hour.
-
-Every card knows which minute of which lesson it was written from, so an answer
-offers two ways back into the lesson: **Im Unterricht hören** plays the passage
-itself, with three seconds of run-up, stopping where the question stopped, and
-**Nachfragen** asks the AI about this card with that lesson's transcript already
-as its context. The follow-up is thrown away with the round; the Chat tab keeps
-its own conversation.
-
-The result is a count, one bar of right against open, what follows from it, and
-the cards that were missed — each opening to its answer and explanation without
-asking for another attempt.
-
-Cards, plan and exams are stored on the iPad. The Lernen screen renders from
-that store before any request is made, a round can be played through with no
-network at all, and answers wait in a queue until the server is back. Browsing
-lives in Stunden, where the lessons already are: a subject board says how many
-of its cards are waiting and starts them, a lesson row shows what is due in it,
-and a lesson page can have its cards written.
-
 ### Chat and the answer note
 
 The chat answers free-form questions about the running recording or any past
@@ -191,20 +149,29 @@ Schoolbooks rarely print page 1 on the first PDF page, so every book learns its
 own numbering once: turn to any page whose number you can read, type that number,
 and the rest of the book follows. It is remembered per book.
 
-**Buch-KI** sits in the reader's toolbar, only ever inside an open book. On an
-iPad it opens as a panel beside the page, so the answer is read against what it
-is about; on a phone it is a sheet. The question goes to the server with nothing
-but the PDF page numbers currently on screen — the server already has the book,
-so no page, picture or text is ever uploaded. It reads that page there, looks at
-the rendered image when the page is a diagram or a scan, and may follow the
-book's own references into neighbouring pages; it never leaves the book. The
-answer arrives with the pages it rests on attached, named with the book's printed
-numbers, and tapping one turns the reader to it. Reading a downloaded book stays
-offline; asking about it needs the server.
+**Seite fragen** sits in the reader's control bar beside the page arrows and the
+layout switch, only ever inside an open book. On an iPad it opens as an inspector
+beside the page; on a phone it is a nonmodal sheet that can collapse while a
+cited page is checked. The question goes to the server with the PDF page numbers
+currently on screen — the server already has the book, so no page, picture or
+text is uploaded. It reads that page there, looks at the rendered image when the
+page is a diagram or scan, and may follow the book's own references into nearby
+pages. The answer arrives with its book sources attached, named with the printed
+numbers, and tapping one turns the reader without throwing the answer away.
+Reading a downloaded book stays offline; asking about it needs the server.
 
-<p align="center">
-  <img src="docs/screenshots/reader.jpg" width="880" alt="A geography textbook open on a two-page spread, with page navigation and the layout switcher in the bar underneath">
-</p>
+Each page or spread has its own short thread. Turning the page switches context
+instead of quietly attaching a follow-up to the previous page. The panel uses
+the same conversation layout and composer as Chat: questions are free-form,
+can be typed or dictated, and answers can be copied or generated again. There
+are no preset task, explanation, summary or illustration actions. Sources stay
+collapsed until wanted.
+
+For something more precise than the current page, **Bereich markieren** closes
+the panel and lets the student draw a rectangle directly on the PDF with a
+finger or Apple Pencil. Echo sends only the page number and normalized rectangle
+coordinates, not a screenshot. That marked region gets its own thread and
+remains outlined while the answer is compared with the book.
 
 ### Dead zones don't cost you the lesson
 
@@ -288,7 +255,7 @@ Sources/MossLive/
   Audio/                     AVAudioEngine capture, Opus streaming encoder
   Network/                   wire protocol, WebSocket client with resume + backlog
   Model/                     app state machine, settings, stores
-  Views/                     SwiftUI: transcript, lessons, learn, chat, library
+  Views/                     SwiftUI: transcript, lessons, chat, library
 Sources/MossLiveWidget/      Home and Lock Screen answer widget
 LocalPackages/OpusShim/      C shim over libopus (SPM)
 Tests/MossLiveTests/         unit tests
@@ -304,8 +271,8 @@ flowchart LR
     C["ChatGPT (Codex CLI)<br/>or Gemini (Antigravity CLI)"]
     D["WebUntis"]
     A -- "WebSocket over Tailscale<br/>audio up · transcript down" --> B
-    A -- "REST: lessons, books, quiz cards" --> B
-    B -- "summaries · chat · quiz cards" --> C
+    A -- "REST: lessons and books" --> B
+    B -- "summaries · chat" --> C
     B -- "timetable" --> D
 ```
 

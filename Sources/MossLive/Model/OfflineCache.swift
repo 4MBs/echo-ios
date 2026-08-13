@@ -5,10 +5,9 @@ import os
 /// show before — or entirely without — a reply.
 ///
 /// Nothing in here is expensive to keep. The lessons were recorded on this
-/// iPad in the first place and their transcripts are text; the cards were
-/// generated once and never change afterwards; the timetable is a few dozen
-/// short strings. The only reason any of it needed the network was that it was
-/// never written down.
+/// iPad in the first place and their transcripts are text; the timetable is a
+/// few dozen short strings. The only reason any of it needed the network was
+/// that it was never written down.
 ///
 /// Application Support rather than Caches: iOS empties Caches whenever it wants
 /// the space back, which for offline content means it disappears exactly when
@@ -21,14 +20,6 @@ enum OfflineCache {
     enum Key {
         static let books = "books"
         static let lessons = "lessons"
-        static let learnCards = "learn-cards"
-        /// The last daily plan the server sent. Kept so Heute has a shape to
-        /// draw before — and without — a reply; it is only trusted while its
-        /// `date` is still today.
-        static let learnPlan = "learn-plan"
-        static let learnExams = "learn-exams"
-        /// The round that was running when the app went away.
-        static let studySession = "study-session"
         static let timetableNow = "timetable-now"
         static let timetableDay = "timetable-day"
         static let timetableSubjects = "timetable-subjects"

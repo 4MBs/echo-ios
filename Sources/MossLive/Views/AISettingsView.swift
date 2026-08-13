@@ -31,25 +31,33 @@ struct AISettingsView: View {
 }
 
 /// Which AI backend the server uses. With ChatGPT, the model and the
-/// reasoning effort are picked here; the choice is stored on the server (like
-/// the WebUntis login) and applies immediately, no restart needed. The model
+/// reasoning effort and speed are picked here; the choice is stored on the
+/// server (like the WebUntis login) and applies immediately, no restart needed. The model
 /// list — including which reasoning efforts each model supports — comes from
 /// the server, so new models appear without an app update.
 struct AIModelSection: View {
     @Environment(AppModel.self) private var model
 
-    @State private var settings: BackendAPI.AnswerSettings?
-    @State private var loadFailed = false
-    @State private var errorMessage: String?
+    private var configuration: AIConfigurationStore { model.aiConfiguration }
 
     var body: some View {
         Section {
             if let settings {
-                LabeledContent("Anbieter", value: settings.provider == "chatgpt" ? "ChatGPT" : "Gemini")
+                Picker("Anbieter", selection: providerBinding) {
+                    Text("Gemini").tag("gemini")
+                    Text("ChatGPT").tag("chatgpt")
+                }
+                .pickerStyle(.navigationLink)
                 if settings.provider == "chatgpt" {
                     Picker("Modell", selection: modelBinding) {
                         ForEach(modelChoices) { choice in
                             Text(displayName(for: choice)).tag(choice.id)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    Picker("Geschwindigkeit", selection: serviceTierBinding) {
+                        ForEach(serviceTierChoices) { choice in
+                            Text(speedLabel(choice)).tag(choice.id)
                         }
                     }
                     .pickerStyle(.navigationLink)
@@ -64,7 +72,7 @@ struct AIModelSection: View {
                 if let errorMessage {
                     Text(errorMessage).font(.footnote).foregroundStyle(.red)
                 }
-            } else if loadFailed {
+            } else if configuration.errorMessage != nil {
                 Text("Server nicht erreichbar.")
                     .foregroundStyle(.secondary)
             } else {
@@ -75,7 +83,7 @@ struct AIModelSection: View {
         } footer: {
             Text(footerText)
         }
-        .task { await load() }
+        .task { await configuration.load(api: api, force: true) }
     }
 
     private var api: BackendAPI {
@@ -90,54 +98,60 @@ struct AIModelSection: View {
     // stay a valid tag, or the picker silently shows nothing selected.
     private var modelChoices: [BackendAPI.ModelChoice] {
         guard let settings else { return [] }
-        var choices = settings.chatgptModels
-        if !choices.contains(where: { $0.id == settings.chatgptModel }) {
-            choices.append(.init(id: settings.chatgptModel, label: "", efforts: []))
-        }
-        return choices
+        return configuration.modelChoices(for: settings)
     }
 
-    /// "" (Standard) plus what the selected model supports; a custom model
-    /// without catalog data falls back to the full list.
+    /// What the selected model supports; a custom model without catalog data
+    /// falls back to the full list. The model default is resolved by the server,
+    /// so Reasoning never needs a separate Standard row.
     private var effortChoices: [String] {
-        guard let settings else { return [""] }
-        let known = supportedEfforts(for: settings.chatgptModel, in: settings)
-        let efforts = known.isEmpty ? settings.reasoningEfforts.filter { !$0.isEmpty } : known
-        var choices = [""] + efforts
-        if !choices.contains(settings.chatgptReasoningEffort) {
-            choices.append(settings.chatgptReasoningEffort)
-        }
-        return choices
-    }
-
-    private func supportedEfforts(for modelID: String, in settings: BackendAPI.AnswerSettings) -> [String] {
-        settings.chatgptModels.first { $0.id == modelID }?.efforts ?? []
+        guard let settings else { return [] }
+        return configuration.effortChoices(for: settings)
     }
 
     private var modelBinding: Binding<String> {
         Binding(
-            get: { settings?.chatgptModel ?? "" },
+            get: { configuration.settings?.chatgptModel ?? "" },
             set: { value in
-                guard var updated = settings else { return }
-                updated.chatgptModel = value
-                // an effort the new model doesn't support goes back to Standard
-                let known = supportedEfforts(for: value, in: updated)
-                if !known.isEmpty, !updated.chatgptReasoningEffort.isEmpty,
-                   !known.contains(updated.chatgptReasoningEffort) {
-                    updated.chatgptReasoningEffort = ""
-                }
-                settings = updated
-                save()
+                configuration.selectModel(value, api: api)
+            }
+        )
+    }
+
+    private var providerBinding: Binding<String> {
+        Binding(
+            get: { configuration.settings?.provider ?? "chatgpt" },
+            set: { value in
+                configuration.selectProvider(value, api: api)
             }
         )
     }
 
     private var effortBinding: Binding<String> {
         Binding(
-            get: { settings?.chatgptReasoningEffort ?? "" },
+            get: {
+                guard let settings = configuration.settings else { return "" }
+                return configuration.reasoningEffort(for: settings)
+            },
             set: { value in
-                settings?.chatgptReasoningEffort = value
-                save()
+                configuration.selectReasoningEffort(value, api: api)
+            }
+        )
+    }
+
+    private var serviceTierChoices: [BackendAPI.ServiceTierChoice] {
+        guard let settings else { return [] }
+        return configuration.serviceTierChoices(for: settings)
+    }
+
+    private var serviceTierBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let settings = configuration.settings else { return "default" }
+                return configuration.serviceTier(for: settings)
+            },
+            set: { value in
+                configuration.selectServiceTier(value, api: api)
             }
         )
     }
@@ -147,14 +161,27 @@ struct AIModelSection: View {
             return "Wird vom Server geladen."
         }
         if settings.provider == "chatgpt" {
-            return "Gilt für Antworten, Zusammenfassungen, Chat und Quiz — sofort."
+            return "Gilt für Antworten, Zusammenfassungen und Chat — sofort."
         }
-        return "Den Anbieter wählt der Server (answer.provider in config.toml)."
+        return "Gemini wird für Antworten, Zusammenfassungen und Chat verwendet — sofort."
     }
 
     private func displayName(for choice: BackendAPI.ModelChoice) -> String {
         if choice.id.isEmpty { return "Standard (empfohlen)" }
+        if choice.id.lowercased().hasPrefix("gpt-") { return Self.modelLabel(choice.id) }
         return choice.label.isEmpty ? Self.modelLabel(choice.id) : choice.label
+    }
+
+    private func speedLabel(_ choice: BackendAPI.ServiceTierChoice) -> String {
+        switch choice.id {
+        case "default": return "Standard – Standardnutzung"
+        case "priority", "fast": return "Schnell – erhöhter Verbrauch"
+        default:
+            let label = choice.label.localizedCaseInsensitiveCompare("Fast") == .orderedSame
+                ? "Schnell"
+                : choice.label
+            return choice.description.isEmpty ? label : "\(label) – \(choice.description)"
+        }
     }
 
     /// Fallback prettifier for models the server has no label for:
@@ -170,7 +197,6 @@ struct AIModelSection: View {
 
     static func effortLabel(_ effort: String) -> String {
         switch effort {
-        case "": "Standard"
         case "minimal": "Minimal – am schnellsten"
         case "low": "Niedrig – schnell"
         case "medium": "Mittel"
@@ -182,29 +208,7 @@ struct AIModelSection: View {
         }
     }
 
-    private func save() {
-        guard let settings else { return }
-        errorMessage = nil
-        Task {
-            do {
-                try await api.updateAnswerSettings(
-                    model: settings.chatgptModel,
-                    reasoningEffort: settings.chatgptReasoningEffort
-                )
-            } catch {
-                errorMessage = error.localizedDescription
-                await load()
-            }
-        }
-    }
+    private var settings: BackendAPI.AnswerSettings? { configuration.settings }
 
-    private func load() async {
-        do {
-            settings = try await api.answerSettings()
-            loadFailed = false
-            errorMessage = nil
-        } catch {
-            loadFailed = settings == nil
-        }
-    }
+    private var errorMessage: String? { configuration.errorMessage }
 }

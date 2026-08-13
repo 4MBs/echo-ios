@@ -2,7 +2,7 @@
 import XCTest
 
 /// A schoolbook page has two numbers — the one printed on it and the one the
-/// PDF calls it — and Buch-KI is the place they meet: the reader shows the
+/// PDF calls it — and "Seite fragen" is where they meet: the reader shows the
 /// printed one, the server is only ever told the PDF one, and a citation has
 /// to travel back the other way to land on the right page.
 final class BookPageNumberingTests: XCTestCase {
@@ -60,6 +60,173 @@ final class BookPageNumberingTests: XCTestCase {
         XCTAssertEqual(plain.printedLabel(7), "7")
         XCTAssertEqual(plain.pdfPage(forPrinted: 7), 7)
         XCTAssertEqual(plain.citationLabel(pdfPage: 7), "Seite 7")
+    }
+}
+
+/// `POST /library/{id}/ask` remembers nothing between calls, so a follow-up
+/// only means something if the turn before it travels with it.
+@MainActor
+final class BookAIFollowUpTests: XCTestCase {
+    private func turn(question: String, text: String) -> BookAIStore.Turn {
+        BookAIStore.Turn(question: question, pages: [16], text: text, citations: [], pagesRead: [16])
+    }
+
+    func testAFirstQuestionGoesUpAsTyped() {
+        XCTAssertEqual(BookAIStore.grounded("Erkläre diese Seite.", after: nil), "Erkläre diese Seite.")
+    }
+
+    /// "Erklär das nochmal einfacher" is unanswerable on its own — what "das"
+    /// was has to be in the request.
+    func testAFollowUpCarriesThePreviousTurn() {
+        let sent = BookAIStore.grounded(
+            "Erklär das nochmal einfacher.",
+            after: turn(question: "Was ist Zellatmung?", text: "Der Abbau von Glukose.")
+        )
+        XCTAssertTrue(sent.contains("Was ist Zellatmung?"))
+        XCTAssertTrue(sent.contains("Der Abbau von Glukose."))
+        XCTAssertTrue(sent.hasSuffix("Erklär das nochmal einfacher."))
+    }
+
+    /// The page is the context that matters; a long answer quoted back in full
+    /// would crowd it out of the prompt.
+    func testALongPreviousAnswerIsCutShort() {
+        let long = String(repeating: "a", count: 5000)
+        let sent = BookAIStore.grounded("Und weiter?", after: turn(question: "Fasse zusammen.", text: long))
+        XCTAssertFalse(sent.contains(long), "the whole answer must not be quoted back")
+        XCTAssertTrue(sent.contains("…"), "the quote is marked as cut")
+        XCTAssertLessThan(sent.count, 1500)
+    }
+
+    func testFreeFormPromptKeepsTheActualRequestAndAddsAGroundedFormatContract() {
+        let sent = BookAIPrompts.formatted("Wie funktioniert die Zellatmung?")
+        XCTAssertTrue(sent.contains("Wie funktioniert die Zellatmung?"))
+        XCTAssertTrue(sent.contains("Erfinde keine Aufgabenstellung"))
+        XCTAssertTrue(sent.contains("ausgewählten Buchseiten"))
+        XCTAssertTrue(sent.contains("keine Tabellen"))
+    }
+}
+
+/// Page and rectangle changes alter request grounding without replacing the
+/// visible conversation.
+@MainActor
+final class BookAIContextTests: XCTestCase {
+    func testSpreadContextIsStableRegardlessOfPageOrder() {
+        XCTAssertEqual(
+            BookAIStore.Context(pages: [17, 16, 17]),
+            BookAIStore.Context(pages: [16, 17])
+        )
+    }
+
+    func testDraftAndConversationSurviveAContextChange() {
+        let store = BookAIStore(loadPersisted: false)
+        let first = BookAIStore.Context(pages: [16])
+        let second = BookAIStore.Context(pages: [17])
+        let conversationID = store.selectedConversationID
+
+        store.activate(first)
+        store.draft = "Frage zu Seite 16"
+        store.activate(second)
+        XCTAssertEqual(store.draft, "Frage zu Seite 16")
+        XCTAssertEqual(store.selectedConversationID, conversationID)
+        XCTAssertEqual(store.context, second)
+    }
+
+    func testDraftAloneDoesNotExposeConversationCleanup() {
+        let store = BookAIStore(loadPersisted: false)
+        store.activate(BookAIStore.Context(pages: [16]))
+
+        XCTAssertFalse(store.hasConversation)
+        store.draft = "Noch nicht gesendet"
+        XCTAssertFalse(store.hasConversation)
+        XCTAssertTrue(store.hasContent)
+    }
+
+    func testNewConversationCanReturnToThePreviousDraft() {
+        let store = BookAIStore(loadPersisted: false)
+        let firstID = store.selectedConversationID
+        store.draft = "Ungesendete erste Frage"
+
+        store.createConversation()
+
+        XCTAssertEqual(store.conversations.count, 2)
+        XCTAssertNotEqual(store.selectedConversationID, firstID)
+        XCTAssertEqual(store.draft, "")
+
+        store.select(firstID)
+        XCTAssertEqual(store.draft, "Ungesendete erste Frage")
+    }
+
+    func testConversationHistorySupportsRenameAndDelete() {
+        let store = BookAIStore(loadPersisted: false)
+        let firstID = store.selectedConversationID
+        store.draft = "Erste Frage"
+        store.createConversation()
+
+        store.rename(firstID, to: "Zellatmung")
+        XCTAssertEqual(store.conversations.first(where: { $0.id == firstID })?.title, "Zellatmung")
+
+        store.delete(firstID)
+        XCTAssertFalse(store.conversations.contains(where: { $0.id == firstID }))
+        XCTAssertFalse(store.conversations.isEmpty)
+    }
+
+    func testConversationHistoryIsCodableWithBookCitations() throws {
+        let turn = BookAIStore.Turn(
+            question: "Was zeigt die Abbildung?",
+            pages: [16],
+            text: "Sie zeigt die Zellatmung.",
+            citations: [BackendAPI.BookCitation(pdfPage: 16, note: "Abbildung")],
+            pagesRead: [16]
+        )
+        let conversation = BookAIStore.Conversation(title: "Zellatmung", turns: [turn])
+
+        let encoded = try JSONEncoder().encode(conversation)
+        let decoded = try JSONDecoder().decode(BookAIStore.Conversation.self, from: encoded)
+
+        XCTAssertEqual(decoded, conversation)
+    }
+
+    func testMarkedRegionIsADifferentContextFromItsWholePage() {
+        let region = BackendAPI.BookPageRegion(
+            pdfPage: 16,
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.4
+        )
+        XCTAssertNotEqual(
+            BookAIStore.Context(pages: [16]),
+            BookAIStore.Context(pages: [16], region: region)
+        )
+    }
+
+    func testRegionUsesNormalizedServerPayloadKeys() throws {
+        let region = BackendAPI.BookPageRegion(
+            pdfPage: 16,
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.4
+        )
+        let data = try JSONSerialization.data(withJSONObject: region.json)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["pdf_page"] as? Int, 16)
+        XCTAssertEqual(object["x"] as? Double, 0.1)
+        XCTAssertEqual(object["height"] as? Double, 0.4)
+    }
+
+    func testRegionAlsoGroundsOlderServersInTheMarkedArea() {
+        let region = BackendAPI.BookPageRegion(
+            pdfPage: 16,
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.4
+        )
+        let prompt = BookAIStore.scoped("Erkläre das.", to: region)
+        XCTAssertTrue(prompt.contains("PDF-Seite 16"))
+        XCTAssertTrue(prompt.contains("10 % links / 40 % oben"))
+        XCTAssertTrue(prompt.hasSuffix("Erkläre das."))
     }
 }
 

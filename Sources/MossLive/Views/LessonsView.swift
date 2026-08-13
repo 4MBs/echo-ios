@@ -9,7 +9,7 @@ import SwiftUI
 /// a free period — which is the one folder that cannot come from WebUntis.
 ///
 /// A folder opens the subject's board of recordings (`SubjectView`); a lesson
-/// opens Zusammenfassung/Transkript. Abfragen lives in the Lernen tab.
+/// opens its summary and transcript.
 struct LessonsView: View {
     @Environment(AppModel.self) private var model
 
@@ -147,9 +147,8 @@ struct LessonsView: View {
     }
 
     /// A link when the folder has something in it, a button that says so when it
-    /// does not — the same bargain the Lernen grid makes, and for the same
-    /// reason: an empty folder is drawn because the subject exists, but opening
-    /// it would land on a screen with one sentence on it.
+    /// does not. An empty folder is drawn because the subject exists, but
+    /// opening it would land on a screen with one sentence on it.
     @ViewBuilder
     private func folderCard(_ folder: SubjectFolder) -> some View {
         if folder.lessons.isEmpty {
