@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 final class LibraryReaderUITests: EchoUITestCase {
@@ -61,6 +62,17 @@ final class LibraryReaderUITests: EchoUITestCase {
             .firstMatch
         XCTAssertTrue(answer.waitForExistence(timeout: 8))
         shot("book-ai-answer")
+
+        UIPasteboard.general.items = []
+        tap(app.buttons["bookAI.copy"].firstMatch)
+        let pasted = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in UIPasteboard.general.hasStrings },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [pasted], timeout: 5), .completed, "The answer was not copied")
+        tap(app.buttons["bookAI.regenerate"])
+        XCTAssertTrue(answer.waitForExistence(timeout: 15), "The regenerated answer never arrived")
+        shot("book-ai-regenerated")
 
         if app.buttons.matching(NSPredicate(format: "label CONTAINS 'Quelle'")).firstMatch.exists {
             tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Quelle'")).firstMatch)

@@ -102,6 +102,8 @@ struct BookAIPanel: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
             .accessibilityLabel("Chatverlauf")
 
             Button {
@@ -111,6 +113,8 @@ struct BookAIPanel: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
             .disabled(!store.hasConversation)
             .opacity(store.hasConversation ? 1 : 0)
             .accessibilityHidden(!store.hasConversation)
@@ -226,8 +230,12 @@ struct BookAIPanel: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
+                // The same 44-point minimum the chat's message actions use.
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(copiedTurn == turn.id ? "Kopiert" : "Antwort kopieren")
+                .accessibilityIdentifier("bookAI.copy")
 
                 if isLast, !store.sending {
                     Button {
@@ -237,8 +245,11 @@ struct BookAIPanel: View {
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Antwort neu erstellen")
+                    .accessibilityIdentifier("bookAI.regenerate")
                 }
                 Spacer()
             }
