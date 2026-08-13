@@ -783,7 +783,144 @@ private final class PDFViewProxy {
     private func go(toIndex index: Int) {
         guard let pdfView, let document = pdfView.document, document.pageCount > 0 else { return }
         let clamped = min(max(index, 0), document.pageCount - 1)
-        if let page = document.page(at: clamped) { pdfView.go(to: page) }
+        pdfView.goToPageAtFinalQuality(clamped)
+    }
+}
+
+/// Device-resolution page images used only while PDFKit prepares its tiled
+/// backing store. This is deliberately not a thumbnail cache: every entry is
+/// rendered at or above the largest dimension the page needs on the current
+/// display, and the cache is bounded by decoded bitmap cost.
+private final class BookPageRenderCache {
+    private let documentURL: URL?
+    private let images = NSCache<NSString, UIImage>()
+    private let lock = NSLock()
+    private var pending: [String: [(UIImage?) -> Void]] = [:]
+
+    init(document: PDFDocument) {
+        documentURL = document.documentURL
+        images.totalCostLimit = 128 * 1024 * 1024
+    }
+
+    func image(pageIndex: Int, maxPixelDimension: Int) -> UIImage? {
+        images.object(forKey: key(pageIndex: pageIndex, maxPixelDimension: maxPixelDimension) as NSString)
+    }
+
+    func prepare(
+        pageIndices: Set<Int>,
+        maxPixelDimension: Int,
+        completion: @escaping () -> Void = {}
+    ) {
+        guard !pageIndices.isEmpty else {
+            DispatchQueue.main.async(execute: completion)
+            return
+        }
+
+        let group = DispatchGroup()
+        for pageIndex in pageIndices {
+            group.enter()
+            prepare(pageIndex: pageIndex, maxPixelDimension: maxPixelDimension) { _ in
+                group.leave()
+            }
+        }
+        group.notify(queue: .main, execute: completion)
+    }
+
+    private func prepare(
+        pageIndex: Int,
+        maxPixelDimension: Int,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        let cacheKey = key(pageIndex: pageIndex, maxPixelDimension: maxPixelDimension)
+        let renderDimension = pixelBucket(for: maxPixelDimension)
+        if let image = images.object(forKey: cacheKey as NSString) {
+            DispatchQueue.main.async { completion(image) }
+            return
+        }
+
+        lock.lock()
+        if pending[cacheKey] != nil {
+            pending[cacheKey]?.append(completion)
+            lock.unlock()
+            return
+        }
+        pending[cacheKey] = [completion]
+        lock.unlock()
+
+        let documentURL = documentURL
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let image = documentURL.flatMap {
+                Self.renderPage(at: $0, pageIndex: pageIndex, maxPixelDimension: renderDimension)
+            }
+            if let image {
+                self?.images.setObject(
+                    image,
+                    forKey: cacheKey as NSString,
+                    cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+                )
+            }
+
+            self?.lock.lock()
+            let callbacks = self?.pending.removeValue(forKey: cacheKey) ?? []
+            self?.lock.unlock()
+            DispatchQueue.main.async {
+                callbacks.forEach { $0(image) }
+            }
+        }
+    }
+
+    private func key(pageIndex: Int, maxPixelDimension: Int) -> String {
+        "\(pageIndex)-\(pixelBucket(for: maxPixelDimension))"
+    }
+
+    private func pixelBucket(for maxPixelDimension: Int) -> Int {
+        max(256, Int(ceil(Double(maxPixelDimension) / 256)) * 256)
+    }
+
+    private static func renderPage(
+        at url: URL,
+        pageIndex: Int,
+        maxPixelDimension: Int
+    ) -> UIImage? {
+        guard let document = CGPDFDocument(url as CFURL),
+              let page = document.page(at: pageIndex + 1)
+        else { return nil }
+
+        var pageSize = page.getBoxRect(.cropBox).standardized.size
+        let rotation = abs(page.rotationAngle) % 180
+        if rotation == 90 { pageSize = CGSize(width: pageSize.height, height: pageSize.width) }
+        guard pageSize.width > 0, pageSize.height > 0 else { return nil }
+
+        let maximum = CGFloat(max(256, maxPixelDimension))
+        let scale = maximum / max(pageSize.width, pageSize.height)
+        let width = max(1, Int(ceil(pageSize.width * scale)))
+        let height = max(1, Int(ceil(pageSize.height * scale)))
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+
+        let target = CGRect(x: 0, y: 0, width: width, height: height)
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(target)
+        context.concatenate(
+            page.getDrawingTransform(
+                .cropBox,
+                rect: target,
+                rotate: 0,
+                preserveAspectRatio: true
+            )
+        )
+        context.drawPDFPage(page)
+        guard let rendered = context.makeImage() else { return nil }
+        return UIImage(cgImage: rendered)
     }
 }
 
@@ -836,6 +973,11 @@ private final class BookPDFView: PDFView {
     private var resizeSnapshotBaseBounds = CGRect.zero
     private var resizeSnapshotContentFrame = CGRect.zero
     private var resizeSnapshotFollowsFit = false
+    private var pageRenderCache: BookPageRenderCache?
+    private var finalQualityOverlay: UIView?
+    private var layoutTransitionOverlay: UIView?
+    private var navigationGeneration = 0
+    private var layoutGeneration = 0
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
     private lazy var deselectionTap = UITapGestureRecognizer(
@@ -871,6 +1013,7 @@ private final class BookPDFView: PDFView {
         }
         super.layoutSubviews()
         applyScaleLimits()
+        prepareVisibleAndNeighboringPages()
         selectionOverlay?.frame = bounds
         observeScrollingIfNeeded()
         updateDisplayedRegion()
@@ -1006,6 +1149,8 @@ private final class BookPDFView: PDFView {
               let scrollView = descendantScrollView(in: self)
         else { return }
         observedScrollView = scrollView
+        scrollView.panGestureRecognizer.addTarget(self, action: #selector(readerInteractionBegan(_:)))
+        scrollView.pinchGestureRecognizer?.addTarget(self, action: #selector(readerInteractionBegan(_:)))
         if let adjustmentOverlay {
             prioritizeRegionGestures(adjustmentOverlay.interactionRecognizers)
         }
@@ -1020,6 +1165,11 @@ private final class BookPDFView: PDFView {
                 self?.updateDisplayedRegion()
             },
         ]
+    }
+
+    @objc private func readerInteractionBegan(_ recognizer: UIGestureRecognizer) {
+        guard recognizer.state == .began else { return }
+        discardFinalQualityOverlay()
     }
 
     private func descendantScrollView(in view: UIView) -> UIScrollView? {
@@ -1101,28 +1251,85 @@ private final class BookPDFView: PDFView {
         restingScale = fit
     }
 
-    /// Change PDFKit's layout in place. Replacing the representable destroys
-    /// the live page hierarchy and is what exposed the white intermediate
-    /// frames in the recording. A snapshot of the already rendered pages stays
-    /// above PDFKit while it lays out the new mode, then moves/scales to the new
-    /// page frame and hands off to the live tiles underneath.
+    /// Page turns never expose PDFKit's provisional tiled render. Neighboring
+    /// pages should already be in the device-resolution cache; if a distant
+    /// jump misses, the old page remains visible until that same final-quality
+    /// render is ready, then the navigation and overlay install happen in one
+    /// main-thread turn before the next frame is displayed.
+    func goToPageAtFinalQuality(_ pageIndex: Int) {
+        guard let document, document.pageCount > 0 else { return }
+        let clamped = min(max(pageIndex, 0), document.pageCount - 1)
+        let targets = expectedPageIndices(containing: clamped, twoUp: displaysAsBook)
+        let dimension = renderPixelDimension
+        guard let cache = pageCache else {
+            if let page = document.page(at: clamped) { go(to: page) }
+            return
+        }
+
+        navigationGeneration += 1
+        let generation = navigationGeneration
+        cache.prepare(pageIndices: targets, maxPixelDimension: dimension) { [weak self] in
+            guard let self, generation == navigationGeneration,
+                  let page = self.document?.page(at: clamped)
+            else { return }
+            discardFinalQualityOverlay()
+            go(to: page)
+            layoutDocumentView()
+            layoutIfNeeded()
+            applyScaleLimits()
+            installFinalQualityOverlay()
+            prepareVisibleAndNeighboringPages()
+        }
+    }
+
+    /// Change PDFKit's layout in place. Device-resolution page planes cover the
+    /// live tiles and move between their old and new frames; newly added pages
+    /// enter from the side and removed pages leave spatially, with no opacity
+    /// animation or replacement of the representable.
     func setPageLayout(twoUp: Bool, anchorPage: Int, animated: Bool) {
         let targetMode: PDFDisplayMode = twoUp ? .twoUp : .singlePage
-        guard displayMode != targetMode || displaysAsBook != twoUp else { return }
-
-        completePendingResize()
-        let oldContentFrame = visiblePageFrame ?? bounds
-        // Reduced Motion still keeps a snapshot until PDFKit's final tiles are
-        // ready; it simply performs a direct hand-off instead of animating it.
-        let snapshot = snapshotView(afterScreenUpdates: false)
-        let zoomRatio = restingScale > 0 ? max(scaleFactor / restingScale, 1) : 1
-
-        displayMode = targetMode
-        displaysAsBook = twoUp
-        if let document,
-           let page = document.page(at: min(max(anchorPage - 1, 0), max(document.pageCount - 1, 0))) {
-            go(to: page)
+        guard displayMode != targetMode || displaysAsBook != twoUp else {
+            // Invalidates an asynchronous render requested for a mode the user
+            // has already toggled away from.
+            layoutGeneration += 1
+            return
         }
+
+        guard let document, document.pageCount > 0 else { return }
+        let anchorIndex = min(max(anchorPage - 1, 0), document.pageCount - 1)
+        let current = Set(visiblePages.map { document.index(for: $0) })
+        let target = expectedPageIndices(containing: anchorIndex, twoUp: twoUp)
+        let required = current.union(target)
+        let dimension = renderPixelDimension
+
+        layoutGeneration += 1
+        let generation = layoutGeneration
+        guard let cache = pageCache else {
+            performPageLayout(twoUp: twoUp, anchorIndex: anchorIndex, animated: animated)
+            return
+        }
+        cache.prepare(pageIndices: required, maxPixelDimension: dimension) { [weak self] in
+            guard let self, generation == layoutGeneration else { return }
+            performPageLayout(twoUp: twoUp, anchorIndex: anchorIndex, animated: animated)
+        }
+    }
+
+    private func performPageLayout(twoUp: Bool, anchorIndex: Int, animated: Bool) {
+        guard let document, let anchor = document.page(at: anchorIndex) else { return }
+        completePendingResize()
+        layoutTransitionOverlay?.removeFromSuperview()
+        layoutTransitionOverlay = nil
+
+        let dimension = renderPixelDimension
+        let oldPages = Dictionary(uniqueKeysWithValues: visiblePages.map {
+            (document.index(for: $0), convert($0.bounds(for: .cropBox), from: $0).standardized)
+        })
+        let zoomRatio = restingScale > 0 ? max(scaleFactor / restingScale, 1) : 1
+        discardFinalQualityOverlay()
+
+        displayMode = twoUp ? .twoUp : .singlePage
+        displaysAsBook = twoUp
+        go(to: anchor)
         restingScale = 0
         layoutDocumentView()
         setNeedsLayout()
@@ -1132,52 +1339,169 @@ private final class BookPDFView: PDFView {
             scaleFactor = min(restingScale * zoomRatio, maxScaleFactor)
         }
 
-        guard let snapshot, bounds.width > 0, bounds.height > 0 else { return }
-        snapshot.frame = bounds
-        snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        snapshot.isUserInteractionEnabled = false
-        snapshot.layer.minificationFilter = .trilinear
-        snapshot.layer.magnificationFilter = .linear
-        addSubview(snapshot)
-
-        // PDFKit posts its visible-page update on the next run loop. Keep the
-        // old rendered pages fully opaque until that final page frame exists.
-        DispatchQueue.main.async { [weak self, weak snapshot] in
-            guard let self, let snapshot, snapshot.superview === self else { return }
-            layoutDocumentView()
-            layoutIfNeeded()
-            applyScaleLimits()
-            let finalContentFrame = visiblePageFrame ?? bounds
-            let scale = min(
-                finalContentFrame.width / max(oldContentFrame.width, 1),
-                finalContentFrame.height / max(oldContentFrame.height, 1)
-            )
-            let baseCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-            let oldOffset = CGPoint(
-                x: oldContentFrame.midX - baseCenter.x,
-                y: oldContentFrame.midY - baseCenter.y
-            )
-
-            guard animated else {
-                snapshot.removeFromSuperview()
-                return
-            }
-
-            UIView.animate(
-                withDuration: 0.34,
-                delay: 0.06,
-                options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
-            ) {
-                snapshot.transform = CGAffineTransform(scaleX: scale, y: scale)
-                snapshot.center = CGPoint(
-                    x: finalContentFrame.midX - scale * oldOffset.x,
-                    y: finalContentFrame.midY - scale * oldOffset.y
-                )
-                snapshot.alpha = 0
-            } completion: { _ in
-                snapshot.removeFromSuperview()
-            }
+        let newPages = Dictionary(uniqueKeysWithValues: visiblePages.map {
+            (document.index(for: $0), convert($0.bounds(for: .cropBox), from: $0).standardized)
+        })
+        guard animated, !oldPages.isEmpty, !newPages.isEmpty else {
+            installFinalQualityOverlay()
+            prepareVisibleAndNeighboringPages()
+            return
         }
+
+        installSpatialLayoutTransition(oldPages: oldPages, newPages: newPages, dimension: dimension)
+    }
+
+    private func installSpatialLayoutTransition(
+        oldPages: [Int: CGRect],
+        newPages: [Int: CGRect],
+        dimension: Int
+    ) {
+        let canvas = UIView(frame: bounds)
+        canvas.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        canvas.isUserInteractionEnabled = false
+        canvas.accessibilityElementsHidden = true
+        for frame in newPages.values {
+            let cover = UIView(frame: frame)
+            cover.backgroundColor = .systemGroupedBackground
+            canvas.addSubview(cover)
+        }
+
+        struct MovingPage {
+            let view: UIImageView
+            let destination: CGRect
+        }
+        var moving: [MovingPage] = []
+        let retained = Set(oldPages.keys).intersection(newPages.keys)
+        let retainedCenter = retained.first.flatMap { newPages[$0]?.midX } ?? bounds.midX
+        for pageIndex in Set(oldPages.keys).union(newPages.keys).sorted() {
+            guard let image = pageCache?.image(pageIndex: pageIndex, maxPixelDimension: dimension) else {
+                continue
+            }
+            guard let frames = transitionFrames(
+                pageIndex: pageIndex,
+                oldPages: oldPages,
+                newPages: newPages,
+                retainedCenter: retainedCenter
+            ) else { continue }
+            let imageView = UIImageView(image: image)
+            imageView.contentMode = .scaleToFill
+            imageView.clipsToBounds = true
+            imageView.frame = frames.start
+            canvas.addSubview(imageView)
+            moving.append(MovingPage(view: imageView, destination: frames.destination))
+        }
+
+        addSubview(canvas)
+        layoutTransitionOverlay = canvas
+        if let adjustmentOverlay { bringSubviewToFront(adjustmentOverlay) }
+        if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
+
+        UIView.animate(
+            withDuration: 0.36,
+            delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+        ) {
+            moving.forEach { $0.view.frame = $0.destination }
+        } completion: { [weak self, weak canvas] _ in
+            guard let self else { return }
+            installFinalQualityOverlay()
+            canvas?.removeFromSuperview()
+            if layoutTransitionOverlay === canvas { layoutTransitionOverlay = nil }
+            prepareVisibleAndNeighboringPages()
+        }
+    }
+
+    private func transitionFrames(
+        pageIndex: Int,
+        oldPages: [Int: CGRect],
+        newPages: [Int: CGRect],
+        retainedCenter: CGFloat
+    ) -> (start: CGRect, destination: CGRect)? {
+        switch (oldPages[pageIndex], newPages[pageIndex]) {
+        case let (oldFrame?, newFrame?):
+            (oldFrame, newFrame)
+        case let (nil, newFrame?):
+            (
+                offscreenFrame(newFrame, movesRight: newFrame.midX >= retainedCenter),
+                newFrame
+            )
+        case let (oldFrame?, nil):
+            (
+                oldFrame,
+                offscreenFrame(oldFrame, movesRight: oldFrame.midX >= retainedCenter)
+            )
+        case (nil, nil):
+            nil
+        }
+    }
+
+    private func offscreenFrame(_ frame: CGRect, movesRight: Bool) -> CGRect {
+        frame.offsetBy(dx: movesRight ? bounds.width + margin : -(bounds.width + margin), dy: 0)
+    }
+
+    private var pageCache: BookPageRenderCache? {
+        if pageRenderCache == nil, let document {
+            pageRenderCache = BookPageRenderCache(document: document)
+        }
+        return pageRenderCache
+    }
+
+    private var renderPixelDimension: Int {
+        let displayScale = window?.screen.scale ?? traitCollection.displayScale
+        let zoomRatio = restingScale > 0 ? max(scaleFactor / restingScale, 1) : 1
+        return max(256, Int(ceil(max(bounds.width, bounds.height) * displayScale * zoomRatio)))
+    }
+
+    private func expectedPageIndices(containing pageIndex: Int, twoUp: Bool) -> Set<Int> {
+        guard let document, document.pageCount > 0 else { return [] }
+        let clamped = min(max(pageIndex, 0), document.pageCount - 1)
+        guard twoUp, clamped > 0 else { return [clamped] }
+        let first = clamped.isMultiple(of: 2) ? clamped - 1 : clamped
+        return Set([first, first + 1].filter { $0 < document.pageCount })
+    }
+
+    private func prepareVisibleAndNeighboringPages() {
+        guard let document, bounds.width > 40, bounds.height > 40 else { return }
+        let visible = visiblePages.map { document.index(for: $0) }
+        guard let first = visible.min(), let last = visible.max() else { return }
+        let nearby = Set(max(0, first - 2) ... min(document.pageCount - 1, last + 2))
+        pageCache?.prepare(pageIndices: nearby, maxPixelDimension: renderPixelDimension)
+    }
+
+    private func installFinalQualityOverlay() {
+        guard let document, let cache = pageCache else { return }
+        let dimension = renderPixelDimension
+        let pageFrames = visiblePages.compactMap { page -> (Int, CGRect) in
+            let index = document.index(for: page)
+            let frame = convert(page.bounds(for: .cropBox), from: page).standardized
+            return frame.isEmpty ? nil : (index, frame)
+        }
+        guard !pageFrames.isEmpty,
+              pageFrames.allSatisfy({ cache.image(pageIndex: $0.0, maxPixelDimension: dimension) != nil })
+        else { return }
+
+        discardFinalQualityOverlay()
+        let overlay = UIView(frame: bounds)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.isUserInteractionEnabled = false
+        overlay.accessibilityElementsHidden = true
+        for (pageIndex, frame) in pageFrames {
+            guard let image = cache.image(pageIndex: pageIndex, maxPixelDimension: dimension) else { continue }
+            let imageView = UIImageView(image: image)
+            imageView.frame = frame
+            imageView.contentMode = .scaleToFill
+            imageView.clipsToBounds = true
+            overlay.addSubview(imageView)
+        }
+        addSubview(overlay)
+        finalQualityOverlay = overlay
+        if let adjustmentOverlay { bringSubviewToFront(adjustmentOverlay) }
+        if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
+    }
+
+    private func discardFinalQualityOverlay() {
+        finalQualityOverlay?.removeFromSuperview()
+        finalQualityOverlay = nil
     }
 
     private func completePendingResize() {
@@ -1197,6 +1521,7 @@ private final class BookPDFView: PDFView {
     /// horizontally. The live PDF is laid out once at the final size and then
     /// cross-faded back in.
     func prepareForAnimatedResize(duration: TimeInterval) {
+        discardFinalQualityOverlay()
         resizeCompletion?.cancel()
         if !holdsPDFLayout {
             // A second toggle can arrive during the one-run-loop hand-off to
@@ -1444,14 +1769,11 @@ private struct PDFKitView: UIViewRepresentable {
     func updateUIView(_ view: PDFView, context: Context) {
         context.coordinator.onPageChange = { updatePageState($0) }
         guard let bookView = view as? BookPDFView else { return }
-        let targetMode: PDFDisplayMode = twoUp ? .twoUp : .singlePage
-        if bookView.displayMode != targetMode || bookView.displaysAsBook != twoUp {
-            bookView.setPageLayout(
-                twoUp: twoUp,
-                anchorPage: currentPage,
-                animated: !UIAccessibility.isReduceMotionEnabled
-            )
-        }
+        bookView.setPageLayout(
+            twoUp: twoUp,
+            anchorPage: currentPage,
+            animated: !UIAccessibility.isReduceMotionEnabled
+        )
         bookView.onRegionChanged = { region in
             context.coordinator.record(region: region)
             selectedRegion = region

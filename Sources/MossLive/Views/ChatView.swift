@@ -14,7 +14,6 @@ struct ChatView: View {
     @State private var pendingAttachments: [ChatStore.Attachment] = []
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var processingAttachmentCount = 0
-    @State private var isWebSearchEnabled = false
     @State private var showAddSheet = false
     @State private var showPhotoPicker = false
     @State private var showCamera = false
@@ -233,92 +232,51 @@ struct ChatView: View {
                 .padding(.bottom, 10)
                 .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
 
-                HStack(spacing: 10) {
-                    Button {
-                        showAddSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 20))
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .disabled(chat.sending || processingAttachmentCount > 0)
-                    .accessibilityLabel("Zum Chat hinzufügen")
-
-                    Button {
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
-                            isWebSearchEnabled.toggle()
-                        }
-                    } label: {
-                        ZStack {
-                            Image(systemName: "globe")
-                                .font(.system(size: 19))
-                                .offset(x: isWebSearchEnabled ? -29 : 0)
-
-                            Text("Websuche")
-                                .font(.caption.weight(.semibold))
-                                .offset(x: 12)
-                                .opacity(isWebSearchEnabled ? 1 : 0)
-                        }
-                        .foregroundStyle(isWebSearchEnabled ? .blue : .secondary)
-                        .frame(width: 92, height: 34)
-                        .background(.blue.opacity(isWebSearchEnabled ? 0.12 : 0), in: Capsule())
-                        .contentShape(Capsule())
-                        .animation(reduceMotion ? nil : .snappy(duration: 0.24), value: isWebSearchEnabled)
-                    }
-                    .buttonStyle(ComposerControlButtonStyle())
-                    .disabled(chat.sending)
-                    .accessibilityLabel(isWebSearchEnabled ? "Websuche aktiviert" : "Websuche aktivieren")
-
-                    contextMenu
-
-                    Spacer(minLength: 0)
-
-                    AIModelMenu()
-                        .disabled(chat.sending)
-
-                    Button {
-                        if voiceInput.isRecording {
-                            voiceInput.stop()
-                        } else {
-                            dictationPrefix = draft.isEmpty ? "" : draft + " "
-                            Task { await voiceInput.start() }
-                        }
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(.red.opacity(0.16))
-                                .frame(width: 34, height: 34)
-                                .scaleEffect(voiceInput.isRecording ? 1 : 0.72)
-                                .opacity(voiceInput.isRecording ? 1 : 0)
-
-                            Image(systemName: voiceInput.isRecording ? "stop.fill" : "mic.fill")
-                                .font(.system(size: 19))
-                                .foregroundStyle(voiceInput.isRecording ? .red : .secondary)
+                HStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Button {
+                            showAddSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 20))
                                 .frame(width: 30, height: 30)
-                                .contentTransition(.symbolEffect(.replace))
                         }
-                        .frame(width: 38, height: 38)
-                        .contentShape(Circle())
-                        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: voiceInput.isRecording)
-                    }
-                    .buttonStyle(ComposerControlButtonStyle())
-                    .disabled(chat.sending || model.phase == .recording)
-                    .accessibilityLabel(voiceInput.isRecording ? "Diktat beenden" : "Frage diktieren")
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .disabled(chat.sending || processingAttachmentCount > 0)
+                        .accessibilityLabel("Zum Chat hinzufügen")
 
-                    Button {
-                        if chat.sending { chat.cancel() } else { send() }
-                    } label: {
-                        Image(systemName: chat.sending ? "stop.fill" : "arrow.up")
-                            .font(.system(size: 15, weight: .semibold))
+                        contextMenu
                     }
-                    .buttonStyle(.glassProminent)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.regular)
-                    .disabled(!chat.sending && !canSend)
-                    .accessibilityLabel(chat.sending ? "Antwort stoppen" : "Nachricht senden")
+
+                    HStack(spacing: 8) {
+                        AIModelMenu()
+                            .disabled(chat.sending)
+
+                        ComposerVoiceButton(isRecording: voiceInput.isRecording) {
+                            if voiceInput.isRecording {
+                                voiceInput.stop()
+                            } else {
+                                dictationPrefix = draft.isEmpty ? "" : draft + " "
+                                Task { await voiceInput.start() }
+                            }
+                        }
+                        .disabled(chat.sending || model.phase == .recording)
+
+                        Button {
+                            if chat.sending { chat.cancel() } else { send() }
+                        } label: {
+                            Image(systemName: chat.sending ? "stop.fill" : "arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .buttonStyle(.glassProminent)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.regular)
+                        .disabled(!chat.sending && !canSend)
+                        .accessibilityLabel(chat.sending ? "Antwort stoppen" : "Nachricht senden")
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
             }
@@ -400,7 +358,6 @@ struct ChatView: View {
         chat.send(
             question: question,
             attachments: attachments,
-            webSearch: isWebSearchEnabled,
             api: api
         )
     }
@@ -492,22 +449,6 @@ struct ChatView: View {
         guard let fresh = try? await api.listLessons().filter({ $0.segmentCount > 0 }) else { return }
         lessons = fresh
         OfflineCache.save(fresh, as: OfflineCache.Key.lessons)
-    }
-}
-
-/// Press feedback stays inside a fixed control frame, so interaction never
-/// participates in the composer's layout calculation.
-private struct ComposerControlButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.93 : 1)
-            .opacity(configuration.isPressed ? 0.72 : 1)
-            .animation(
-                reduceMotion ? nil : .smooth(duration: 0.14),
-                value: configuration.isPressed
-            )
     }
 }
 

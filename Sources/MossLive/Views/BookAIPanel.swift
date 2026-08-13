@@ -359,51 +359,40 @@ struct BookAIPanel: View {
                 .padding(.bottom, 10)
                 .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
 
-                HStack(spacing: 10) {
-                    regionSelectionButton
+                HStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        regionSelectionButton
+                    }
 
-                    Spacer(minLength: 0)
+                    HStack(spacing: 8) {
+                        AIModelMenu()
+                            .disabled(store.sending)
 
-                    AIModelMenu()
-                        .disabled(store.sending)
-
-                    Button {
-                        if voiceInput.isRecording {
-                            voiceInput.stop()
-                        } else {
-                            voiceError = nil
-                            dictationPrefix = store.draft.isEmpty ? "" : store.draft + " "
-                            Task { await voiceInput.start() }
-                        }
-                    } label: {
-                        ZStack {
+                        ComposerVoiceButton(isRecording: voiceInput.isRecording) {
                             if voiceInput.isRecording {
-                                Circle()
-                                    .fill(.red.opacity(0.16))
-                                    .frame(width: 38, height: 38)
+                                voiceInput.stop()
+                            } else {
+                                voiceError = nil
+                                dictationPrefix = store.draft.isEmpty ? "" : store.draft + " "
+                                Task { await voiceInput.start() }
                             }
-                            Image(systemName: voiceInput.isRecording ? "stop.fill" : "mic.fill")
-                                .font(.system(size: 19))
-                                .foregroundStyle(voiceInput.isRecording ? .red : .secondary)
-                                .frame(width: 30, height: 30)
                         }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(store.sending || model.phase == .recording)
-                    .accessibilityLabel(voiceInput.isRecording ? "Diktat beenden" : "Frage diktieren")
+                        .disabled(store.sending || model.phase == .recording)
 
-                    Button {
-                        if store.sending { store.cancel() } else { sendDraft() }
-                    } label: {
-                        Image(systemName: store.sending ? "stop.fill" : "arrow.up")
-                            .font(.system(size: 15, weight: .semibold))
+                        Button {
+                            if store.sending { store.cancel() } else { sendDraft() }
+                        } label: {
+                            Image(systemName: store.sending ? "stop.fill" : "arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .buttonStyle(.glassProminent)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.regular)
+                        .disabled(!store.sending && !canSend)
+                        .accessibilityLabel(store.sending ? "Antwort stoppen" : "Nachricht senden")
                     }
-                    .buttonStyle(.glassProminent)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.regular)
-                    .disabled(!store.sending && !canSend)
-                    .accessibilityLabel(store.sending ? "Antwort stoppen" : "Nachricht senden")
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
             }

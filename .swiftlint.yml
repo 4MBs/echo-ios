@@ -2,6 +2,11 @@ included:
   - Sources
   - Tests
 
+# Keep the established repository debt explicit while requiring every new or
+# moved violation to pass the normal rule set. Regenerate deliberately with
+# `swiftlint lint --write-baseline .swiftlint-baseline.json` after fixing debt.
+baseline: .swiftlint-baseline.json
+
 excluded:
   - LocalPackages
 

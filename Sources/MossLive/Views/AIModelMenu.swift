@@ -54,18 +54,19 @@ struct AIModelMenu: View {
                         .frame(minHeight: 30)
                 } else {
                     ZStack(alignment: .leading) {
-                        // Reserve the exact native width of every possible value.
-                        // Menu dismissal can otherwise update the text one pass
-                        // before its label receives the new intrinsic width.
-                        ForEach(compactSelectionCandidates, id: \.self) { candidate in
-                            compactLabel(candidate, showsSpeed: true)
-                                .hidden()
-                                .accessibilityHidden(true)
-                        }
+                        // Measure the current value in the same pass in which it
+                        // becomes visible. A fresh identity below prevents Menu
+                        // from briefly reusing the previous label's narrower
+                        // intrinsic width, without permanently reserving the
+                        // widest possible model/reasoning combination.
+                        compactLabel(compactSelectionLabel, showsSpeed: speedIsSelected)
+                            .hidden()
+                            .accessibilityHidden(true)
 
                         compactLabel(compactSelectionLabel, showsSpeed: speedIsSelected)
                     }
                     .fixedSize(horizontal: true, vertical: false)
+                    .id("\(compactSelectionLabel)-\(speedIsSelected)")
                     .transaction { $0.animation = nil }
                     .frame(minHeight: 30)
                 }
@@ -161,25 +162,28 @@ struct AIModelMenu: View {
         return configuration.serviceTier(for: settings) != "default"
     }
 
-    private var compactSelectionCandidates: [String] {
-        guard let settings = configuration.settings, settings.provider == "chatgpt" else {
-            return [compactSelectionLabel]
+    private func compactLabel(_ text: String, showsSpeed: Bool) -> some View {
+        let pieces = Self.compactLabelPieces(text)
+        HStack(spacing: 3) {
+            Text(pieces.version).font(.system(size: 13, weight: .semibold))
+                + Text(pieces.detail).font(.system(size: 13, weight: .regular))
+            if showsSpeed {
+                Image(systemName: "bolt.fill")
+            }
         }
-        let efforts = configuration.effortChoices(for: settings)
-        let candidates = configuration.modelChoices(for: settings).flatMap { choice in
-            let modelName = Self.modelLabel(choice).replacingOccurrences(of: "GPT-", with: "")
-            return efforts.map { "\(modelName) \(Self.intelligenceLabel($0))" }
-        } + [compactSelectionLabel]
-        return Array(Set(candidates)).sorted()
+        .font(.system(size: 11, weight: .medium))
     }
 
-    private func compactLabel(_ text: String, showsSpeed: Bool) -> some View {
-        HStack(spacing: 3) {
-            Text(text)
-            Image(systemName: "bolt.fill")
-                .opacity(showsSpeed ? 1 : 0)
-        }
-        .font(.caption.weight(.medium))
+    /// Keep the model generation slightly stronger without turning Luna, Sol,
+    /// the reasoning level, or their spaces into a second badge-like label.
+    private static func compactLabelPieces(_ label: String) -> (version: String, detail: String) {
+        let separator = label.firstIndex(of: " ") ?? label.endIndex
+        let version = String(label[..<separator])
+        guard version.allSatisfy({ $0.isNumber || $0 == "." }) else { return ("", label) }
+        return (
+            version,
+            separator == label.endIndex ? "" : String(label[separator...])
+        )
     }
 
     /// ChatGPT presents intelligence from strongest to lightest. Its picker
