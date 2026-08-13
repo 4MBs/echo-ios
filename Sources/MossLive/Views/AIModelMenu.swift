@@ -164,7 +164,7 @@ struct AIModelMenu: View {
 
     private func compactLabel(_ text: String, showsSpeed: Bool) -> some View {
         let pieces = Self.compactLabelPieces(text)
-        HStack(spacing: 3) {
+        return HStack(spacing: 3) {
             Text(pieces.version).font(.system(size: 13, weight: .semibold))
                 + Text(pieces.detail).font(.system(size: 13, weight: .regular))
             if showsSpeed {
