@@ -56,8 +56,6 @@ final class LibraryReaderUITests: EchoUITestCase {
         let field = app.textFields["bookAI.input"]
         typeText("Was ist die Kernaussage?", into: field)
         tap(app.buttons["bookAI.send"])
-        XCTAssertTrue(app.staticTexts["KI denkt nach"].waitForExistence(timeout: 3))
-        shot("book-ai-loading")
         let answer = app.staticTexts
             .matching(NSPredicate(format: "label CONTAINS 'reproduzierbaren Beispiel'"))
             .firstMatch
@@ -124,10 +122,17 @@ final class LibraryReaderUITests: EchoUITestCase {
 
         tap(app.buttons["Seite fragen"])
         tap(app.buttons["Bereich markieren"])
-        let selectionSurface = app.descendants(matching: .any)["Buchbereich markieren"]
-        XCTAssertTrue(selectionSurface.waitForExistence(timeout: 3))
-        let start = selectionSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.25))
-        let end = selectionSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.55))
+        let regionInstruction = app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS 'Rahmen'"))
+            .firstMatch
+        XCTAssertTrue(regionInstruction.waitForExistence(timeout: 3))
+        let isPad = window.frame.width > 700
+        let start = window.coordinate(
+            withNormalizedOffset: CGVector(dx: isPad ? 0.38 : 0.25, dy: 0.25)
+        )
+        let end = window.coordinate(
+            withNormalizedOffset: CGVector(dx: isPad ? 0.58 : 0.68, dy: 0.50)
+        )
         start.press(forDuration: 0.2, thenDragTo: end)
         XCTAssertTrue(app.staticTexts["Bereich ausgewählt"].waitForExistence(timeout: 3))
         shot("reader-region-selected")

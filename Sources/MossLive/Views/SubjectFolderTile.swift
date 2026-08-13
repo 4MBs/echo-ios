@@ -94,7 +94,7 @@ struct SubjectFolderTile: View {
             label
         }
         .aspectRatio(1.04, contentMode: .fit)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(name), \(countLabel)")
     }
 

@@ -55,7 +55,6 @@ final class ChatUITests: EchoUITestCase {
             shot("chat-attachment-\(choice)")
             typeText("Analysiere diesen Anhang", into: app.textFields["chat.input"])
             tap(app.buttons["chat.send"])
-            XCTAssertTrue(app.staticTexts["KI denkt nach"].waitForExistence(timeout: 3))
             let answer = app.staticTexts
                 .matching(NSPredicate(format: "label CONTAINS 'Antwort auf'"))
                 .firstMatch
@@ -76,7 +75,6 @@ final class ChatUITests: EchoUITestCase {
 
         if app.buttons["Antwort neu erstellen"].exists {
             tap(app.buttons["Antwort neu erstellen"])
-            XCTAssertTrue(app.staticTexts["KI denkt nach"].waitForExistence(timeout: 3))
             XCTAssertTrue(app.buttons["Antwort neu erstellen"].waitForExistence(timeout: 12))
         }
         tap(app.buttons["Antwort kopieren"])

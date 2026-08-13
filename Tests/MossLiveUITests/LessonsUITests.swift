@@ -34,12 +34,12 @@ final class LessonsUITests: EchoUITestCase {
     func testLessonToolbarNotesTranscriptVocabularyAndShare() {
         openLesson()
 
-        tap(app.buttons["Unterrichtsnotizen importieren"])
+        tapToolbarAction("Unterrichtsnotizen importieren")
         XCTAssertTrue(app.navigationBars["Unterrichtsnotizen"].waitForExistence(timeout: 4))
         shot("lesson-imported-notes")
         tap(app.buttons["Fertig"])
 
-        tap(app.buttons["Transkriptoptionen"])
+        tapToolbarAction("Transkriptoptionen")
         tap(app.buttons["Fachwörterbuch"])
         XCTAssertTrue(app.navigationBars["Mathematik"].waitForExistence(timeout: 4))
         shot("lesson-vocabulary")
@@ -50,7 +50,7 @@ final class LessonsUITests: EchoUITestCase {
         }
         tap(app.navigationBars.buttons.firstMatch)
 
-        tap(app.buttons["Transkriptoptionen"])
+        tapToolbarAction("Transkriptoptionen")
         tap(app.buttons["Transkript bearbeiten"])
         let transcriptNavigation = app.navigationBars
             .matching(NSPredicate(format: "identifier CONTAINS 'Transkript'"))
@@ -63,7 +63,7 @@ final class LessonsUITests: EchoUITestCase {
         if app.buttons["Abbrechen"].exists { app.buttons["Abbrechen"].tap() }
         else if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
 
-        tap(app.buttons["Teilen"])
+        tapToolbarAction("Teilen")
         XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 4))
         shot("lesson-share-sheet")
         app.swipeDown()
@@ -73,6 +73,22 @@ final class LessonsUITests: EchoUITestCase {
         launch(tab: "stunden")
         tap(button(containing: "Mathematik"))
         tap(button(containing: "Ursache und Wirkung"))
-        XCTAssertTrue(app.buttons["Transkriptoptionen"].waitForExistence(timeout: 10))
+        let directAction = app.buttons["Transkriptoptionen"]
+        let overflow = app.buttons["More"]
+        XCTAssertTrue(
+            directAction.waitForExistence(timeout: 4) || overflow.waitForExistence(timeout: 6),
+            "Lesson toolbar actions are unavailable"
+        )
+    }
+
+    private func tapToolbarAction(_ label: String) {
+        let action = app.buttons[label]
+        if action.exists {
+            tap(action)
+            return
+        }
+
+        tap(app.buttons["More"])
+        tap(app.buttons[label])
     }
 }
