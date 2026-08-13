@@ -60,8 +60,11 @@ final class LessonsUITests: EchoUITestCase {
             .firstMatch
         XCTAssertTrue(transcriptNavigation.waitForExistence(timeout: 4) || transcriptText.exists)
         shot("lesson-transcript-editor")
-        if app.buttons["Abbrechen"].exists { app.buttons["Abbrechen"].tap() }
-        else if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
+        if app.buttons["Abbrechen"].exists {
+            app.buttons["Abbrechen"].tap()
+        } else if app.buttons["Fertig"].exists {
+            app.buttons["Fertig"].tap()
+        }
 
         tapToolbarAction("Teilen")
         // UIActivityViewController is exposed by XCTest as a popover-backed
