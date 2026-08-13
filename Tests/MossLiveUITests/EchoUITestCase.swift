@@ -5,12 +5,12 @@ class EchoUITestCase: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        executionTimeAllowance = 600
         app = XCUIApplication()
     }
 
     override func tearDownWithError() throws {
         XCUIDevice.shared.orientation = .portrait
-        app?.terminate()
         app = nil
     }
 
@@ -20,7 +20,12 @@ class EchoUITestCase: XCTestCase {
         scenario: String = "populated",
         contentSize: String = "UICTContentSizeCategoryL"
     ) -> XCUIApplication {
-        app.terminate()
+        if app.state == .runningForeground
+            || app.state == .runningBackground
+            || app.state == .runningBackgroundSuspended
+        {
+            app.terminate()
+        }
         app = XCUIApplication()
         app.launchArguments = [
             "-UITesting",

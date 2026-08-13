@@ -401,8 +401,9 @@ final class ChatStore {
                         Message(id: messageID, role: .assistant, text: "")
                     )
                     let words = answer.split(separator: " ", omittingEmptySubsequences: false)
+                    let wordDelay = UITestRuntime.scenario == .longContent ? 80 : 28
                     for (wordIndex, word) in words.enumerated() {
-                        try await Task.sleep(for: .milliseconds(28))
+                        try await Task.sleep(for: .milliseconds(wordDelay))
                         guard !Task.isCancelled,
                               self.activeRequestID == requestID,
                               let conversationIndex = self.conversations.firstIndex(where: { $0.id == selectedID }),

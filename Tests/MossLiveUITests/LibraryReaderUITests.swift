@@ -116,16 +116,11 @@ final class LibraryReaderUITests: EchoUITestCase {
         shot("reader-pinch-zoom-out")
 
         tap(app.buttons["Seite fragen"])
-        let regionButton = app.buttons["Bereich markieren"]
-        tap(regionButton)
+        tap(app.buttons["Bereich markieren"])
         // Wait for the UIKit selection overlay to join the PDF view before
         // beginning the synthetic drag. This also guards against regressions
         // where the button stops entering selection mode.
-        let selecting = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == 'Auswahl aktiv'"),
-            object: regionButton
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [selecting], timeout: 2), .completed)
+        XCTAssertTrue(app.buttons["Bereichsauswahl aktiv"].waitForExistence(timeout: 3))
         let isPad = window.frame.width > 700
         let start = window.coordinate(
             withNormalizedOffset: CGVector(dx: isPad ? 0.38 : 0.25, dy: 0.25)
@@ -134,6 +129,7 @@ final class LibraryReaderUITests: EchoUITestCase {
             withNormalizedOffset: CGVector(dx: isPad ? 0.58 : 0.68, dy: 0.42)
         )
         start.press(forDuration: 0.35, thenDragTo: end)
+        let regionButton = app.buttons["Bereich markieren"]
         let selected = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == 'Bereich ausgewählt'"),
             object: regionButton

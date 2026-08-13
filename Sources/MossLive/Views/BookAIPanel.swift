@@ -415,11 +415,11 @@ struct BookAIPanel: View {
         Button(action: requestRegion) {
             Image(systemName: "rectangle.dashed")
                 .font(.system(size: 18))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isSelectingRegion ? Color.accentColor : Color.secondary)
                 .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Bereich markieren")
+        .accessibilityLabel(isSelectingRegion ? "Bereichsauswahl aktiv" : "Bereich markieren")
         .accessibilityValue(regionSelectionValue)
     }
 
