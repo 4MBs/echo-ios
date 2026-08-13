@@ -173,8 +173,8 @@ struct PDFReader: View {
             bookID: book.id,
             numbering: numbering,
             visiblePages: visiblePages,
-            region: selectedRegion,
-            isSelectingRegion: selectingRegion,
+            region: $selectedRegion,
+            isSelectingRegion: $selectingRegion,
             store: bookAI,
             detent: $bookAIDetent,
             goToPage: { page in

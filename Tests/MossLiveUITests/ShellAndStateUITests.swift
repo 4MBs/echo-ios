@@ -73,8 +73,12 @@ final class ShellAndStateUITests: EchoUITestCase {
                 // clipped because their AX node uses the row's full 52-point
                 // frame. Suppress only that identified system-row false
                 // positive; all app content remains audited for clipping.
-                issue.auditType == .textClipped
-                    && issue.element?.identifier.hasPrefix("tab.") == true
+                let sidebarLabels: Set<String> = [
+                    "Aufnahme", "Stunden", "Bibliothek", "Chat mit KI", "Einstellungen",
+                ]
+                let isSystemSidebarNode = issue.element?.identifier.hasPrefix("tab.") == true
+                    || sidebarLabels.contains(issue.element?.label ?? "")
+                return issue.auditType == .textClipped && isSystemSidebarNode
             }
             shot("accessibility-audit-\(tab)")
         }

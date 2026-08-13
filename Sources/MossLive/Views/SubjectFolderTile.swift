@@ -115,6 +115,7 @@ struct SubjectFolderTile: View {
                 .minimumScaleFactor(0.75)
                 .multilineTextAlignment(.leading)
                 .padding(.horizontal, 2)
+                .padding(.vertical, 2)
                 .accessibilityHidden(true)
             Text(countLabel)
                 .font(.footnote)

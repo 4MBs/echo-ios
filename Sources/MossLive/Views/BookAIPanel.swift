@@ -11,8 +11,8 @@ struct BookAIPanel: View {
     let bookID: String
     let numbering: BookPageNumbering
     let visiblePages: [Int]
-    let region: BackendAPI.BookPageRegion?
-    let isSelectingRegion: Bool
+    @Binding var region: BackendAPI.BookPageRegion?
+    @Binding var isSelectingRegion: Bool
     let store: BookAIStore
     @Binding var detent: PresentationDetent
     let goToPage: (Int) -> Void
