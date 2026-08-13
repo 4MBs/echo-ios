@@ -8,7 +8,7 @@ final class LibraryReaderUITests: EchoUITestCase {
 
         tap(app.buttons["Nächste Seite"])
         let pageIndicator = app.buttons
-            .matching(NSPredicate(format: "label BEGINSWITH 'Seite '"))
+            .matching(NSPredicate(format: "label MATCHES 'Seite [0-9]+.*'"))
             .firstMatch
         XCTAssertTrue(pageIndicator.waitForExistence(timeout: 4))
         shot("reader-next-page")
@@ -21,7 +21,9 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(app.buttons["Doppelseite"])
         shot("reader-return-double-page")
 
-        let indicator = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Seite '")).firstMatch
+        let indicator = app.buttons
+            .matching(NSPredicate(format: "label MATCHES 'Seite [0-9]+.*'"))
+            .firstMatch
         tap(indicator)
         let pageField = app.textFields["Seitennummer"]
         XCTAssertTrue(pageField.waitForExistence(timeout: 3))
@@ -122,15 +124,14 @@ final class LibraryReaderUITests: EchoUITestCase {
 
         tap(app.buttons["Seite fragen"])
         tap(app.buttons["Bereich markieren"])
-        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.18))
-        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.58, dy: 0.38))
+        let selectionSurface = app.otherElements["Buchbereich markieren"]
+        XCTAssertTrue(selectionSurface.waitForExistence(timeout: 3))
+        let start = selectionSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.25))
+        let end = selectionSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.55))
         start.press(forDuration: 0.2, thenDragTo: end)
-        if app.staticTexts["Bereich ausgewählt"].waitForExistence(timeout: 3) {
-            shot("reader-region-selected")
-            tap(app.buttons["Aufheben"])
-        } else {
-            tap(app.buttons["Abbrechen"])
-        }
+        XCTAssertTrue(app.staticTexts["Bereich ausgewählt"].waitForExistence(timeout: 3))
+        shot("reader-region-selected")
+        tap(app.buttons["Aufheben"])
     }
 
     private func openReader() {

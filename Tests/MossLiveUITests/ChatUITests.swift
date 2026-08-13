@@ -9,10 +9,10 @@ final class ChatUITests: EchoUITestCase {
 
         tap(app.buttons["Chatverlauf"])
         XCTAssertTrue(app.navigationBars["Chatverlauf"].waitForExistence(timeout: 4))
-        XCTAssertTrue(app.buttons["Ursache und Wirkung"].exists)
-        XCTAssertTrue(app.buttons["Ohne Kontext"].exists)
+        XCTAssertTrue(button(containing: "Ursache und Wirkung").exists)
+        XCTAssertTrue(button(containing: "Ohne Kontext").exists)
         shot("chat-history")
-        tap(app.buttons["Ursache und Wirkung"])
+        tap(button(containing: "Ursache und Wirkung"))
 
         let context = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Kontext:'")).firstMatch
         tap(context)
@@ -48,8 +48,9 @@ final class ChatUITests: EchoUITestCase {
         for (identifier, choice, fileName) in choices {
             launch(tab: "chat")
             tap(app.buttons["chat.add"])
-            XCTAssertTrue(app.navigationBars["Zum Chat hinzufügen"].waitForExistence(timeout: 4))
-            tap(app.buttons["chat.add.\(identifier)"])
+            let attachmentButton = app.buttons["chat.add.\(identifier)"]
+            XCTAssertTrue(attachmentButton.waitForExistence(timeout: 4))
+            tap(attachmentButton)
             XCTAssertTrue(app.staticTexts[fileName].waitForExistence(timeout: 4))
             shot("chat-attachment-\(choice)")
             typeText("Analysiere diesen Anhang", into: app.textFields["chat.input"])

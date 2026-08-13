@@ -77,8 +77,13 @@ class EchoUITestCase: XCTestCase {
         let window = app.windows.firstMatch
         guard window.exists else { return }
         let bounds = window.frame.insetBy(dx: -2, dy: -2)
-        let controls = app.descendants(matching: .any).allElementsBoundByIndex
-        for control in controls.prefix(120) where control.exists && control.isHittable && !control.frame.isEmpty {
+        let controlTypes: [XCUIElement.ElementType] = [
+            .button, .textField, .secureTextField, .searchField, .switch, .slider, .stepper, .picker, .link,
+        ]
+        let controls = controlTypes.flatMap {
+            window.descendants(matching: $0).allElementsBoundByIndex
+        }
+        for control in controls where control.isHittable && !control.frame.isEmpty {
             XCTAssertTrue(
                 bounds.intersects(control.frame),
                 "Visible control is outside the window: \(control)",

@@ -20,9 +20,9 @@ final class LessonsUITests: EchoUITestCase {
         search.buttons["Clear text"].tap()
 
         tap(button(containing: "Mathematik"))
-        XCTAssertTrue(app.staticTexts["Teststunde Mathematik"].waitForExistence(timeout: 5))
+        XCTAssertTrue(button(containing: "Ursache und Wirkung").waitForExistence(timeout: 5))
         shot("lessons-subject-board")
-        tap(button(containing: "Teststunde Mathematik"))
+        tap(button(containing: "Ursache und Wirkung"))
         let lessonSummary = app.staticTexts
             .matching(NSPredicate(format: "label CONTAINS 'Ursache und Wirkung'"))
             .firstMatch
@@ -72,7 +72,7 @@ final class LessonsUITests: EchoUITestCase {
     private func openLesson() {
         launch(tab: "stunden")
         tap(button(containing: "Mathematik"))
-        tap(button(containing: "Teststunde Mathematik"))
+        tap(button(containing: "Ursache und Wirkung"))
         XCTAssertTrue(app.buttons["Transkriptoptionen"].waitForExistence(timeout: 5))
     }
 }

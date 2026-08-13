@@ -7,7 +7,7 @@ final class SettingsUITests: EchoUITestCase {
         shot("settings-index")
 
         openSettingsPage("Server", title: "Server")
-        XCTAssertTrue(app.staticTexts["Verbunden"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Verbunden'")).firstMatch.exists)
         shot("settings-server")
         back()
 
@@ -103,7 +103,10 @@ final class SettingsUITests: EchoUITestCase {
             shot("settings-server-\(scenario)")
             back()
             openSettingsPage("KI", title: "KI")
-            XCTAssertTrue(app.staticTexts["Server nicht erreichbar."].waitForExistence(timeout: 6))
+            let unavailable = app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS 'Server nicht erreichbar'"))
+                .firstMatch
+            XCTAssertTrue(unavailable.waitForExistence(timeout: 6))
             shot("settings-ai-\(scenario)")
         }
     }

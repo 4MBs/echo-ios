@@ -113,6 +113,7 @@ struct SubjectFolderTile: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.75)
                 .multilineTextAlignment(.leading)
+                .padding(.horizontal, 2)
             Text(countLabel)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
