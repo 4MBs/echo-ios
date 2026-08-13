@@ -109,8 +109,9 @@ final class BookAIStore {
         persistenceEnabled = loadPersisted && key != nil
 
         if UITestRuntime.isEnabled, UITestRuntime.scenario != .empty {
-            conversations = Self.uiTestConversations
-            selectedConversationID = conversations[0].id
+            let fixtures = Self.uiTestConversations
+            conversations = fixtures
+            selectedConversationID = fixtures[0].id
         } else if loadPersisted,
                   let key,
                   let saved = OfflineCache.load(SavedState.self, key: key),

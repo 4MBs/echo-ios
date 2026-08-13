@@ -174,8 +174,9 @@ final class ChatStore {
     init(loadPersisted: Bool = true) {
         persistenceEnabled = loadPersisted
         if UITestRuntime.isEnabled, UITestRuntime.scenario != .empty {
-            conversations = Self.uiTestConversations
-            selectedConversationID = conversations[0].id
+            let fixtures = Self.uiTestConversations
+            conversations = fixtures
+            selectedConversationID = fixtures[0].id
         } else if loadPersisted,
                   let saved = OfflineCache.load(SavedState.self, key: Self.storageKey),
                   !saved.conversations.isEmpty {

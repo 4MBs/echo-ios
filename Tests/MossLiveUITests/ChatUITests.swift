@@ -81,7 +81,7 @@ final class ChatUITests: EchoUITestCase {
             XCTAssertTrue(app.staticTexts["KI denkt nach"].waitForExistence(timeout: 3))
             XCTAssertTrue(app.buttons["Antwort neu erstellen"].waitForExistence(timeout: 12))
         }
-        tap(app.buttons["Antwort kopieren"].firstMatch)
+        tap(app.buttons["Antwort kopieren"])
         XCTAssertTrue(app.buttons["Kopiert"].waitForExistence(timeout: 2))
 
         tap(app.buttons["Neue Unterhaltung"])
