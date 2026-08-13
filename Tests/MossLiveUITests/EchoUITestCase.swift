@@ -22,8 +22,7 @@ class EchoUITestCase: XCTestCase {
     ) -> XCUIApplication {
         if app.state == .runningForeground
             || app.state == .runningBackground
-            || app.state == .runningBackgroundSuspended
-        {
+            || app.state == .runningBackgroundSuspended {
             app.terminate()
         }
         app = XCUIApplication()
