@@ -143,6 +143,7 @@ struct MainTabView: View {
         switch model.selectedTab ?? .aufnahme {
         case .aufnahme: LiveView()
         case .stunden: LessonsView()
+        case .lernen: LearnView()
         case .bibliothek: LibraryView()
         case .chat: ChatView()
         case .einstellungen: SettingsView()
@@ -151,7 +152,7 @@ struct MainTabView: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case aufnahme, stunden, bibliothek, chat, einstellungen
+    case aufnahme, stunden, lernen, bibliothek, chat, einstellungen
 
     var id: Self { self }
 
@@ -163,6 +164,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .aufnahme: "Aufnahme"
         case .stunden: "Stunden"
+        case .lernen: "Lernen"
         case .bibliothek: "Bibliothek"
         case .chat: "Chat mit KI"
         case .einstellungen: "Einstellungen"
@@ -176,6 +178,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         // The shelf read as books, and Bibliothek two rows below is books —
         // two book glyphs in a list of five is one too many.
         case .stunden: "folder"
+        case .lernen: "brain.head.profile"
         case .bibliothek: "book.closed"
         case .chat: "bubble.left.and.text.bubble.right"
         case .einstellungen: "gearshape"

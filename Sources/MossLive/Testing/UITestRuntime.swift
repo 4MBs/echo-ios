@@ -57,6 +57,8 @@ enum UITestRuntime {
             OfflineCache.Key.timetableNow,
             OfflineCache.Key.timetableDay,
             OfflineCache.Key.timetableSubjects,
+            OfflineCache.Key.learnOverview,
+            OfflineCache.Key.learnCards,
             OfflineCache.Key.lesson("lesson-1"),
             OfflineCache.Key.lesson("lesson-2"),
             OfflineCache.Key.waveform("lesson-1"),
@@ -191,6 +193,19 @@ enum UITestRuntime {
         if path == "/timetable/day" { return try json(["enabled": false, "lessons": []]) }
         if path == "/timetable/week" { return try json(["days": []]) }
         if path == "/answer/settings" { return try json(answerSettingsObject) }
+        if path == "/learn/overview" {
+            return try json([
+                "due_total": 0, "card_total": 0, "estimated_minutes": 0,
+                "mastery": 0.0, "subjects": [], "sessions_with_cards": [],
+            ])
+        }
+        if path == "/learn/plan" {
+            return try json([
+                "date": "2026-08-14", "requested_minutes": 30,
+                "estimated_minutes": 0, "cards": [], "blocks": [],
+            ])
+        }
+        if path == "/learn/cards" { return try json(["cards": []]) }
         return try json([:])
     }
 
@@ -202,6 +217,26 @@ enum UITestRuntime {
         if path == "/timetable/day" { return try json(timetableDayObject) }
         if path == "/timetable/week" { return try json(["days": [timetableDayObject]]) }
         if path == "/answer/settings" { return try json(answerSettingsObject) }
+        if path == "/learn/overview" { return try json(learnOverviewObject) }
+        if path == "/learn/plan" { return try json(learnPlanObject) }
+        if path == "/learn/cards" { return try json(["cards": learnCardsObject]) }
+        if path == "/learn/evaluate" {
+            var reviewed = learnCardsObject[0]
+            reviewed["box"] = 2
+            reviewed["due_date"] = "2026-08-18"
+            reviewed["stability"] = 4.0
+            reviewed["reps"] = 1
+            return try json([
+                "ok": true,
+                "evaluation": [
+                    "category": "correct",
+                    "feedback": "Richtig",
+                    "correct_answer": "Chlorophyll absorbiert Lichtenergie.",
+                ],
+                "card": reviewed,
+            ])
+        }
+        if path == "/learn/generate" { return try json(["ok": true, "cards": learnCardsObject, "cached": false]) }
         if path == "/answer" {
             return try json(["ok": true, "text": "Die Testantwort fasst die letzten Sekunden zusammen."])
         }
@@ -252,6 +287,9 @@ enum UITestRuntime {
         if path.hasSuffix("/transcription") || path.hasSuffix("/retranscribe") {
             return try json(["status": "completed", "offset": 1, "size": 1, "progress": 1.0])
         }
+        if path == "/sessions/lesson-2" && method == "GET" {
+            return try json(biologyLessonDetailObject)
+        }
         if path.hasPrefix("/sessions/") && method == "GET" {
             return try json(lessonDetailObject)
         }
@@ -277,6 +315,12 @@ enum UITestRuntime {
         }
         if let value = try? decoder.decode(BackendAPI.TimetableDay.self, from: json(timetableDayObject)) {
             OfflineCache.save(value, as: OfflineCache.Key.timetableDay)
+        }
+        if let value = try? decoder.decode(BackendAPI.LearnOverview.self, from: json(learnOverviewObject)) {
+            OfflineCache.save(value, as: OfflineCache.Key.learnOverview)
+        }
+        if let value = try? decoder.decode([BackendAPI.LearnCard].self, from: json(learnCardsObject)) {
+            OfflineCache.save(value, as: OfflineCache.Key.learnCards)
         }
     }
 
@@ -433,6 +477,66 @@ private extension UITestRuntime {
          "transcript_revision": 2, "has_manual_edits": true, "has_audio": true,
          "title": "Teststunde Mathematik", "subject": "Mathematik", "teacher": "Frau Beispiel",
          "room": "A12", "segments": lessonSegments]
+    }
+
+    static var biologyLessonDetailObject: [String: Any] {
+        ["id": "lesson-2", "started_at_ms": nowMilliseconds - 86_400_000,
+         "ended_at_ms": nowMilliseconds - 82_800_000,
+         "summary": "Die Stunde erklärt Photosynthese und Chlorophyll.",
+         "transcript_revision": 1, "has_manual_edits": false, "has_audio": false,
+         "title": "Teststunde Biologie", "subject": "Biologie", "teacher": "Herr Muster",
+         "room": "B04", "segments": [
+            ["t0": 8.0, "t1": 16.0, "speaker": "Lehrkraft", "text": "Chlorophyll absorbiert Lichtenergie."],
+            ["t0": 16.0, "t1": 28.0, "speaker": "Lehrkraft", "text": "Diese Energie treibt die Lichtreaktion an."],
+         ]]
+    }
+
+    static var learnOverviewObject: [String: Any] {
+        ["due_total": 2, "card_total": 2, "estimated_minutes": 2, "mastery": 0.42,
+         "subjects": [["subject": "Biologie", "due": 2, "total": 2, "mastery": 0.42]],
+         "sessions_with_cards": ["lesson-2"]]
+    }
+
+    static var learnPlanObject: [String: Any] {
+        ["date": "2026-08-14", "requested_minutes": 30, "estimated_minutes": 2,
+         "cards": learnCardsObject,
+         "blocks": [["subject": "Biologie", "exam_name": NSNull(), "card_count": 2,
+                      "estimated_minutes": 2, "reason": "Fällige Wiederholung und Wissenslücken"]]]
+    }
+
+    static var learnCardsObject: [[String: Any]] {
+        [learnCard(
+            id: "learn-1",
+            question: "Warum ist Chlorophyll für die Photosynthese wichtig?",
+            expected: "Chlorophyll absorbiert Lichtenergie.",
+            concept: "Photosynthese",
+            startMs: 8_000
+        ), learnCard(
+            id: "learn-2",
+            question: "Was treibt die Lichtreaktion an?",
+            expected: "Die vom Chlorophyll aufgenommene Lichtenergie.",
+            concept: "Lichtreaktion",
+            startMs: 16_000
+        )]
+    }
+
+    static func learnCard(
+        id: String,
+        question: String,
+        expected: String,
+        concept: String,
+        startMs: Int
+    ) -> [String: Any] {
+        ["id": id, "session_id": "lesson-2", "subject": "Biologie",
+         "lesson_title": "Teststunde Biologie", "question": question, "options": [], "answer": 0,
+         "explanation": expected, "kind": "free_text", "expected_answer": expected,
+         "concept": concept, "difficulty": 2, "source_label": concept,
+         "source_start_ms": startMs, "source_end_ms": NSNull(), "source_revision": 1,
+         "box": 0, "due_date": "2026-08-14", "stability": 0.0,
+         "difficulty_score": 5.0, "reps": 0, "lapses": 0,
+         "sources": [["session_id": "lesson-2", "lesson_title": "Teststunde Biologie",
+                      "source_label": concept, "source_start_ms": startMs,
+                      "source_end_ms": NSNull(), "transcript_revision": 1]]]
     }
 
     static var timetableNowObject: [String: Any] {
