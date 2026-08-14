@@ -109,7 +109,7 @@ final class ShellAndStateUITests: EchoUITestCase {
                     let evidence = XCTAttachment(screenshot: element.screenshot())
                     evidence.name = "audit-excused-\(tab)-\(element.identifier)"
                     evidence.lifetime = .keepAlways
-                    add(evidence)
+                    self.add(evidence)
                     return true
                 }
                 // Collected instead of thrown one at a time, so a single run
