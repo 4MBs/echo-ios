@@ -53,6 +53,7 @@ struct LearnView: View {
                     }
                     ProgressView(value: overview.mastery)
                         .tint(Theme.accent)
+                        .accessibilityHidden(true)
                     Text("Gesamtbeherrschung \(percent(overview.mastery))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -81,7 +82,9 @@ struct LearnView: View {
                             Spacer()
                             Text(percent(subject.mastery)).foregroundStyle(.secondary)
                         }
-                        ProgressView(value: subject.mastery).tint(Theme.accent)
+                        ProgressView(value: subject.mastery)
+                            .tint(Theme.accent)
+                            .accessibilityHidden(true)
                         Text("\(subject.due) fällig · \(subject.total) Konzepte")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -90,7 +93,7 @@ struct LearnView: View {
                 }
             }
 
-            Section("Lernstoff") {
+            Section {
                 NavigationLink {
                     LearnConceptLibraryView(cards: cards)
                 } label: {
@@ -105,7 +108,11 @@ struct LearnView: View {
                     )
                 } label: {
                     Label("Neue Stunden verarbeiten", systemImage: "sparkles")
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+            } header: {
+                Text("Lernstoff")
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let errorMessage {
