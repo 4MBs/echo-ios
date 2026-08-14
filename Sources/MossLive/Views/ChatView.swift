@@ -320,7 +320,9 @@ struct ChatView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.red)
                 .padding(.horizontal, 9)
-                .frame(height: 32)
+                // Same reason as the lesson capsule: grow, never crop.
+                .padding(.vertical, 7)
+                .frame(minHeight: 32)
                 .background(.red.opacity(0.1), in: Capsule())
                 .accessibilityLabel("Kontext: Aktuelle Aufnahme")
         } else {
@@ -538,12 +540,11 @@ private struct ChatMessageRow: View {
                 } else {
                     Text(renderedMarkdown(message.text))
                         .font(.body)
-                        .lineSpacing(3)
                         .textSelection(.enabled)
                         .multilineTextAlignment(.leading)
-                        // Line spacing is added between lines but not below the
-                        // last one, so the bubble can end a few points short of
-                        // the descenders. Let the text keep its own height.
+                        // Message text keeps its own measured height: the
+                        // accessibility audit reads a bubble that is even a
+                        // point short of its descenders as clipped text.
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if message.usedWebSearch {
@@ -573,7 +574,6 @@ private struct ChatMessageRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(renderedMarkdown(message.text))
                     .font(.body)
-                    .lineSpacing(4)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -784,6 +784,7 @@ private struct ChatSentAttachments: View {
                             // part that identifies the file; keep both ends.
                             .lineLimit(2)
                             .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: 160, alignment: .leading)
                     // "Versuchsprotokoll.pdf" spoken as one word is not a

@@ -119,6 +119,19 @@ final class ChatUITests: EchoUITestCase {
         }
     }
 
+    func testChatDuringRecordingShowsTheLiveContext() {
+        launch(tab: "chat", scenario: "recording")
+        XCTAssertTrue(app.textFields["chat.input"].waitForExistence(timeout: 5))
+        // While the lesson is being recorded the composer swaps its context
+        // picker for a fixed live badge, so the question is asked about now.
+        let live = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == 'Kontext: Aktuelle Aufnahme'"))
+            .firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 5), "The chat does not show the live recording context")
+        shot("chat-live-context")
+        assertVisibleElementsStayOnScreen()
+    }
+
     func testDictationNeverMovesOrResizesTheComposer() {
         launch(tab: "chat")
         let microphone = app.buttons["Frage diktieren"]

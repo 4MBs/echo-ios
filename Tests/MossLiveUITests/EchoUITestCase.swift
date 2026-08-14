@@ -95,6 +95,32 @@ class EchoUITestCase: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
+    /// The seeded Mathematik lesson, open and ready for its toolbar actions.
+    func openLesson() {
+        launch(tab: "stunden")
+        tap(button(containing: "Mathematik"))
+        tap(button(containing: "Ursache und Wirkung"))
+        let directAction = app.buttons["Transkriptoptionen"]
+        let overflow = app.buttons["More"]
+        XCTAssertTrue(
+            directAction.waitForExistence(timeout: 4) || overflow.waitForExistence(timeout: 6),
+            "Lesson toolbar actions are unavailable"
+        )
+    }
+
+    /// Compact widths move the lesson's toolbar actions into the system "More"
+    /// menu, so an action is either on the bar or one level inside it.
+    func tapToolbarAction(_ label: String) {
+        let action = app.buttons[label]
+        if action.exists {
+            tap(action)
+            return
+        }
+
+        tap(app.buttons["More"])
+        tap(app.buttons[label])
+    }
+
     func rotateAndCapture(_ prefix: String) {
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))

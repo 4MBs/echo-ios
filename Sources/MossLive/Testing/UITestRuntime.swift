@@ -35,11 +35,13 @@ enum UITestRuntime {
     /// fake server right after the request, so a purely static fixture would
     /// resurrect it and make a working feature look broken.
     private nonisolated(unsafe) static var deletedSessionIDs: Set<String> = []
+    private nonisolated(unsafe) static var deletedNoteIDs: Set<String> = []
 
     @MainActor
     static func installFixtures() {
         guard isEnabled else { return }
         deletedSessionIDs.removeAll()
+        deletedNoteIDs.removeAll()
         if let identifier = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: identifier)
         }
@@ -87,7 +89,12 @@ enum UITestRuntime {
 
     static func response(path: String, method: String, body: [String: Any]?) async throws -> Data {
         if method == "DELETE", path.hasPrefix("/sessions/") {
-            deletedSessionIDs.insert(String(path.dropFirst("/sessions/".count)))
+            let parts = path.dropFirst("/sessions/".count).split(separator: "/")
+            if parts.count == 3, parts[1] == "notes" {
+                deletedNoteIDs.insert(String(parts[2]))
+            } else if parts.count == 1 {
+                deletedSessionIDs.insert(String(parts[0]))
+            }
         }
         if scenario == .loading {
             try await Task.sleep(for: .seconds(4))
@@ -403,7 +410,11 @@ private extension UITestRuntime {
              "default_effort": "high", "service_tiers": []],
         ],
     ]
-    static let notesObject: [[String: Any]] = [[
+    static var notesObject: [[String: Any]] {
+        allNotes.filter { !deletedNoteIDs.contains($0["id"] as? String ?? "") }
+    }
+
+    static let allNotes: [[String: Any]] = [[
         "id": "note-1", "session_id": "lesson-1", "offset_seconds": 12.0, "kind": "text",
         "timing_source": "matched", "title": "Tafelbild", "text_content": "Ursache → Wirkung",
         "original_filename": "Notizen.goodnotes", "mime_type": "application/pdf", "has_attachment": false,

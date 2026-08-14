@@ -76,26 +76,4 @@ final class LessonsUITests: EchoUITestCase {
         app.swipeDown()
     }
 
-    private func openLesson() {
-        launch(tab: "stunden")
-        tap(button(containing: "Mathematik"))
-        tap(button(containing: "Ursache und Wirkung"))
-        let directAction = app.buttons["Transkriptoptionen"]
-        let overflow = app.buttons["More"]
-        XCTAssertTrue(
-            directAction.waitForExistence(timeout: 4) || overflow.waitForExistence(timeout: 6),
-            "Lesson toolbar actions are unavailable"
-        )
-    }
-
-    private func tapToolbarAction(_ label: String) {
-        let action = app.buttons[label]
-        if action.exists {
-            tap(action)
-            return
-        }
-
-        tap(app.buttons["More"])
-        tap(app.buttons[label])
-    }
 }

@@ -135,6 +135,25 @@ final class DestructiveFlowsUITests: EchoUITestCase {
         tap(app.buttons["Fertig"])
     }
 
+    func testImportedNoteSwipeDeleteRemovesIt() {
+        openLesson()
+        tapToolbarAction("Unterrichtsnotizen importieren")
+        XCTAssertTrue(app.navigationBars["Unterrichtsnotizen"].waitForExistence(timeout: 5))
+
+        let note = app.staticTexts["Tafelbild"]
+        XCTAssertTrue(note.waitForExistence(timeout: 5))
+        shot("lesson-notes-before-delete")
+        note.swipeLeft()
+        tap(app.buttons["Löschen"])
+        expectToDisappear(note, "The deleted note is still listed")
+        XCTAssertFalse(
+            app.staticTexts["Import nicht möglich"].exists,
+            "Deleting the note reported an error"
+        )
+        shot("lesson-notes-after-delete")
+        tap(app.buttons["Fertig"])
+    }
+
     private func openChatHistory() {
         tap(app.buttons["Chatverlauf"])
         XCTAssertTrue(app.navigationBars["Chatverlauf"].waitForExistence(timeout: 5))
