@@ -179,6 +179,40 @@ final class LibraryReaderUITests: EchoUITestCase {
             "The drag on the page did not produce a selected region"
         )
         shot("reader-region-selected")
+
+        // The selection is meant to be adjustable afterwards: the overlay says
+        // so to VoiceOver, so its handles have to be reachable and it has to
+        // move when dragged.
+        let adjustment = app.descendants(matching: .any)["Ausgewählter Buchbereich"]
+        XCTAssertTrue(adjustment.waitForExistence(timeout: 4), "The chosen region cannot be adjusted")
+        let before = adjustment.frame
+        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(
+                forDuration: 0.2,
+                thenDragTo: adjustment.coordinate(withNormalizedOffset: CGVector(dx: 1.1, dy: 1.1))
+            )
+        let moved = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                guard let element = object as? XCUIElement else { return false }
+                return element.exists && element.frame.origin != before.origin
+            },
+            object: adjustment
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [moved], timeout: 5),
+            .completed,
+            "Dragging the chosen region did not move it"
+        )
+        shot("reader-region-adjusted")
+        // Compact widths keep the assistant aside while the region is being
+        // adjusted, and come back through the banner.
+        if app.buttons["Fertig"].exists {
+            tap(app.buttons["Fertig"])
+            XCTAssertTrue(
+                app.buttons["bookAI.region"].waitForExistence(timeout: 5),
+                "The assistant did not come back with the marked region"
+            )
+        }
         tap(app.buttons["Aufheben"])
     }
 

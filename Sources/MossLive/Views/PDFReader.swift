@@ -217,6 +217,12 @@ struct PDFReader: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if resumeAssistantAfterRegion {
+                Button("Fertig", action: resumeAssistant)
+                    .font(.subheadline.weight(.medium))
+                    .frame(minHeight: 44)
+                    .accessibilityHint("Fragt mit dem markierten Bereich weiter")
+            }
             Button("Aufheben", systemImage: "xmark", action: clearRegionSelection)
                 .labelStyle(.iconOnly)
                 .frame(minWidth: 44, minHeight: 44)
@@ -255,7 +261,10 @@ struct PDFReader: View {
                 selectedRegion = region
                 selectingRegion = false
             }
-            resumeAssistant()
+            // The assistant stays aside for a moment longer on compact widths:
+            // the fresh selection can be dragged and resized on the page, which
+            // is impossible underneath a presented sheet. The banner's "Fertig"
+            // brings the assistant back when the student is happy with it.
         }
     }
 
@@ -271,6 +280,7 @@ struct PDFReader: View {
         selectingRegion = false
         proxy.cancelRegionSelection()
         proxy.clearRegionSelection()
+        resumeAssistant()
     }
 
     /// Teach the reader where the printed numbering starts: turn to a page whose

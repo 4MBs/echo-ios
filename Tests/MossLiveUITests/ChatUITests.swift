@@ -76,7 +76,13 @@ final class ChatUITests: EchoUITestCase {
 
         if app.buttons["chat.regenerate"].exists {
             tap(app.buttons["chat.regenerate"])
-            XCTAssertTrue(app.buttons["chat.regenerate"].waitForExistence(timeout: 25))
+            // Wait for the regenerated answer to actually finish: the send
+            // button returns from "stop" only once the stream has ended.
+            let finished = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == true"),
+                object: app.buttons["Nachricht senden"]
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 90), .completed)
         }
         UIPasteboard.general.items = []
         // Every assistant message has one, and the regenerated answer is the

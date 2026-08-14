@@ -65,6 +65,26 @@ class EchoUITestCase: XCTestCase {
         }
     }
 
+    /// A long press can be swallowed while a list is still settling, which on
+    /// the slower tablet runner reads as a missing menu. Ask twice before
+    /// believing the menu never opened.
+    @discardableResult
+    func openContextMenu(on element: XCUIElement, expecting item: String,
+                         file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        element.press(forDuration: 1.2)
+        let entry = app.buttons[item]
+        if !entry.waitForExistence(timeout: 4) {
+            element.press(forDuration: 1.4)
+            XCTAssertTrue(
+                entry.waitForExistence(timeout: 6),
+                "The context menu never offered \(item)",
+                file: file,
+                line: line
+            )
+        }
+        return entry
+    }
+
     func replaceText(_ field: XCUIElement, with value: String) {
         focus(field)
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 100))
