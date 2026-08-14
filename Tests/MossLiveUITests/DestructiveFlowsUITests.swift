@@ -55,8 +55,13 @@ final class DestructiveFlowsUITests: EchoUITestCase {
         tap(app.buttons["Bearbeiten"])
 
         XCTAssertTrue(app.navigationBars["Nachricht bearbeiten"].waitForExistence(timeout: 4))
-        // A vertical-axis TextField is exposed as a text view once it can grow.
-        let editor = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
+        // The sheet does not cover the whole screen on iPad, so the editor has
+        // to be addressed by its own identifier: typing into the chat composer
+        // behind it would dismiss the sheet instead.
+        let editor = app.textViews["chat.edit.input"].exists
+            ? app.textViews["chat.edit.input"]
+            : app.textFields["chat.edit.input"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 4), "The edit sheet has no editable field")
         replaceText(editor, with: "Erkläre den Unterschied.")
         shot("chat-message-edit-sheet")
         tap(app.buttons["Senden"])
@@ -82,8 +87,15 @@ final class DestructiveFlowsUITests: EchoUITestCase {
         tap(app.buttons["Stunde löschen"])
         XCTAssertTrue(app.staticTexts["Stunde löschen?"].waitForExistence(timeout: 4))
         shot("lesson-delete-confirmation")
-        tap(app.buttons["Abbrechen"])
+        // iOS 26 anchors the dialog to the row it belongs to and shows only the
+        // destructive action; backing out means tapping away from it.
+        if app.buttons["Abbrechen"].exists {
+            tap(app.buttons["Abbrechen"])
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.93)).tap()
+        }
         XCTAssertTrue(lesson.waitForExistence(timeout: 4), "Cancelling the dialog removed the lesson anyway")
+        XCTAssertFalse(app.staticTexts["Stunde löschen?"].exists, "The dialog stayed open after tapping away")
 
         lesson.press(forDuration: 1.2)
         tap(app.buttons["Stunde löschen"])

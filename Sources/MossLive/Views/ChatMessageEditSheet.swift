@@ -22,6 +22,7 @@ struct ChatMessageEditSheet: View {
                     .foregroundStyle(.secondary)
                 TextField("Nachricht bearbeiten", text: $text, axis: .vertical)
                     .lineLimit(3 ... 10)
+                    .accessibilityIdentifier("chat.edit.input")
                     .padding(12)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
                 Spacer()

@@ -340,7 +340,11 @@ struct ChatView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tint)
                         .padding(.horizontal, 9)
-                        .frame(height: 32)
+                        // Padding rather than a fixed height: the capsule keeps
+                        // its resting size but grows with the student's text
+                        // instead of cropping the word inside it.
+                        .padding(.vertical, 7)
+                        .frame(minHeight: 32)
                         .background(Theme.accent.opacity(0.1), in: Capsule())
                 } else {
                     Image(systemName: "text.book.closed")
@@ -537,6 +541,10 @@ private struct ChatMessageRow: View {
                         .lineSpacing(3)
                         .textSelection(.enabled)
                         .multilineTextAlignment(.leading)
+                        // Line spacing is added between lines but not below the
+                        // last one, so the bubble can end a few points short of
+                        // the descenders. Let the text keep its own height.
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if message.usedWebSearch {
                     Label("Websuche", systemImage: "globe")
@@ -567,6 +575,7 @@ private struct ChatMessageRow: View {
                     .font(.body)
                     .lineSpacing(4)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 4) {
@@ -609,8 +618,11 @@ private struct ChatMessageRow: View {
 
                 if isLastAssistant {
                     Text("KI kann Fehler machen. Prüfe wichtige Informationen.")
-                        .font(.caption2)
+                        // Footnote rather than the smallest style: this line is
+                        // a caution, and caption2 stops shrinking below Large.
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.horizontal, 4)
@@ -768,13 +780,27 @@ private struct ChatSentAttachments: View {
                         }
                         Text(attachment.fileName)
                             .font(.caption.weight(.medium))
-                            .lineLimit(1)
+                            // A name cut off at the tile's edge hides the very
+                            // part that identifies the file; keep both ends.
+                            .lineLimit(2)
+                            .truncationMode(.middle)
                     }
                     .frame(maxWidth: 160, alignment: .leading)
+                    // "Versuchsprotokoll.pdf" spoken as one word is not a
+                    // sentence anyone can follow: say what it is instead.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.spokenLabel(for: attachment))
                 }
             }
         }
         .scrollIndicators(.hidden)
+    }
+
+    private static func spokenLabel(for attachment: ChatStore.Attachment) -> String {
+        let name = attachment.fileName as NSString
+        let type = name.pathExtension.uppercased()
+        let base = name.deletingPathExtension
+        return type.isEmpty ? "Anhang: \(base)" : "Anhang: \(base), \(type)"
     }
 }
 
