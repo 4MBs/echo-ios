@@ -1,5 +1,9 @@
 import Foundation
 
+// These wire DTOs intentionally live under BackendAPI, matching every other
+// API payload in the app. Their JSON field is named `mastery`, which SwiftLint's
+// generic language rule cannot distinguish from the learning-science term.
+// swiftlint:disable nesting inclusive_language
 extension BackendAPI {
     struct LearnSource: Codable, Hashable, Identifiable, Sendable {
         let sessionId: String
@@ -202,3 +206,4 @@ extension BackendAPI {
         return LearnEvaluationResult(evaluation: response.evaluation, card: response.card)
     }
 }
+// swiftlint:enable nesting inclusive_language

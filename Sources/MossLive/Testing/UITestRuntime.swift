@@ -209,6 +209,8 @@ enum UITestRuntime {
         return try json([:])
     }
 
+    // One deterministic router intentionally covers every fake backend endpoint.
+    // swiftlint:disable:next cyclomatic_complexity
     private static func populatedResponse(path: String, method: String, body: [String: Any]?) throws -> Data {
         if path == "/sessions" { return try json(sessionsObject) }
         if path == "/library" { return try json(booksObject) }
