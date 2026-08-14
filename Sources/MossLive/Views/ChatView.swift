@@ -546,6 +546,7 @@ private struct ChatMessageRow: View {
                         // accessibility audit reads a bubble that is even a
                         // point short of its descenders as clipped text.
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("chat.message.text")
                 }
                 if message.usedWebSearch {
                     Label("Websuche", systemImage: "globe")
@@ -577,6 +578,7 @@ private struct ChatMessageRow: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("chat.message.text")
 
                 HStack(spacing: 4) {
                     Button(action: copy) {
@@ -785,6 +787,7 @@ private struct ChatSentAttachments: View {
                             .lineLimit(2)
                             .truncationMode(.middle)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("chat.attachment.name")
                     }
                     .frame(maxWidth: 160, alignment: .leading)
                     // "Versuchsprotokoll.pdf" spoken as one word is not a

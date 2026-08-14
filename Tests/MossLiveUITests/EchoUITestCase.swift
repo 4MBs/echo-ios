@@ -48,6 +48,16 @@ class EchoUITestCase: XCTestCase {
 
     func tap(_ element: XCUIElement, timeout: TimeInterval = 8, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "Missing element: \(element)", file: file, line: line)
+        // A menu's items exist before the menu has finished presenting, and an
+        // element without a frame yet has no activation point to ask about.
+        let laidOut = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                guard let element = object as? XCUIElement else { return false }
+                return element.exists && !element.frame.isEmpty
+            },
+            object: element
+        )
+        _ = XCTWaiter.wait(for: [laidOut], timeout: 3)
         if element.isHittable {
             element.tap()
         } else {

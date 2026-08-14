@@ -39,6 +39,28 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(app.buttons["Sichern"])
         XCTAssertTrue(app.navigationBars["Visueller Testname"].waitForExistence(timeout: 4))
         shot("reader-renamed")
+
+        // Teaching the book its printed numbering, and taking it back.
+        tap(app.buttons["Seitendarstellung"])
+        tap(app.buttons["Seitenzahlen anpassen…"])
+        let printedNumber = app.textFields["Gedruckte Seitenzahl"]
+        XCTAssertTrue(printedNumber.waitForExistence(timeout: 4))
+        typeText("10", into: printedNumber)
+        shot("reader-numbering-editor")
+        let renumbered = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH 'Seite 10 '"))
+            .firstMatch
+        XCTAssertTrue(renumbered.waitForExistence(timeout: 5), "The printed page number was not applied")
+        tap(app.buttons["Zurücksetzen"])
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
+
+        tap(app.buttons["Buchoptionen"])
+        tap(app.buttons["Originalnamen wiederherstellen"])
+        XCTAssertTrue(
+            app.navigationBars["Echo Testbuch"].waitForExistence(timeout: 4),
+            "The book kept its custom name after restoring the original"
+        )
+        shot("reader-original-name-restored")
         rotateAndCapture("reader-renamed")
     }
 
