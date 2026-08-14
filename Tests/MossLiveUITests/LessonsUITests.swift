@@ -75,5 +75,4 @@ final class LessonsUITests: EchoUITestCase {
         shot("lesson-share-sheet")
         app.swipeDown()
     }
-
 }
