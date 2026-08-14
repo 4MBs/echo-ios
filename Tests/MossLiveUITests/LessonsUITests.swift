@@ -31,6 +31,57 @@ final class LessonsUITests: EchoUITestCase {
         rotateAndCapture("lesson-detail")
     }
 
+    func testManualRetranscriptionExplainsAMissingSafetyRecording() {
+        openLesson()
+        tapToolbarAction("Transkriptoptionen")
+        tap(app.buttons["Aus 48-kHz-Datei neu transkribieren"])
+        let explanation = app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS 'keine 48-kHz-Sicherheitsaufnahme'"))
+            .firstMatch
+        XCTAssertTrue(
+            explanation.waitForExistence(timeout: 5),
+            "The lesson does not say why it cannot re-transcribe"
+        )
+        shot("lesson-retranscription-without-recording")
+    }
+
+    func testManualRetranscriptionAsksBeforeUploadingTheSafetyRecording() {
+        launch(tab: "stunden", scenario: "safetyRecording")
+        tap(button(containing: "Mathematik"))
+        tap(button(containing: "Ursache und Wirkung"))
+        tapToolbarAction("Transkriptoptionen")
+        tap(app.buttons["Aus 48-kHz-Datei neu transkribieren"])
+
+        let question = app.staticTexts["48-kHz-Aufnahme neu transkribieren?"]
+        XCTAssertTrue(question.waitForExistence(timeout: 5), "The upload started without asking")
+        shot("lesson-retranscription-confirmation")
+        // The same anchored dialog as deleting a lesson: iOS 26 offers only the
+        // action itself, so backing out means tapping away from it.
+        if app.buttons["Abbrechen"].exists {
+            tap(app.buttons["Abbrechen"])
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.93)).tap()
+        }
+        XCTAssertFalse(question.exists, "The confirmation stayed open after tapping away")
+    }
+
+    func testTranscriptSaveFailureIsReportedToTheStudent() {
+        launch(tab: "stunden", scenario: "writeError")
+        tap(button(containing: "Mathematik"))
+        tap(button(containing: "Ursache und Wirkung"))
+        tapToolbarAction("Transkriptoptionen")
+        tap(app.buttons["Transkript bearbeiten"])
+        XCTAssertTrue(app.navigationBars["Transkript bearbeiten"].waitForExistence(timeout: 5))
+        tap(app.buttons["Sichern"])
+
+        XCTAssertTrue(
+            app.staticTexts["Transkript konnte nicht gespeichert werden"].waitForExistence(timeout: 8),
+            "A refused save left the student without an explanation"
+        )
+        shot("lesson-transcript-save-error")
+        tap(app.buttons["OK"])
+    }
+
     func testLessonToolbarNotesTranscriptVocabularyAndShare() {
         openLesson()
 
@@ -65,6 +116,15 @@ final class LessonsUITests: EchoUITestCase {
         } else if app.buttons["Fertig"].exists {
             app.buttons["Fertig"].tap()
         }
+
+        tapToolbarAction("Transkriptoptionen")
+        tap(app.buttons["Transkript bearbeiten"])
+        tap(app.buttons["Versionen"])
+        XCTAssertTrue(app.navigationBars["Versionsverlauf"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Ursprüngliches Live-Transkript wiederherstellen"].exists)
+        shot("lesson-transcript-versions")
+        tap(app.buttons["Fertig"])
+        if app.buttons["Abbrechen"].exists { tap(app.buttons["Abbrechen"]) }
 
         tapToolbarAction("Teilen")
         // UIActivityViewController is exposed by XCTest as a popover-backed

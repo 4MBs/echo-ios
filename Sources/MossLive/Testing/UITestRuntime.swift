@@ -14,6 +14,12 @@ enum UITestRuntime {
         case recording
         case reconnecting
         case longContent
+        /// Reads succeed, every change is refused: the state a student meets
+        /// when the server is up but will not accept their edit.
+        case writeError
+        /// A finished 48 kHz safety recording exists on this device for the
+        /// seeded lesson, which is what unlocks manual re-transcription.
+        case safetyRecording
     }
 
     static let isEnabled = ProcessInfo.processInfo.arguments.contains("-UITesting")
@@ -61,7 +67,12 @@ enum UITestRuntime {
         clearGeneratedFiles()
 
         switch scenario {
-        case .populated, .offline, .recording, .reconnecting, .longContent:
+        case .safetyRecording:
+            seedOfflineCache()
+            seedBookFiles()
+            seedAudioFile()
+            seedSafetyRecording()
+        case .populated, .offline, .recording, .reconnecting, .longContent, .writeError:
             seedOfflineCache()
             seedBookFiles()
             seedAudioFile()
@@ -85,6 +96,44 @@ enum UITestRuntime {
         try? FileManager.default.removeItem(
             at: caches.appendingPathComponent("lesson-audio", isDirectory: true)
         )
+        try? FileManager.default.removeItem(
+            at: applicationSupport.appendingPathComponent("EchoRecordings", isDirectory: true)
+        )
+    }
+
+    /// A completed safety recording belonging to the seeded lesson. Only the
+    /// manifest and a real file on disk matter here: the reader of this state
+    /// asks whether a 48 kHz recording exists and whether it has finished.
+    private static func seedSafetyRecording() {
+        guard let root = try? LocalRecordingStorage.defaultRoot() else { return }
+        let id = UUID(uuidString: "30000000-0000-0000-0000-000000000001")!
+        let directory = LocalRecordingStorage.directory(root: root, id: id)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? makeWAV().write(
+            to: directory.appendingPathComponent(LocalRecordingStorage.m4aName),
+            options: .atomic
+        )
+        let startedAt = Date(timeIntervalSince1970: Double(nowMilliseconds - 3_600_000) / 1000)
+        let manifest = LocalRecordingManifest(
+            version: LocalRecordingManifest.currentVersion,
+            id: id,
+            serverSessionId: "lesson-1",
+            state: .completed,
+            startedAt: startedAt,
+            updatedAt: startedAt.addingTimeInterval(3600),
+            endedAt: startedAt.addingTimeInterval(3600),
+            pcmFilename: LocalRecordingStorage.pcmName,
+            m4aFilename: LocalRecordingStorage.m4aName,
+            sampleRate: 48000,
+            channels: 1,
+            framesWritten: 48000 * 3600,
+            events: [],
+            error: nil
+        )
+        try? LocalRecordingStorage.save(
+            manifest,
+            to: LocalRecordingStorage.manifestURL(root: root, id: id)
+        )
     }
 
     static func response(path: String, method: String, body: [String: Any]?) async throws -> Data {
@@ -103,6 +152,9 @@ enum UITestRuntime {
         }
         if path == "/answer" || path.hasSuffix("/ask") {
             try await Task.sleep(for: .milliseconds(4000))
+        }
+        if scenario == .writeError, method != "GET" {
+            throw BackendAPI.APIError(message: "Der Testserver lehnt Änderungen ab.", status: 500)
         }
         switch scenario {
         case .offline:
