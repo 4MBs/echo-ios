@@ -488,8 +488,8 @@ private extension UITestRuntime {
          "transcript_revision": 1, "has_manual_edits": false, "has_audio": false,
          "title": "Teststunde Biologie", "subject": "Biologie", "teacher": "Herr Muster",
          "room": "B04", "segments": [
-            ["t0": 8.0, "t1": 16.0, "speaker": "Lehrkraft", "text": "Chlorophyll absorbiert Lichtenergie."],
-            ["t0": 16.0, "t1": 28.0, "speaker": "Lehrkraft", "text": "Diese Energie treibt die Lichtreaktion an."],
+             ["t0": 8.0, "t1": 16.0, "speaker": "Lehrkraft", "text": "Chlorophyll absorbiert Lichtenergie."],
+             ["t0": 16.0, "t1": 28.0, "speaker": "Lehrkraft", "text": "Diese Energie treibt die Lichtreaktion an."],
          ]]
     }
 
@@ -503,7 +503,7 @@ private extension UITestRuntime {
         ["date": "2026-08-14", "requested_minutes": 30, "estimated_minutes": 2,
          "cards": learnCardsObject,
          "blocks": [["subject": "Biologie", "exam_name": NSNull(), "card_count": 2,
-                      "estimated_minutes": 2, "reason": "Fällige Wiederholung und Wissenslücken"]]]
+             "estimated_minutes": 2, "reason": "Fällige Wiederholung und Wissenslücken"]]]
     }
 
     static var learnCardsObject: [[String: Any]] {
@@ -512,13 +512,13 @@ private extension UITestRuntime {
             question: "Warum ist Chlorophyll für die Photosynthese wichtig?",
             expected: "Chlorophyll absorbiert Lichtenergie.",
             concept: "Photosynthese",
-            startMs: 8_000
+            startMs: 8000
         ), learnCard(
             id: "learn-2",
             question: "Was treibt die Lichtreaktion an?",
             expected: "Die vom Chlorophyll aufgenommene Lichtenergie.",
             concept: "Lichtreaktion",
-            startMs: 16_000
+            startMs: 16000
         )]
     }
 
