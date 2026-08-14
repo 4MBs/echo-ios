@@ -205,6 +205,6 @@ extension BackendAPI {
         let response = try JSONDecoder().decode(Response.self, from: data)
         return LearnEvaluationResult(evaluation: response.evaluation, card: response.card)
     }
-
 }
+
 // swiftlint:enable nesting inclusive_language

@@ -503,7 +503,7 @@ private extension UITestRuntime {
         ["date": "2026-08-14", "requested_minutes": 30, "estimated_minutes": 2,
          "cards": learnCardsObject,
          "blocks": [["subject": "Biologie", "exam_name": NSNull(), "card_count": 2,
-             "estimated_minutes": 2, "reason": "Fällige Wiederholung und Wissenslücken"]]]
+                     "estimated_minutes": 2, "reason": "Fällige Wiederholung und Wissenslücken"]]]
     }
 
     static var learnCardsObject: [[String: Any]] {
