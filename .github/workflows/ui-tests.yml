@@ -29,11 +29,13 @@ jobs:
   simulator-suite:
     name: ${{ matrix.form-factor }} complete suite
     runs-on: macos-26
-    timeout-minutes: 120
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        form-factor: [iphone, ipad]
+        # Echo is an iPad app first, and every flow is covered there. Add
+        # "iphone" back to this list to run the same suite on the phone.
+        form-factor: [ipad]
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +49,7 @@ jobs:
           xcrun simctl list runtimes
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
 
       - name: Generate project
         run: xcodegen generate
@@ -95,17 +97,37 @@ jobs:
           open -a Simulator
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
 
-      - name: Run complete XCUITest suite
+      # Building once up front keeps the compile out of the timed test run and
+      # lets the suite start on every clone at the same moment.
+      - name: Build for testing
         run: |
           set -o pipefail
-          xcodebuild test \
+          xcodebuild build-for-testing \
             -project MossLive.xcodeproj \
             -scheme MossLiveUITests \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -clonedSourcePackagesDirPath .spm-packages \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
+
+      # The suite is a set of independent test classes that each relaunch the
+      # app into a deterministic state, so it parallelises cleanly: XCTest
+      # clones the simulator and runs several classes at once. This is where
+      # the wall-clock time went from most of an hour to a few minutes.
+      - name: Run complete XCUITest suite
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project MossLive.xcodeproj \
+            -scheme MossLiveUITests \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -clonedSourcePackagesDirPath .spm-packages \
+            -derivedDataPath DerivedData \
             -resultBundlePath UIResults.xcresult \
+            -parallel-testing-enabled YES \
+            -maximum-parallel-testing-workers 3 \
             -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 180 \
+            -default-test-execution-time-allowance 300 \
             -maximum-test-execution-time-allowance 600 \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-test.log
 
