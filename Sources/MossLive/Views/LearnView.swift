@@ -107,12 +107,8 @@ struct LearnView: View {
                         onGenerated: reload
                     )
                 } label: {
-                    Label("Neue Stunden verarbeiten", systemImage: "sparkles")
-                        .fixedSize(horizontal: false, vertical: true)
+                    Label("Stunden verarbeiten", systemImage: "sparkles")
                 }
-            } header: {
-                Text("Lernstoff")
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let errorMessage {
