@@ -8,6 +8,7 @@ import UIKit
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var draft = ""
     @State private var lessons: [BackendAPI.LessonInfo] = []
@@ -73,7 +74,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showAddSheet, onDismiss: presentPendingPicker) {
             ChatAddSheet(
-                canUseCamera: UIImagePickerController.isSourceTypeAvailable(.camera),
+                canUseCamera: UITestRuntime.isEnabled || UIImagePickerController.isSourceTypeAvailable(.camera),
                 onCamera: { choose(.camera) },
                 onPhotos: { choose(.photos) },
                 onFiles: { choose(.files) }
@@ -184,6 +185,13 @@ struct ChatView: View {
                     .padding(.bottom, 12)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // A conversation opens where it left off. Without this the view
+                // starts at the oldest message, which only shows once the thread
+                // is longer than the screen — a large text size is enough.
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: chat.selectedConversationID) {
+                    scrollToBottom(proxy)
+                }
                 .onChange(of: chat.messages.count) {
                     scrollToBottom(proxy)
                 }
@@ -224,7 +232,9 @@ struct ChatView: View {
                 )
                 .textFieldStyle(.plain)
                 .lineLimit(1 ... 5)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .focused($inputFocused)
+                .accessibilityIdentifier("chat.input")
                 .submitLabel(.send)
                 .onSubmit(send)
                 .padding(.horizontal, 16)
@@ -232,7 +242,7 @@ struct ChatView: View {
                 .padding(.bottom, 10)
                 .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
 
-                HStack(spacing: 8) {
+                composerControlLayout {
                     HStack(spacing: 8) {
                         Button {
                             showAddSheet = true
@@ -242,9 +252,12 @@ struct ChatView: View {
                                 .frame(width: 30, height: 30)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .foregroundStyle(.secondary)
                         .disabled(chat.sending || processingAttachmentCount > 0)
                         .accessibilityLabel("Zum Chat hinzufügen")
+                        .accessibilityIdentifier("chat.add")
 
                         contextMenu
                     }
@@ -274,6 +287,7 @@ struct ChatView: View {
                         .controlSize(.regular)
                         .disabled(!chat.sending && !canSend)
                         .accessibilityLabel(chat.sending ? "Antwort stoppen" : "Nachricht senden")
+                        .accessibilityIdentifier("chat.send")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -290,6 +304,15 @@ struct ChatView: View {
         .padding(.bottom, 6)
     }
 
+    /// The composer's controls sit on one line until the labels need more room
+    /// than the composer has. They then take a second line rather than putting
+    /// a ceiling on how large the student may set their text.
+    private var composerControlLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+    }
+
     @ViewBuilder
     private var contextMenu: some View {
         if model.phase == .recording {
@@ -297,7 +320,9 @@ struct ChatView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.red)
                 .padding(.horizontal, 9)
-                .frame(height: 32)
+                // Same reason as the lesson capsule: grow, never crop.
+                .padding(.vertical, 7)
+                .frame(minHeight: 32)
                 .background(.red.opacity(0.1), in: Capsule())
                 .accessibilityLabel("Kontext: Aktuelle Aufnahme")
         } else {
@@ -317,7 +342,11 @@ struct ChatView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tint)
                         .padding(.horizontal, 9)
-                        .frame(height: 32)
+                        // Padding rather than a fixed height: the capsule keeps
+                        // its resting size but grows with the student's text
+                        // instead of cropping the word inside it.
+                        .padding(.vertical, 7)
+                        .frame(minHeight: 32)
                         .background(Theme.accent.opacity(0.1), in: Capsule())
                 } else {
                     Image(systemName: "text.book.closed")
@@ -365,6 +394,38 @@ struct ChatView: View {
     // MARK: - Attachments
 
     private func choose(_ action: PickerAction) {
+        if UITestRuntime.isEnabled {
+            pendingPickerAction = nil
+            showAddSheet = false
+            let attachment: ChatStore.Attachment = switch action {
+            case .camera:
+                .init(
+                    kind: .image,
+                    fileName: "Kamerafoto.jpg",
+                    mimeType: "image/jpeg",
+                    byteCount: 24000,
+                    extractedText: "Fotografierte Testnotiz: Ursache führt zur Wirkung."
+                )
+            case .photos:
+                .init(
+                    kind: .image,
+                    fileName: "Testfoto.jpg",
+                    mimeType: "image/jpeg",
+                    byteCount: 18000,
+                    extractedText: "Deterministischer Text aus der Fotomediathek."
+                )
+            case .files:
+                .init(
+                    kind: .document,
+                    fileName: "Testdokument.pdf",
+                    mimeType: "application/pdf",
+                    byteCount: 42000,
+                    extractedText: "Deterministischer Dokumentinhalt für den Chat."
+                )
+            }
+            pendingAttachments.append(attachment)
+            return
+        }
         pendingPickerAction = action
         showAddSheet = false
     }
@@ -479,9 +540,13 @@ private struct ChatMessageRow: View {
                 } else {
                     Text(renderedMarkdown(message.text))
                         .font(.body)
-                        .lineSpacing(3)
                         .textSelection(.enabled)
                         .multilineTextAlignment(.leading)
+                        // Message text keeps its own measured height: the
+                        // accessibility audit reads a bubble that is even a
+                        // point short of its descenders as clipped text.
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("chat.message.text")
                 }
                 if message.usedWebSearch {
                     Label("Websuche", systemImage: "globe")
@@ -510,9 +575,10 @@ private struct ChatMessageRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(renderedMarkdown(message.text))
                     .font(.body)
-                    .lineSpacing(4)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("chat.message.text")
 
                 HStack(spacing: 4) {
                     Button(action: copy) {
@@ -521,8 +587,21 @@ private struct ChatMessageRow: View {
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
+                    // Message actions are the smallest controls in the thread;
+                    // keep their touch area at the 44-point minimum.
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(copied ? "Kopiert" : "Antwort kopieren")
+                    .accessibilityIdentifier("chat.copy")
+
+                    if copied {
+                        Text("Kopiert")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            .accessibilityIdentifier("chat.copy.confirmation")
+                    }
 
                     if isLastAssistant && !isSending {
                         Button(action: onRegenerate) {
@@ -530,16 +609,22 @@ private struct ChatMessageRow: View {
                                 .frame(width: 32, height: 32)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .foregroundStyle(.secondary)
                         .accessibilityLabel("Antwort neu erstellen")
+                        .accessibilityIdentifier("chat.regenerate")
                     }
                     Spacer()
                 }
 
                 if isLastAssistant {
                     Text("KI kann Fehler machen. Prüfe wichtige Informationen.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        // Footnote rather than the smallest style: this line is
+                        // a caution, and caption2 stops shrinking below Large.
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.horizontal, 4)
@@ -551,7 +636,9 @@ private struct ChatMessageRow: View {
         UIPasteboard.general.string = message.text
         withAnimation { copied = true }
         Task {
-            try? await Task.sleep(for: .seconds(1.5))
+            // Keep the visible and spoken confirmation perceivable without
+            // permanently occupying message-action space.
+            try? await Task.sleep(for: .seconds(5))
             withAnimation { copied = false }
         }
     }
@@ -695,13 +782,29 @@ private struct ChatSentAttachments: View {
                         }
                         Text(attachment.fileName)
                             .font(.caption.weight(.medium))
-                            .lineLimit(1)
+                            // A name cut off at the tile's edge hides the very
+                            // part that identifies the file; keep both ends.
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("chat.attachment.name")
                     }
                     .frame(maxWidth: 160, alignment: .leading)
+                    // "Versuchsprotokoll.pdf" spoken as one word is not a
+                    // sentence anyone can follow: say what it is instead.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.spokenLabel(for: attachment))
                 }
             }
         }
         .scrollIndicators(.hidden)
+    }
+
+    private static func spokenLabel(for attachment: ChatStore.Attachment) -> String {
+        let name = attachment.fileName as NSString
+        let type = name.pathExtension.uppercased()
+        let base = name.deletingPathExtension
+        return type.isEmpty ? "Anhang: \(base)" : "Anhang: \(base), \(type)"
     }
 }
 
@@ -794,48 +897,7 @@ private struct ChatAddSheet: View {
             .background(.background, in: RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct ChatMessageEditSheet: View {
-    let message: ChatStore.Message
-    let onSave: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var text: String
-
-    init(message: ChatStore.Message, onSave: @escaping (String) -> Void) {
-        self.message = message
-        self.onSave = onSave
-        _text = State(initialValue: message.text)
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Nachfolgende Antworten werden entfernt und neu erstellt.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                TextField("Nachricht bearbeiten", text: $text, axis: .vertical)
-                    .lineLimit(3 ... 10)
-                    .padding(12)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
-                Spacer()
-            }
-            .padding(20)
-            .navigationTitle("Nachricht bearbeiten")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Senden") {
-                        onSave(text)
-                        dismiss()
-                    }
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-        .presentationDetents([.medium])
+        .accessibilityIdentifier("chat.add.\(title.lowercased())")
     }
 }
 
@@ -919,41 +981,5 @@ private struct ChatHistorySheet: View {
             get: { renamingConversation != nil },
             set: { if !$0 { renamingConversation = nil } }
         )
-    }
-}
-
-private struct ChatCameraPicker: UIViewControllerRepresentable {
-    let completion: (Data?) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.cameraCaptureMode = .photo
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let completion: (Data?) -> Void
-
-        init(completion: @escaping (Data?) -> Void) {
-            self.completion = completion
-        }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            let image = info[.originalImage] as? UIImage
-            completion(image?.jpegData(compressionQuality: 0.82))
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            completion(nil)
-        }
     }
 }

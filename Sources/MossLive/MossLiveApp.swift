@@ -1,9 +1,18 @@
 import Combine
 import SwiftUI
+import UIKit
 
 @main
 struct MossLiveApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        UITestRuntime.installFixtures()
+        _model = State(initialValue: AppModel())
+        if UITestRuntime.isEnabled {
+            UIView.setAnimationsEnabled(false)
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -27,6 +36,7 @@ struct MainTabView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingNoteImportCount = 0
+    @ScaledMetric(relativeTo: .body) private var sidebarFooterRowHeight: CGFloat = 52
 
     /// Which place the sidebar is on. It lives on the model rather than in this
     /// view so screens can change the selected destination directly.
@@ -68,6 +78,9 @@ struct MainTabView: View {
                 Label(tab.title, systemImage: tab.systemImage)
                     .tag(tab)
                     .badge(tab == .stunden ? pendingNoteImportCount : 0)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(tab.title)
+                    .accessibilityIdentifier("tab.\(tab.rawValue)")
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
@@ -114,10 +127,13 @@ struct MainTabView: View {
             List(selection: selection) {
                 Label(AppTab.einstellungen.title, systemImage: AppTab.einstellungen.systemImage)
                     .tag(AppTab.einstellungen)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(AppTab.einstellungen.title)
+                    .accessibilityIdentifier("tab.\(AppTab.einstellungen.rawValue)")
             }
             .listStyle(.sidebar)
             .scrollDisabled(true)
-            .frame(height: 52)
+            .frame(height: sidebarFooterRowHeight)
         }
         .padding(.bottom, 4)
     }

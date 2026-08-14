@@ -165,13 +165,15 @@ struct AIModelMenu: View {
     private func compactLabel(_ text: String, showsSpeed: Bool) -> some View {
         let pieces = Self.compactLabelPieces(text)
         return HStack(spacing: 3) {
-            Text(pieces.version).font(.system(size: 13, weight: .semibold))
-                + Text(pieces.detail).font(.system(size: 13, weight: .regular))
+            // Footnote is the same 13 points at the default setting, but it
+            // follows the student's text size instead of pinning the chip.
+            Text(pieces.version).font(.footnote.weight(.semibold))
+                + Text(pieces.detail).font(.footnote)
             if showsSpeed {
                 Image(systemName: "bolt.fill")
             }
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(.caption2.weight(.medium))
     }
 
     /// Keep the model generation slightly stronger without turning Luna, Sol,

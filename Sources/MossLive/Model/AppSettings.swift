@@ -103,6 +103,16 @@ final class AppSettings {
         let storedQuickSwitch = defaults.string(forKey: "quickSwitchURL")
         quickSwitchURL = (storedQuickSwitch == nil || storedQuickSwitch == "goodnotes://")
             ? "goodnotes5://" : storedQuickSwitch!
+        if UITestRuntime.isEnabled {
+            serverHost = "ui-test.local"
+            serverPort = 8787
+            authToken = "ui-test-token"
+            timetableConnected = UITestRuntime.scenario != .empty
+            lessonNotifications = false
+            autoStopAtLessonEnd = true
+            showPageNumberEditor = true
+            showBookRenaming = true
+        }
         // propagate whatever is already configured to the widget container,
         // so widgets work immediately after this app version's first launch
         mirrorToWidget()

@@ -83,7 +83,7 @@ struct AIModelSection: View {
         } footer: {
             Text(footerText)
         }
-        .task { await configuration.load(api: api, force: true) }
+        .task { await configuration.load(api: api) }
     }
 
     private var api: BackendAPI {

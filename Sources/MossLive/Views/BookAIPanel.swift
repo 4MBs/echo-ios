@@ -7,11 +7,13 @@ import UIKit
 struct BookAIPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let bookID: String
     let numbering: BookPageNumbering
     let visiblePages: [Int]
-    let region: BackendAPI.BookPageRegion?
+    @Binding var region: BackendAPI.BookPageRegion?
+    @Binding var isSelectingRegion: Bool
     let store: BookAIStore
     @Binding var detent: PresentationDetent
     let goToPage: (Int) -> Void
@@ -100,6 +102,8 @@ struct BookAIPanel: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
             .accessibilityLabel("Chatverlauf")
 
             Button {
@@ -109,6 +113,8 @@ struct BookAIPanel: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
             .disabled(!store.hasConversation)
             .opacity(store.hasConversation ? 1 : 0)
             .accessibilityHidden(!store.hasConversation)
@@ -159,6 +165,9 @@ struct BookAIPanel: View {
                     .padding(.bottom, 12)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // The assistant opens on its most recent answer, like the chat.
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: store.selectedConversationID) { scrollToBottom(proxy) }
                 .onChange(of: store.turns.count) { scrollToBottom(proxy) }
                 .onChange(of: store.sending) { scrollToBottom(proxy) }
             }
@@ -221,8 +230,12 @@ struct BookAIPanel: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
+                // The same 44-point minimum the chat's message actions use.
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(copiedTurn == turn.id ? "Kopiert" : "Antwort kopieren")
+                .accessibilityIdentifier("bookAI.copy")
 
                 if isLast, !store.sending {
                     Button {
@@ -232,8 +245,11 @@ struct BookAIPanel: View {
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Antwort neu erstellen")
+                    .accessibilityIdentifier("bookAI.regenerate")
                 }
                 Spacer()
             }
@@ -351,7 +367,9 @@ struct BookAIPanel: View {
                 )
                 .textFieldStyle(.plain)
                 .lineLimit(1 ... 5)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .focused($inputFocused)
+                .accessibilityIdentifier("bookAI.input")
                 .submitLabel(.send)
                 .onSubmit(sendDraft)
                 .padding(.horizontal, 16)
@@ -359,7 +377,7 @@ struct BookAIPanel: View {
                 .padding(.bottom, 10)
                 .frame(minHeight: 62, maxHeight: 142, alignment: .topLeading)
 
-                HStack(spacing: 8) {
+                composerControlLayout {
                     HStack(spacing: 8) {
                         regionSelectionButton
                     }
@@ -390,6 +408,7 @@ struct BookAIPanel: View {
                         .controlSize(.regular)
                         .disabled(!store.sending && !canSend)
                         .accessibilityLabel(store.sending ? "Antwort stoppen" : "Nachricht senden")
+                        .accessibilityIdentifier("bookAI.send")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -406,15 +425,36 @@ struct BookAIPanel: View {
         .padding(.bottom, 6)
     }
 
+    /// One line while the labels fit, two when the student's text is larger
+    /// than the panel — never a ceiling on the text itself.
+    private var composerControlLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+    }
+
     private var regionSelectionButton: some View {
         Button(action: requestRegion) {
             Image(systemName: "rectangle.dashed")
                 .font(.system(size: 18))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isSelectingRegion ? Color.accentColor : Color.secondary)
                 .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Bereich markieren")
+        // A dashed square is mostly empty, so the glyph's own bounds are both
+        // below the 44-point minimum and hollow in the middle. Give the control
+        // a full, solid hit area like the chat composer's attachment button.
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .accessibilityLabel(isSelectingRegion ? "Bereichsauswahl aktiv" : "Bereich markieren")
+        .accessibilityValue(regionSelectionValue)
+        .accessibilityIdentifier("bookAI.region")
+    }
+
+    private var regionSelectionValue: String {
+        if region != nil { return "Bereich ausgewählt" }
+        if isSelectingRegion { return "Auswahl aktiv" }
+        return "Ganze Seite"
     }
 
     @ViewBuilder

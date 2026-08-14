@@ -108,10 +108,14 @@ final class BookAIStore {
         storageKey = key
         persistenceEnabled = loadPersisted && key != nil
 
-        if loadPersisted,
-           let key,
-           let saved = OfflineCache.load(SavedState.self, key: key),
-           !saved.conversations.isEmpty {
+        if UITestRuntime.isEnabled, UITestRuntime.scenario != .empty {
+            let fixtures = Self.uiTestConversations
+            conversations = fixtures
+            selectedConversationID = fixtures[0].id
+        } else if loadPersisted,
+                  let key,
+                  let saved = OfflineCache.load(SavedState.self, key: key),
+                  !saved.conversations.isEmpty {
             let restored = saved.conversations.sorted { $0.updatedAt > $1.updatedAt }
             let restoredSelection = restored.contains(where: { $0.id == saved.selectedConversationID })
                 ? saved.selectedConversationID
@@ -453,4 +457,37 @@ extension BookAIStore {
 
     /// How much of the previous answer is quoted back as context.
     private static let answerContextLimit = 1200
+
+    private static var uiTestConversations: [Conversation] {
+        let base = Date(timeIntervalSince1970: 1_775_702_400)
+        let longSuffix = UITestRuntime.scenario == .longContent
+            ? String(repeating: " Zusätzlicher Buchinhalt prüft Scrollen und Textumbruch.", count: 16)
+            : ""
+        return [
+            Conversation(
+                id: UUID(uuidString: "30000000-0000-0000-0000-000000000001")!,
+                title: "Beispiel auf Seite 2",
+                turns: [
+                    Turn(
+                        id: UUID(uuidString: "40000000-0000-0000-0000-000000000001")!,
+                        question: "Was zeigt das Beispiel?",
+                        pages: [1, 2],
+                        text: "Das Beispiel zeigt einen reproduzierbaren Zusammenhang.\(longSuffix)",
+                        citations: [BackendAPI.BookCitation(pdfPage: 2, note: "Definition und Beispiel")],
+                        pagesRead: [1, 2, 3]
+                    ),
+                ],
+                createdAt: base,
+                updatedAt: base
+            ),
+            Conversation(
+                id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+                title: "Zweite Unterhaltung",
+                turns: [],
+                draft: "Welche Begriffe sind wichtig?",
+                createdAt: base.addingTimeInterval(-60),
+                updatedAt: base.addingTimeInterval(-60)
+            ),
+        ]
+    }
 }

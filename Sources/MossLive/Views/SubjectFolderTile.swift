@@ -75,8 +75,27 @@ struct SubjectFolderTile: View {
     let style: SubjectStyle
 
     @ScaledMetric(relativeTo: .headline) private var iconSize: CGFloat = 24
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        folder
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name), \(countLabel)")
+    }
+
+    /// The folder keeps its squarish proportion at normal text sizes, because a
+    /// grid of equal cards is what makes it read as a shelf. At accessibility
+    /// sizes it grows to whatever the name and the count need instead: the text
+    /// scales the whole way rather than being capped or cropped by the tile.
+    @ViewBuilder private var folder: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            silhouette
+        } else {
+            silhouette.aspectRatio(1.04, contentMode: .fit)
+        }
+    }
+
+    private var silhouette: some View {
         ZStack(alignment: .topLeading) {
             FolderShape()
                 .fill(
@@ -93,9 +112,6 @@ struct SubjectFolderTile: View {
                 )
             label
         }
-        .aspectRatio(1.04, contentMode: .fit)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(name), \(countLabel)")
     }
 
     private var label: some View {
@@ -106,22 +122,40 @@ struct SubjectFolderTile: View {
                 .frame(width: iconSize, height: iconSize)
                 .foregroundStyle(style.color)
                 .frame(height: 28, alignment: .leading)
+                .accessibilityHidden(true)
             Spacer(minLength: 10)
             Text(name)
                 .font(.headline)
                 .foregroundStyle(.primary)
-                .lineLimit(2)
+                // Two lines are the tile's budget while it holds its shape. Once
+                // it grows with the text, nothing has to be dropped at all.
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .minimumScaleFactor(0.75)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
+                .accessibilityIdentifier("subject-folder-title-visual")
+                .accessibilityHidden(true)
             Text(countLabel)
-                .font(.subheadline)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .minimumScaleFactor(0.75)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 3)
+                .accessibilityIdentifier("subject-folder-count-visual")
+                .accessibilityHidden(true)
         }
         .padding(.top, FolderGeometry.tabHeight + 14)
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The tile itself already exposes one complete, localized label. Keep
+        // its visual text out of the child accessibility tree so VoiceOver and
+        // the system audit do not inspect cropped glyph snapshots separately.
+        .accessibilityHidden(true)
     }
 
     /// An empty folder says so rather than showing a nought: a subject you have
