@@ -20,9 +20,14 @@ final class ChatUITests: EchoUITestCase {
         tap(app.buttons["Ohne Kontext"])
         XCTAssertTrue(app.buttons["Kontext: Ohne Kontext"].waitForExistence(timeout: 3))
         tap(app.buttons["Kontext: Ohne Kontext"])
-        tap(app.buttons["Teststunde Mathematik"])
+        let aiLesson = app.buttons
+            .matching(NSPredicate(format: "label CONTAINS 'Ursache und Wirkung'"))
+            .firstMatch
+        XCTAssertTrue(aiLesson.waitForExistence(timeout: 3))
+        XCTAssertTrue(aiLesson.label.contains("Mathematik"), "The AI title must retain its subject")
+        tap(aiLesson)
         let lessonContext = app.buttons
-            .matching(NSPredicate(format: "label CONTAINS 'Teststunde Mathematik'"))
+            .matching(NSPredicate(format: "label CONTAINS 'Ursache und Wirkung'"))
             .firstMatch
         XCTAssertTrue(lessonContext.waitForExistence(timeout: 3))
 

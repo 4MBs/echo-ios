@@ -332,8 +332,8 @@ struct ChatView: View {
                 }
                 if !lessons.isEmpty { Divider() }
                 ForEach(lessons) { lesson in
-                    Button(title(for: lesson)) {
-                        chat.context = .lesson(id: lesson.id, title: title(for: lesson))
+                    Button(lesson.compactDisplayTitle) {
+                        chat.context = .lesson(id: lesson.id, title: lesson.compactDisplayTitle)
                     }
                 }
             } label: {
@@ -497,10 +497,6 @@ struct ChatView: View {
             get: { localError != nil },
             set: { if !$0 { localError = nil } }
         )
-    }
-
-    private func title(for lesson: BackendAPI.LessonInfo) -> String {
-        lesson.title ?? lesson.startedAt.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func loadLessons() async {

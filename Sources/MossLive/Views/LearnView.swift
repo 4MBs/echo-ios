@@ -202,12 +202,13 @@ private struct LearnLessonPickerView: View {
             ForEach(lessons) { lesson in
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(lesson.topic ?? lesson.title ?? lesson.subject ?? "Unterrichtsstunde")
+                        Text(lesson.displayTitle)
                             .font(.headline)
-                        Text(lesson.subject ?? lesson.startedAt.formatted(date: .abbreviated, time: .omitted))
+                        Text(lessonMetadata(lesson))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .accessibilityElement(children: .combine)
                     Spacer()
                     if generated.contains(lesson.id) {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
@@ -224,6 +225,12 @@ private struct LearnLessonPickerView: View {
             }
         }
         .navigationTitle("Stunden auswählen")
+    }
+
+    private func lessonMetadata(_ lesson: BackendAPI.LessonInfo) -> String {
+        let date = lesson.startedAt.formatted(date: .abbreviated, time: .omitted)
+        guard let subject = lesson.displaySubject else { return date }
+        return "\(subject) · \(date)"
     }
 
     private func generate(_ lesson: BackendAPI.LessonInfo) async {
