@@ -11,6 +11,7 @@ on:
         options:
           - all
           - LibraryReaderUITests
+          - LibraryReaderUITests/testShelfReaderNavigationLayoutPageJumpAndRename
           - LearnUITests
           - ChatUITests
           - LessonsUITests
