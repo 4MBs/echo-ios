@@ -45,7 +45,7 @@ struct LearnView: View {
             Section {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("\(overview.dueTotal) heute")
+                        Text("\(overview.dueTotal) fällig · \(min(10, overview.newTotal ?? 0)) neu")
                             .font(.title.bold())
                         Spacer()
                         Text("ca. \(overview.estimatedMinutes) Min.")
@@ -104,7 +104,7 @@ struct LearnView: View {
                         ProgressView(value: subject.mastery)
                             .tint(Theme.accent)
                             .accessibilityHidden(true)
-                        Text("\(subject.due) fällig · \(subject.total) Konzepte")
+                        Text("\(subject.due) fällig · \(subject.newCount ?? 0) neu · \(subject.total) Konzepte")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

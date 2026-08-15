@@ -153,15 +153,22 @@ extension BackendAPI {
     struct LearnSubjectSummary: Codable, Hashable, Identifiable, Sendable {
         let subject: String?
         let due: Int
+        let newCount: Int?
         let total: Int
         let mastery: Double
 
         var id: String { subject ?? "" }
         var displayName: String { subject ?? "Sonstige" }
+
+        enum CodingKeys: String, CodingKey {
+            case subject, due, total, mastery
+            case newCount = "new"
+        }
     }
 
     struct LearnOverview: Codable, Sendable {
         let dueTotal: Int
+        let newTotal: Int?
         let cardTotal: Int
         let estimatedMinutes: Int
         let mastery: Double
@@ -176,6 +183,7 @@ extension BackendAPI {
         enum CodingKeys: String, CodingKey {
             case subjects, mastery
             case dueTotal = "due_total"
+            case newTotal = "new_total"
             case cardTotal = "card_total"
             case estimatedMinutes = "estimated_minutes"
             case sessionsWithCards = "sessions_with_cards"
