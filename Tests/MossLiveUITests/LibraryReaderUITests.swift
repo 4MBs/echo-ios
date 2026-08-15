@@ -5,14 +5,24 @@ final class LibraryReaderUITests: EchoUITestCase {
     func testShelfReaderNavigationLayoutPageJumpAndRename() {
         openReader()
         XCTAssertTrue(app.buttons["Nächste Seite"].waitForExistence(timeout: 8))
+        let pageField = app.textFields["Seitennummer"]
+        XCTAssertTrue(
+            pageField.waitForExistence(timeout: 3),
+            "The mounted page field is unavailable before the first tap"
+        )
         shot("reader-double-page")
 
+        let initialPage = pageField.value as? String
         tap(app.buttons["Nächste Seite"])
-        let turned = app.buttons
-            .matching(NSPredicate(format: "NOT (label BEGINSWITH 'Seite 1 ')"))
-            .matching(NSPredicate(format: "label MATCHES 'Seite [0-9]+.*'"))
-            .firstMatch
-        XCTAssertTrue(turned.waitForExistence(timeout: 5), "The page never turned")
+        let turned = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value != %@", initialPage ?? "1"),
+            object: pageField
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [turned], timeout: 5),
+            .completed,
+            "The page never turned"
+        )
         shot("reader-next-page")
         tap(app.buttons["Vorherige Seite"])
 
@@ -23,12 +33,15 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(app.buttons["Doppelseite"])
         shot("reader-return-double-page")
 
-        let indicator = app.buttons
-            .matching(NSPredicate(format: "label MATCHES 'Seite [0-9]+.*'"))
-            .firstMatch
-        tap(indicator)
-        let pageField = app.textFields["Seitennummer"]
-        XCTAssertTrue(pageField.waitForExistence(timeout: 3))
+        tap(pageField)
+        XCTAssertTrue(
+            app.keyboards.firstMatch.waitForExistence(timeout: 3),
+            "A single tap did not focus the page field"
+        )
+        XCTAssertTrue(
+            app.keyboards.buttons["Fertig"].waitForExistence(timeout: 3),
+            "The page field still uses the number pad without a Done key"
+        )
         // Typing the number is the whole interaction: there is nothing to
         // confirm, so no control is tapped between the digit and the page.
         replaceText(pageField, with: "5")
