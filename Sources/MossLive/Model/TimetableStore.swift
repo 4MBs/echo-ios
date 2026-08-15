@@ -94,6 +94,18 @@ final class TimetableStore {
             .min { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
+    /// The lesson a recording started now belongs to — the answer the app uses
+    /// to label a recording without asking. The whole stored day is consulted
+    /// rather than only `current`, so a recording begun in the minutes before
+    /// the bell, or just after one lesson ended, still finds its subject.
+    func lessonForRecording(
+        at moment: Date = Date(),
+        tolerance: TimeInterval = RecordingLessonMatch.defaultTolerance
+    ) -> BackendAPI.Lesson? {
+        let plan = storedDay()?.lessons ?? [current, next].compactMap { $0 }
+        return RecordingLessonMatch.lesson(in: plan, at: moment, tolerance: tolerance)
+    }
+
     private func storedDay() -> BackendAPI.TimetableDay? {
         guard let day = OfflineCache.load(BackendAPI.TimetableDay.self, key: OfflineCache.Key.timetableDay),
               day.date == Self.dayKey.string(from: Date())

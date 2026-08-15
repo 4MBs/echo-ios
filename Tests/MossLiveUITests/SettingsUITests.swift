@@ -73,6 +73,45 @@ final class SettingsUITests: EchoUITestCase {
         rotateAndCapture("settings-about")
     }
 
+    /// The subject picker is optional: the timetable names every recording on
+    /// its own, so switching the control off has to take it off the dock and
+    /// leave recording working.
+    func testSubjectPickerCanBeTakenOffTheRecordingDock() {
+        launch(tab: "einstellungen")
+        openSettingsPage("Aufnahme", title: "Aufnahme")
+        let subjectToggle = app.switches["Fach auswählen"]
+        XCTAssertTrue(subjectToggle.waitForExistence(timeout: 4))
+        tap(subjectToggle)
+        shot("settings-recording-subject-off")
+
+        switchTo(tab: "aufnahme")
+        let picker = app.buttons["recording-subject-picker"]
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "exists == false"),
+                    object: picker
+                )],
+                timeout: 4
+            ),
+            .completed,
+            "The subject picker stayed on the dock after being switched off"
+        )
+        shot("recording-idle-without-subject-picker")
+        tap(app.buttons["Aufnahme starten"])
+        XCTAssertTrue(
+            app.buttons["Aufnahme beenden"].waitForExistence(timeout: 4),
+            "Recording no longer starts once the subject picker is hidden"
+        )
+        tap(app.buttons["Aufnahme beenden"])
+
+        switchTo(tab: "einstellungen")
+        openSettingsPage("Aufnahme", title: "Aufnahme")
+        tap(app.switches["Fach auswählen"])
+        switchTo(tab: "aufnahme")
+        XCTAssertTrue(picker.waitForExistence(timeout: 4), "The subject picker did not come back")
+    }
+
     func testAIProviderModelSpeedEffortAndContextCombinations() {
         launch(tab: "einstellungen")
         openSettingsPage("KI", title: "KI")

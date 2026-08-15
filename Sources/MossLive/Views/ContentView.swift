@@ -84,10 +84,17 @@ struct RecordDeck: View {
                     .transition(.opacity)
             }
             caption
+            // Without the picker the record button is alone and centres itself;
+            // with it, the empty column on the right keeps it centred against
+            // the menu on the left.
             HStack(spacing: 16) {
-                RecordingSubjectPicker()
+                if model.settings.showRecordingSubjectPicker {
+                    RecordingSubjectPicker()
+                }
                 RecordButton()
-                Color.clear.frame(width: 112, height: 1)
+                if model.settings.showRecordingSubjectPicker {
+                    Color.clear.frame(width: 112, height: 1)
+                }
             }
         }
         .padding(.horizontal, 24)
