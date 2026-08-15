@@ -125,7 +125,7 @@ struct MainTabView: View {
                 coordinator: noteImportCoordinator
             )
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .overlay(alignment: .bottomTrailing) {
             if let message = noteImportCoordinator.status.message,
                noteImportCoordinator.destinationItem == nil,
                showsIncomingNoteStatus {
@@ -136,9 +136,8 @@ struct MainTabView: View {
                     dismiss: noteImportCoordinator.dismissStatus
                 )
                 .frame(maxWidth: 300)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 14)
+                .padding(.bottom, incomingNoteStatusBottomPadding)
             }
         }
     }
@@ -154,6 +153,14 @@ struct MainTabView: View {
 
     private var showsIncomingNoteStatus: Bool {
         model.selectedTab == .aufnahme || model.selectedTab == .chat
+    }
+
+    private var incomingNoteStatusBottomPadding: CGFloat {
+        switch model.selectedTab {
+        case .aufnahme: 150
+        case .chat: 78
+        default: 14
+        }
     }
 
     /// Settings sits under the navigation list rather than inside it. It is not
