@@ -101,11 +101,11 @@ jobs:
           # Set this before boot so focused keyboard tests do not need to wait
           # for a running simulator merely to expose the software keyboard.
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-          xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
           if [ "$TEST_CLASS" != "all" ]; then
-            echo "Simulator boot continues while the focused test compiles."
+            echo "Focused build starts the simulator concurrently."
             exit 0
           fi
+          xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
           # Disable software keyboard predictions and autocorrect overhead
           xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardAutocorrection -bool false || true
@@ -119,10 +119,13 @@ jobs:
           set -o pipefail
           DESTINATION="platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}"
           CLASS="${{ github.event.inputs.test_class }}"
+          BOOT_PID=""
           if [ -n "$CLASS" ] && [ "$CLASS" != "all" ]; then
             # This build does not wait for the concrete simulator to finish
             # booting. The following test step uses the resulting products.
             DESTINATION="generic/platform=iOS Simulator"
+            xcrun simctl boot "${{ steps.simulator.outputs.udid }}" &
+            BOOT_PID=$!
           fi
           xcodebuild build-for-testing \
             -project MossLive.xcodeproj \
@@ -131,6 +134,11 @@ jobs:
             -clonedSourcePackagesDirPath .spm-packages \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          if [ -n "$BOOT_PID" ]; then
+            wait "$BOOT_PID" || true
+          fi
+          exit "$BUILD_STATUS"
 
       # Parallel workers were tried and were slower: the runner only granted
       # two simulator clones, and sharing its cores made every UI interaction
