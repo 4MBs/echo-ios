@@ -93,8 +93,8 @@ jobs:
 
       - name: Boot simulator
         run: |
+          # Headless: the Simulator window is only overhead on a runner.
           xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
-          open -a Simulator
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
 
       # Building once up front keeps the compile out of the timed test run and

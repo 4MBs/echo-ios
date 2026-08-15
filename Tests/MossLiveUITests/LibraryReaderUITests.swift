@@ -3,7 +3,9 @@ import XCTest
 
 final class LibraryReaderUITests: EchoUITestCase {
     func testShelfReaderNavigationLayoutPageJumpAndRename() {
-        openReader()
+        // The one flow that is about the transitions themselves: single and
+        // double page swap with a real animation here.
+        openReader(animations: true)
         XCTAssertTrue(app.buttons["Nächste Seite"].waitForExistence(timeout: 8))
         shot("reader-double-page")
 
@@ -216,8 +218,8 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(app.buttons["Aufheben"])
     }
 
-    private func openReader() {
-        launch(tab: "bibliothek")
+    private func openReader(animations: Bool = false) {
+        launch(tab: "bibliothek", animations: animations)
         XCTAssertTrue(app.navigationBars["Bibliothek"].waitForExistence(timeout: 5))
         shot("library-shelf")
         tap(app.buttons["Echo Testbuch"])

@@ -37,6 +37,12 @@ enum UITestRuntime {
         return AppTab(rawValue: arguments[index + 1])
     }()
 
+    /// True while the suite is running without asking for animations.
+    static let prefersReducedMotion: Bool = {
+        guard isEnabled else { return false }
+        return !ProcessInfo.processInfo.arguments.contains("-UITestAnimations")
+    }()
+
     /// Deleting a lesson has to stay deleted: the list is reloaded from the
     /// fake server right after the request, so a purely static fixture would
     /// resurrect it and make a working feature look broken.
