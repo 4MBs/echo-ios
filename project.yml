@@ -65,6 +65,31 @@ targets:
       path: Sources/MossLive/Info.plist
       properties:
         CFBundleDisplayName: Echo
+        CFBundleURLTypes:
+          - CFBundleURLName: com.fourmbs.mosslive.note-import
+            CFBundleURLSchemes: [echo]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Echo-Unterrichtsnotizen
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.fourmbs.echo.goodnotes-document
+              - com.fourmbs.echo.notability-document
+              - com.adobe.pdf
+              - public.png
+              - public.jpeg
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.fourmbs.echo.goodnotes-document
+            UTTypeDescription: Goodnotes-Dokument
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [goodnotes]
+          - UTTypeIdentifier: com.fourmbs.echo.notability-document
+            UTTypeDescription: Notability-Dokument
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [note]
+        LSSupportsOpeningDocumentsInPlace: true
         # The app talks ws:// (cleartext) to the user's own machine over a
         # Tailscale address; the link is already WireGuard-encrypted, and ATS
         # would otherwise block the in-app WebSocket (Safari is not affected,

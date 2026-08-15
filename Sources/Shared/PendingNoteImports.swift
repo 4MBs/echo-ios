@@ -84,6 +84,13 @@ enum PendingNoteImports {
         .sorted { $0.id < $1.id }
     }
 
+    static func item(id: String) -> Item? {
+        guard id.range(of: #"^[a-zA-Z0-9-]+$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        return all().first { $0.id == id }
+    }
+
     static func remove(_ item: Item) {
         guard let root = try? root(create: false) else { return }
         let directory = root.appendingPathComponent(item.id, isDirectory: true)
@@ -93,7 +100,23 @@ enum PendingNoteImports {
     }
 
     private static func root(create: Bool) throws -> URL {
-        guard let container = SharedConfig.containerURL else { throw StorageError.appGroupUnavailable }
+        let container: URL
+        if let sharedContainer = SharedConfig.containerURL {
+            container = sharedContainer
+        } else {
+            // A share extension cannot hand a file from its private container
+            // to the host app. The main app, however, needs a private fallback
+            // when LiveContainer cannot provide the signed App Group.
+            guard Bundle.main.bundleURL.pathExtension != "appex" else {
+                throw StorageError.appGroupUnavailable
+            }
+            container = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: create
+            )
+        }
         let root = container.appendingPathComponent(directoryName, isDirectory: true)
         if create {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

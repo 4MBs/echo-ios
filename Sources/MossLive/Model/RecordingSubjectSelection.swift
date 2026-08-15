@@ -43,10 +43,6 @@ struct RecordingSubjectSelection: Sendable {
         selected = subject
     }
 
-    mutating func rollBack() {
-        selected = confirmed
-    }
-
     mutating func resetManualOverride() {
         isManual = false
         confirmed = nil

@@ -238,13 +238,13 @@ struct ImportedLessonNotesView: View {
         importing = true
         defer { importing = false }
         do {
-            let extraction = try await LocalNoteImporter.extract(from: url)
-            let result = try await api.importLessonNotes(
-                sessionId: lesson.id,
-                originalFilename: url.lastPathComponent,
-                pages: extraction.pages
+            let result = try await LessonNoteImportService.importDocument(
+                at: url,
+                filename: url.lastPathComponent,
+                sessionID: lesson.id,
+                api: api
             )
-            warnings = Array(Set(extraction.warnings + result.warnings)).sorted()
+            warnings = result.warnings
             notes = try await api.lessonNotes(id: lesson.id)
                 .sorted(by: Self.noteOrder)
         } catch {
@@ -256,13 +256,14 @@ struct ImportedLessonNotesView: View {
         importing = true
         defer { importing = false }
         do {
-            let extraction = try await LocalNoteImporter.extract(from: item.url)
-            let result = try await api.importLessonNotes(
-                sessionId: lesson.id,
-                originalFilename: item.filename,
-                pages: extraction.pages
+            let result = try await LessonNoteImportService.importDocument(
+                at: item.url,
+                filename: item.filename,
+                importID: item.id,
+                sessionID: lesson.id,
+                api: api
             )
-            warnings = Array(Set(extraction.warnings + result.warnings)).sorted()
+            warnings = result.warnings
             PendingNoteImports.remove(item)
             pendingImports.removeAll { $0.id == item.id }
             notes = try await api.lessonNotes(id: lesson.id)

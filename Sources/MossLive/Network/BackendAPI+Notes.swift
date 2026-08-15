@@ -45,7 +45,8 @@ extension BackendAPI {
     func importLessonNotes(
         sessionId: String,
         originalFilename: String,
-        pages: [LocalNotePage]
+        pages: [LocalNotePage],
+        importID: String? = nil
     ) async throws -> NoteImportResult {
         guard !pages.isEmpty else {
             throw APIError(message: "Das Dokument enthält keine importierbaren Seiten.")
@@ -54,7 +55,7 @@ extension BackendAPI {
         guard pages.count <= 2000, textBytes <= 4_000_000 else {
             throw APIError(message: "Der lokal extrahierte Notiztext ist zu groß.")
         }
-        let importId = UUID().uuidString.lowercased()
+        let importId = importID ?? UUID().uuidString.lowercased()
         let query = [
             URLQueryItem(name: "filename", value: originalFilename),
             URLQueryItem(name: "import_id", value: importId),

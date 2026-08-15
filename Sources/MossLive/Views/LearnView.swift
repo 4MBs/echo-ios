@@ -10,6 +10,9 @@ struct LearnView: View {
     @State private var errorMessage: String?
 
     private var api: BackendAPI { model.api }
+    private var practiceCards: [BackendAPI.LearnCard] {
+        cards.filter { $0.learningState != "suspended" }
+    }
 
     var body: some View {
         NavigationStack {
@@ -45,21 +48,32 @@ struct LearnView: View {
             Section {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("\(overview.dueTotal) heute")
+                        Text("\(overview.dueTotal) fällig · \(min(10, overview.newTotal ?? 0)) neu")
                             .font(.title.bold())
                         Spacer()
                         Text("ca. \(overview.estimatedMinutes) Min.")
                             .foregroundStyle(.secondary)
                     }
-                    ProgressView(value: overview.mastery)
+                    ProgressView(value: overview.memoryStrength ?? overview.mastery)
                         .tint(Theme.accent)
                         .accessibilityHidden(true)
-                    Text("Gesamtbeherrschung \(percent(overview.mastery))")
+                    Text("Erinnerungsstärke \(percent(overview.memoryStrength ?? overview.mastery))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    HStack {
+                        Label("\(overview.stateCounts?["learning"] ?? 0) im Lernen", systemImage: "brain")
+                        Spacer()
+                        if let readiness = overview.readiness {
+                            Text("Prüfungsbereit \(percent(readiness))")
+                        } else {
+                            Text("Noch nicht genug Daten")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     if let plan, !plan.cards.isEmpty {
                         NavigationLink {
-                            LearnReviewView(api: api, cards: plan.cards)
+                            LearnReviewView(api: api, cards: plan.cards, onChanged: reload)
                         } label: {
                             Label("Wiederholung starten", systemImage: "play.fill")
                                 .frame(maxWidth: .infinity)
@@ -69,6 +83,14 @@ struct LearnView: View {
                     } else {
                         Text("Für heute ist nichts mehr fällig.")
                             .foregroundStyle(.secondary)
+                    }
+                    if !practiceCards.isEmpty {
+                        NavigationLink {
+                            LearnReviewView(api: api, cards: practiceCards, mode: "practice", onChanged: reload)
+                        } label: {
+                            Label("Optional weiter üben", systemImage: "rectangle.stack")
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
                 .padding(.vertical, 8)
@@ -85,7 +107,7 @@ struct LearnView: View {
                         ProgressView(value: subject.mastery)
                             .tint(Theme.accent)
                             .accessibilityHidden(true)
-                        Text("\(subject.due) fällig · \(subject.total) Konzepte")
+                        Text("\(subject.due) fällig · \(subject.newCount ?? 0) neu · \(subject.total) Konzepte")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -94,6 +116,16 @@ struct LearnView: View {
             }
 
             Section {
+                NavigationLink {
+                    LearnExamListView(api: api, lessons: lessons)
+                } label: {
+                    Label("Prüfungen", systemImage: "doc.text.magnifyingglass")
+                }
+                NavigationLink {
+                    LearnAnalyticsView(api: api)
+                } label: {
+                    Label("Lernanalyse", systemImage: "chart.bar.xaxis")
+                }
                 NavigationLink {
                     LearnConceptLibraryView(cards: cards, api: api, onDeleted: reload)
                 } label: {
@@ -189,6 +221,13 @@ private struct LearnLessonPickerView: View {
     @State private var generating: String?
     @State private var generated: Set<String> = []
     @State private var errorMessage: String?
+    @State private var preview: DraftPreview?
+
+    private struct DraftPreview: Identifiable {
+        let lesson: BackendAPI.LessonInfo
+        let drafts: [BackendAPI.LearnCardDraft]
+        var id: String { lesson.id }
+    }
 
     var body: some View {
         List {
@@ -225,6 +264,16 @@ private struct LearnLessonPickerView: View {
             }
         }
         .navigationTitle("Stunden auswählen")
+        .sheet(item: $preview) { value in
+            LearnCardDraftPreviewView(
+                api: api,
+                sessionId: value.lesson.id,
+                drafts: value.drafts
+            ) {
+                generated.insert(value.lesson.id)
+                await onGenerated()
+            }
+        }
     }
 
     private func lessonMetadata(_ lesson: BackendAPI.LessonInfo) -> String {
@@ -237,9 +286,8 @@ private struct LearnLessonPickerView: View {
         generating = lesson.id
         errorMessage = nil
         do {
-            _ = try await api.generateLearnCards(sessionId: lesson.id)
-            generated.insert(lesson.id)
-            await onGenerated()
+            let drafts = try await api.generateLearnDrafts(sessionId: lesson.id)
+            preview = DraftPreview(lesson: lesson, drafts: drafts)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -254,6 +302,8 @@ private struct LearnConceptLibraryView: View {
     @State private var query = ""
     @State private var pendingDelete: BackendAPI.LearnCard?
     @State private var errorMessage: String?
+    @State private var editingCard: BackendAPI.LearnCard?
+    @State private var regenerating: Set<String> = []
 
     init(
         cards: [BackendAPI.LearnCard],
@@ -281,6 +331,16 @@ private struct LearnConceptLibraryView: View {
                     Button("Konzept löschen", role: .destructive) { pendingDelete = card }
                 }
                 .contextMenu {
+                    Button("Bearbeiten", systemImage: "pencil") { editingCard = card }
+                    Button("Neu formulieren", systemImage: "arrow.clockwise") {
+                        Task { await regenerate(card) }
+                    }
+                    Button(
+                        card.learningState == "suspended" ? "Aktivieren" : "Pausieren",
+                        systemImage: card.learningState == "suspended" ? "play" : "pause"
+                    ) {
+                        Task { await toggleSuspended(card) }
+                    }
                     Button("Konzept löschen", systemImage: "trash", role: .destructive) {
                         pendingDelete = card
                     }
@@ -288,6 +348,9 @@ private struct LearnConceptLibraryView: View {
                 .accessibilityIdentifier("learn-concept-\(card.id)")
         }
         .navigationTitle("Gelernte Konzepte")
+        .sheet(item: $editingCard) { card in
+            LearnCardEditorView(api: api, card: card) { updated in replace(updated) }
+        }
         .searchable(text: $query, prompt: "Konzept oder Fach")
         .confirmationDialog(
             "Konzept endgültig löschen?",
@@ -339,5 +402,29 @@ private struct LearnConceptLibraryView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func regenerate(_ card: BackendAPI.LearnCard) async {
+        regenerating.insert(card.id)
+        do {
+            try await replace(api.regenerateLearnCard(
+                id: card.id, concept: card.displayConcept, question: card.question
+            ))
+        } catch { errorMessage = error.localizedDescription }
+        regenerating.remove(card.id)
+    }
+
+    private func replace(_ updated: BackendAPI.LearnCard) {
+        if let index = cards.firstIndex(where: { $0.id == updated.id }) { cards[index] = updated }
+        OfflineCache.save(cards, as: OfflineCache.Key.learnCards)
+    }
+
+    private func toggleSuspended(_ card: BackendAPI.LearnCard) async {
+        do {
+            try await replace(api.updateLearnCard(
+                id: card.id,
+                changes: ["learning_state": card.learningState == "suspended" ? "review" : "suspended"]
+            ))
+        } catch { errorMessage = error.localizedDescription }
     }
 }

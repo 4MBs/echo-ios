@@ -53,6 +53,7 @@ final class AppModel {
     private(set) var recordingStartedAt: Date?
     private(set) var recordingSubjectSelection = RecordingSubjectSelection()
     private(set) var isSavingRecordingSubject = false
+    private(set) var recordingSubjectError: String?
     var bannerMessage: String?
 
     /// Which place of the app the sidebar is on. Held here rather than in the
@@ -81,6 +82,8 @@ final class AppModel {
     private var transcribingPulse: Task<Void, Never>?
     private var timetablePoll: Task<Void, Never>?
     private var autoStopTask: Task<Void, Never>?
+    private var recordingSubjectPersistenceTask: Task<Void, Never>?
+    private var recordingSubjectErrorWasDismissed = false
     private var wantsRecording = false
     private var lastNotificationSyncDay = Date.distantPast
     private static let lastRecordingSubjectKey = "last-recording-subject"
@@ -228,14 +231,21 @@ final class AppModel {
               let subject = recordingSubjectSelection.selected,
               subject != before
         else { return }
-        Task { await persistRecordingSubject(subject, sessionId: sessionId) }
+        persistRecordingSubject(subject, sessionId: sessionId)
     }
 
     func chooseRecordingSubject(_ subject: BackendAPI.SubjectInfo) {
         recordingSubjectSelection.choose(subject)
         UserDefaults.standard.set(subject.id, forKey: Self.lastRecordingSubjectKey)
+        recordingSubjectError = nil
+        recordingSubjectErrorWasDismissed = false
         guard wantsRecording, let sessionId else { return }
-        Task { await persistRecordingSubject(subject, sessionId: sessionId) }
+        persistRecordingSubject(subject, sessionId: sessionId)
+    }
+
+    func dismissRecordingSubjectError() {
+        recordingSubjectError = nil
+        recordingSubjectErrorWasDismissed = true
     }
 
     /// Hand the subject back to the timetable after a manual correction. The
@@ -249,26 +259,54 @@ final class AppModel {
             catalogue: recordingSubjectSelection.catalogue,
             current: timetable.lessonForRecording()
         )
+        recordingSubjectError = nil
+        recordingSubjectErrorWasDismissed = false
         guard let sessionId,
               let subject = recordingSubjectSelection.selected,
               subject != before
         else { return }
-        Task { await persistRecordingSubject(subject, sessionId: sessionId) }
+        persistRecordingSubject(subject, sessionId: sessionId)
     }
 
-    private func persistRecordingSubject(_ subject: BackendAPI.SubjectInfo, sessionId: String) async {
+    private func persistRecordingSubject(_ subject: BackendAPI.SubjectInfo, sessionId: String) {
+        recordingSubjectPersistenceTask?.cancel()
         if UITestRuntime.isEnabled {
             recordingSubjectSelection.confirm(subject)
             return
         }
-        isSavingRecordingSubject = true
-        defer { isSavingRecordingSubject = false }
-        do {
-            _ = try await api.updateLessonSubject(sessionId: sessionId, subject: subject.name)
-            recordingSubjectSelection.confirm(subject)
-        } catch {
-            recordingSubjectSelection.rollBack()
-            bannerMessage = "Das Fach konnte nicht gespeichert werden: \(error.localizedDescription)"
+        recordingSubjectPersistenceTask = Task { [weak self] in
+            guard let self else { return }
+            isSavingRecordingSubject = true
+            defer { isSavingRecordingSubject = false }
+
+            while !Task.isCancelled,
+                  wantsRecording,
+                  self.sessionId == sessionId,
+                  recordingSubjectSelection.selected == subject {
+                do {
+                    _ = try await api.updateLessonSubject(
+                        sessionId: sessionId,
+                        subject: subject.name
+                    )
+                    guard !Task.isCancelled else { return }
+                    recordingSubjectSelection.confirm(subject)
+                    recordingSubjectError = nil
+                    recordingSubjectErrorWasDismissed = false
+                    return
+                } catch is CancellationError {
+                    return
+                } catch {
+                    if !recordingSubjectErrorWasDismissed {
+                        recordingSubjectError =
+                            "Das Fach konnte nicht gespeichert werden: \(error.localizedDescription)"
+                    }
+                    do {
+                        try await Task.sleep(for: .seconds(5))
+                    } catch {
+                        return
+                    }
+                }
+            }
         }
     }
 
@@ -301,6 +339,8 @@ final class AppModel {
             return
         }
         bannerMessage = nil
+        recordingSubjectError = nil
+        recordingSubjectErrorWasDismissed = false
         // No subject is required to record. WebUntis names the lesson, here and
         // again on the server, and the picker is there to correct it — asking
         // for it first only ever stood between the student and the recording.
@@ -333,6 +373,11 @@ final class AppModel {
     }
 
     func stopRecording() {
+        recordingSubjectPersistenceTask?.cancel()
+        recordingSubjectPersistenceTask = nil
+        isSavingRecordingSubject = false
+        recordingSubjectError = nil
+        recordingSubjectErrorWasDismissed = false
         if UITestRuntime.isEnabled {
             wantsRecording = false
             phase = .disconnected
@@ -379,7 +424,7 @@ final class AppModel {
             sessionId = ack.sessionId
             audio.attachServerSession(ack.sessionId)
             if let subject = recordingSubjectSelection.selected {
-                Task { await persistRecordingSubject(subject, sessionId: ack.sessionId) }
+                persistRecordingSubject(subject, sessionId: ack.sessionId)
             }
             if !ack.resumed {
                 audio.resetSequence()
@@ -435,6 +480,10 @@ final class AppModel {
         case .failed(let reason):
             phase = .error(reason)
             wantsRecording = false
+            recordingSubjectPersistenceTask?.cancel()
+            recordingSubjectPersistenceTask = nil
+            isSavingRecordingSubject = false
+            recordingSubjectError = nil
             let manifestURL = audio.stop()
             Task { [weak self] in
                 let pending = await client.disconnect(sendStop: false)

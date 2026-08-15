@@ -2,15 +2,27 @@ import SwiftUI
 
 struct LearnReviewView: View {
     let api: BackendAPI
+    let mode: String
+    let onChanged: (() async -> Void)?
     @State private var session: LearnReviewSession
     @State private var answer = ""
     @State private var evaluation: BackendAPI.LearnEvaluation?
+    @State private var remediation: BackendAPI.LearnRemediation?
     @State private var isEvaluating = false
     @State private var errorMessage: String?
+    @State private var confidence: Int?
+    @State private var questionStartedAt = Date()
     @FocusState private var answerFocused: Bool
 
-    init(api: BackendAPI, cards: [BackendAPI.LearnCard]) {
+    init(
+        api: BackendAPI,
+        cards: [BackendAPI.LearnCard],
+        mode: String = "review",
+        onChanged: (() async -> Void)? = nil
+    ) {
         self.api = api
+        self.mode = mode
+        self.onChanged = onChanged
         _session = State(initialValue: LearnReviewSession(cards: cards))
     }
 
@@ -48,16 +60,34 @@ struct LearnReviewView: View {
                     .font(.title2.bold())
                     .accessibilityAddTraits(.isHeader)
 
-                if let evaluation {
+                if card.workedExampleStage == 0, evaluation == nil, remediation == nil {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("Durchgerechnetes Beispiel", systemImage: "function")
+                            .font(.headline).foregroundStyle(Theme.accent)
+                        Text(card.explanation)
+                        if let expected = card.expectedAnswer, !expected.isEmpty { Text(expected) }
+                        Text(
+                            "Das Ansehen allein zählt noch nicht als gelernt. Danach folgen Lückenschritt und Transferaufgabe."
+                        )
+                        .font(.footnote).foregroundStyle(.secondary)
+                        Button("Beispiel verstanden – weiter") { Task { await finishStudyExample(card) } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else if let remediation {
+                    LearnRemediationView(api: api, card: card, remediation: remediation) {
+                        advance()
+                    }
+                } else if let evaluation {
                     feedback(evaluation, card: card)
                 } else {
-                    TextEditor(text: $answer)
+                    LearnAnswerSpecView(spec: card.answerSpec, answer: $answer)
                         .focused($answerFocused)
-                        .frame(minHeight: 150)
-                        .padding(10)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
-                        .accessibilityLabel("Deine Antwort")
-                        .accessibilityIdentifier("learn.answer")
+                    Picker("Wie sicher bist du?", selection: $confidence) {
+                        Text("Nicht angegeben").tag(Int?.none)
+                        Text("Unsicher").tag(Int?.some(1))
+                        Text("Teilweise sicher").tag(Int?.some(2))
+                        Text("Sehr sicher").tag(Int?.some(4))
+                    }
                     Button {
                         Task { await evaluate(card) }
                     } label: {
@@ -102,11 +132,7 @@ struct LearnReviewView: View {
                 .buttonStyle(.bordered)
             }
             Button(session.completedCount + 1 == session.cards.count ? "Abschließen" : "Nächste Frage") {
-                session.advance()
-                answer = ""
-                self.evaluation = nil
-                errorMessage = nil
-                answerFocused = true
+                advance()
             }
             .buttonStyle(.borderedProminent)
         }
@@ -116,14 +142,39 @@ struct LearnReviewView: View {
         isEvaluating = true
         errorMessage = nil
         do {
-            let result = try await api.evaluateLearnAnswer(cardId: card.id, answer: answer)
+            let duration = max(0, Int(Date().timeIntervalSince(questionStartedAt) * 1000))
+            let result = try await api.evaluateLearnAnswer(
+                cardId: card.id, answer: answer, confidence: confidence,
+                responseDurationMs: duration,
+                mode: mode
+            )
             evaluation = result.evaluation
+            remediation = result.remediation
         } catch is CancellationError {
             return
         } catch {
             errorMessage = error.localizedDescription
         }
         isEvaluating = false
+    }
+
+    private func advance() {
+        session.advance()
+        answer = ""
+        evaluation = nil
+        remediation = nil
+        confidence = nil
+        questionStartedAt = Date()
+        if session.isComplete, let onChanged { Task { await onChanged() } }
+        errorMessage = nil
+        answerFocused = true
+    }
+
+    private func finishStudyExample(_ card: BackendAPI.LearnCard) async {
+        do {
+            _ = try await api.updateLearnCard(id: card.id, changes: ["learning_state": "suspended"])
+            advance()
+        } catch { errorMessage = error.localizedDescription }
     }
 }
 
