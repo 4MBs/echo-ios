@@ -516,5 +516,6 @@ struct PDFReader: View {
         .buttonStyle(.glass)
         .accessibilityLabel("Seitendarstellung")
         .popover(isPresented: $adjustingNumbering) { numberingEditor }
+        .simultaneousGesture(TapGesture().onEnded { endPageEntry() })
     }
 }
