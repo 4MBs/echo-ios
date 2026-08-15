@@ -188,3 +188,11 @@ schemes:
     test:
       targets: [MossLiveUITests]
       gatherCoverageData: false
+      # The suite keeps the screenshots it takes on purpose; XCTest's own
+      # per-step captures and screen recordings cost time on every launch and
+      # made the artifact half a gigabyte, so they only survive a failure.
+      captureScreenshotsAutomatically: false
+      deleteScreenshotsWhenEachTestSucceeds: true
+      # Nothing debugs the app under test on CI, and attaching to it is one of
+      # the slower parts of a launch — the suite launches the app 60 times.
+      debugEnabled: false

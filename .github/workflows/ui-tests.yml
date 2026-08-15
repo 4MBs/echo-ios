@@ -110,10 +110,10 @@ jobs:
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
 
-      # The suite is a set of independent test classes that each relaunch the
-      # app into a deterministic state, so it parallelises cleanly: XCTest
-      # clones the simulator and runs several classes at once. This is where
-      # the wall-clock time went from most of an hour to a few minutes.
+      # Parallel workers were tried and were slower: the runner only granted
+      # two simulator clones, and sharing its cores made every UI interaction
+      # slow enough that timing-sensitive flows started failing. One simulator,
+      # one test at a time, with the waiting taken out of the fixtures instead.
       - name: Run complete XCUITest suite
         run: |
           set -o pipefail
@@ -124,10 +124,8 @@ jobs:
             -clonedSourcePackagesDirPath .spm-packages \
             -derivedDataPath DerivedData \
             -resultBundlePath UIResults.xcresult \
-            -parallel-testing-enabled YES \
-            -maximum-parallel-testing-workers 3 \
             -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 300 \
+            -default-test-execution-time-allowance 240 \
             -maximum-test-execution-time-allowance 600 \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-test.log
 

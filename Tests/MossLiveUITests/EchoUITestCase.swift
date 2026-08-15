@@ -39,6 +39,19 @@ class EchoUITestCase: XCTestCase {
         return app
     }
 
+    /// Move between destinations the way a student does. Relaunching the app
+    /// for each one costs a dozen seconds on a hosted simulator, and tapping
+    /// the sidebar exercises the navigation itself rather than a launch flag.
+    func switchTo(tab: String, file: StaticString = #filePath, line: UInt = #line) {
+        let item = app.descendants(matching: .any).matching(identifier: "tab.\(tab)").firstMatch
+        if !item.waitForExistence(timeout: 3) {
+            let toggle = app.buttons["ToggleSidebar"]
+            if toggle.exists { toggle.tap() }
+        }
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "No sidebar entry for \(tab)", file: file, line: line)
+        tap(item)
+    }
+
     func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
