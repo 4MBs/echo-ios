@@ -11,6 +11,7 @@ on:
         options:
           - all
           - LibraryReaderUITests
+          - LibraryReaderUITests/testReaderPageEntryFocusSubmitAndOutsideDismissal
           - LearnUITests
           - ChatUITests
           - LessonsUITests
@@ -62,6 +63,7 @@ jobs:
           restore-keys: ui-spm-${{ runner.os }}-
 
       - name: Resolve dependencies
+        if: ${{ github.event.inputs.test_class == 'all' }}
         run: |
           xcodebuild -resolvePackageDependencies \
             -project MossLive.xcodeproj \
@@ -92,8 +94,17 @@ jobs:
           echo "Selected ${{ steps.simulator.outputs.name }} (${{ steps.simulator.outputs.udid }})"
 
       - name: Boot and configure simulator
+        env:
+          TEST_CLASS: ${{ github.event.inputs.test_class }}
         run: |
           # Headless: the Simulator window is only overhead on a runner.
+          # Set this before boot so focused keyboard tests do not need to wait
+          # for a running simulator merely to expose the software keyboard.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          if [ "$TEST_CLASS" != "all" ]; then
+            echo "Focused build starts the simulator concurrently."
+            exit 0
+          fi
           xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
           # Disable software keyboard predictions and autocorrect overhead
@@ -106,13 +117,28 @@ jobs:
       - name: Build for testing
         run: |
           set -o pipefail
+          DESTINATION="platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}"
+          CLASS="${{ github.event.inputs.test_class }}"
+          BOOT_PID=""
+          if [ -n "$CLASS" ] && [ "$CLASS" != "all" ]; then
+            # This build does not wait for the concrete simulator to finish
+            # booting. The following test step uses the resulting products.
+            DESTINATION="generic/platform=iOS Simulator"
+            xcrun simctl boot "${{ steps.simulator.outputs.udid }}" &
+            BOOT_PID=$!
+          fi
           xcodebuild build-for-testing \
             -project MossLive.xcodeproj \
             -scheme MossLiveUITests \
-            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -destination "$DESTINATION" \
             -clonedSourcePackagesDirPath .spm-packages \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          if [ -n "$BOOT_PID" ]; then
+            wait "$BOOT_PID" || true
+          fi
+          exit "$BUILD_STATUS"
 
       # Parallel workers were tried and were slower: the runner only granted
       # two simulator clones, and sharing its cores made every UI interaction
@@ -141,7 +167,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-test.log
 
       - name: Export screenshots
-        if: always()
+        if: ${{ failure() || github.event.inputs.test_class == 'all' }}
         run: |
           mkdir -p UIScreenshots
           if [ -d UIResults.xcresult ]; then
@@ -152,7 +178,7 @@ jobs:
           find UIScreenshots -type f -maxdepth 2 -print | sort || true
 
       - name: Upload result bundle, screenshots, and log
-        if: always()
+        if: ${{ failure() || github.event.inputs.test_class == 'all' }}
         uses: actions/upload-artifact@v4
         with:
           name: simulator-${{ matrix.form-factor }}-${{ github.run_number }}

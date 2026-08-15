@@ -159,7 +159,7 @@ final class AppModel {
         timetablePoll = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.timetable.refresh()
-                self?.applyCurrentTimetableSubjectIfIdle()
+                self?.applyAutomaticRecordingSubject()
                 self?.scheduleAutoStopIfNeeded()
                 await self?.resyncNotificationsIfDayChanged()
                 try? await Task.sleep(for: .seconds(60))
@@ -191,7 +191,7 @@ final class AppModel {
 
     func refreshTimetable() async {
         await timetable.refresh()
-        applyCurrentTimetableSubjectIfIdle()
+        applyAutomaticRecordingSubject()
         scheduleAutoStopIfNeeded()
     }
 
@@ -209,18 +209,29 @@ final class AppModel {
         }
         recordingSubjectSelection.refresh(
             catalogue: subjects,
-            current: timetable.current,
+            current: timetable.lessonForRecording(),
             lastSelectedID: UserDefaults.standard.string(forKey: Self.lastRecordingSubjectKey)
         )
     }
 
-    private func applyCurrentTimetableSubjectIfIdle() {
-        guard !wantsRecording else { return }
+    /// Name the recording from WebUntis. This is the normal path: a subject is
+    /// never something the student has to supply, only something they may
+    /// correct. A recording started before the plan arrived is labelled as soon
+    /// as it does, and the label is then left alone for the rest of it.
+    private func applyAutomaticRecordingSubject() {
+        if wantsRecording, recordingSubjectSelection.selected != nil { return }
+        let before = recordingSubjectSelection.selected
         recordingSubjectSelection.refresh(
             catalogue: recordingSubjectSelection.catalogue,
-            current: timetable.current,
+            current: timetable.lessonForRecording(),
             lastSelectedID: UserDefaults.standard.string(forKey: Self.lastRecordingSubjectKey)
         )
+        guard wantsRecording,
+              let sessionId,
+              let subject = recordingSubjectSelection.selected,
+              subject != before
+        else { return }
+        persistRecordingSubject(subject, sessionId: sessionId)
     }
 
     func chooseRecordingSubject(_ subject: BackendAPI.SubjectInfo) {
@@ -235,6 +246,26 @@ final class AppModel {
     func dismissRecordingSubjectError() {
         recordingSubjectError = nil
         recordingSubjectErrorWasDismissed = true
+    }
+
+    /// Hand the subject back to the timetable after a manual correction. The
+    /// remembered last choice goes with it, so "Automatisch" means the plan and
+    /// nothing else.
+    func useAutomaticRecordingSubject() {
+        UserDefaults.standard.removeObject(forKey: Self.lastRecordingSubjectKey)
+        recordingSubjectSelection.resetManualOverride()
+        let before = recordingSubjectSelection.selected
+        recordingSubjectSelection.refresh(
+            catalogue: recordingSubjectSelection.catalogue,
+            current: timetable.lessonForRecording()
+        )
+        recordingSubjectError = nil
+        recordingSubjectErrorWasDismissed = false
+        guard let sessionId,
+              let subject = recordingSubjectSelection.selected,
+              subject != before
+        else { return }
+        persistRecordingSubject(subject, sessionId: sessionId)
     }
 
     private func persistRecordingSubject(_ subject: BackendAPI.SubjectInfo, sessionId: String) {
@@ -310,10 +341,9 @@ final class AppModel {
         bannerMessage = nil
         recordingSubjectError = nil
         recordingSubjectErrorWasDismissed = false
-        guard recordingSubjectSelection.selected != nil else {
-            phase = .error("Bitte zuerst ein Fach auswählen.")
-            return
-        }
+        // No subject is required to record. WebUntis names the lesson, here and
+        // again on the server, and the picker is there to correct it — asking
+        // for it first only ever stood between the student and the recording.
         guard settings.isConfigured, let url = settings.websocketURL else {
             phase = .error("Zuerst Serveradresse und Token in den Einstellungen setzen.")
             return
@@ -381,7 +411,7 @@ final class AppModel {
         phase = .disconnected
         isTranscribing = false
         recordingSubjectSelection.resetManualOverride()
-        applyCurrentTimetableSubjectIfIdle()
+        applyAutomaticRecordingSubject()
     }
 
     // MARK: - Event handling
@@ -522,7 +552,7 @@ final class AppModel {
             [BackendAPI.SubjectInfo].self,
             key: OfflineCache.Key.timetableSubjects
         ) ?? []
-        recordingSubjectSelection.refresh(catalogue: subjects, current: timetable.current)
+        recordingSubjectSelection.refresh(catalogue: subjects, current: timetable.lessonForRecording())
         connectivity.configureForUITests(online: UITestRuntime.scenario != .offline)
         switch UITestRuntime.scenario {
         case .recording:
