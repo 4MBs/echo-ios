@@ -84,7 +84,7 @@ private final class OutsideTouchRecognizer: UIGestureRecognizer, UIGestureRecogn
         super.init(target: target, action: action)
         // A recognizer without a single action is not sent touches at all, so
         // it keeps one that does nothing.
-        addTarget(self, action: #selector(ignore))
+        addTarget(self, action: #selector(observeOnly))
         cancelsTouchesInView = false
         delaysTouchesBegan = false
         delaysTouchesEnded = false
@@ -110,7 +110,7 @@ private final class OutsideTouchRecognizer: UIGestureRecognizer, UIGestureRecogn
         onTouchOutside?()
     }
 
-    @objc private func ignore() {}
+    @objc private func observeOnly() {}
 
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,

@@ -72,6 +72,17 @@ struct RecordingSettingsView: View {
             }
 
             Section {
+                Toggle("Fach auswählen", isOn: $settings.showRecordingSubjectPicker)
+            } header: {
+                Text("Fach")
+            } footer: {
+                Text(
+                    "Aus: Der Stundenplan benennt jede Aufnahme selbst. "
+                        + "An: Neben dem Aufnahmeknopf steht ein Menü, um das Fach zu korrigieren."
+                )
+            }
+
+            Section {
                 Picker("Bitrate", selection: $settings.bitrate) {
                     Text("16 kbit/s").tag(16000)
                     Text("24 kbit/s").tag(24000)
