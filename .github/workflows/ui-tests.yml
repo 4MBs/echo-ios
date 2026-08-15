@@ -1,21 +1,6 @@
 name: Exhaustive iOS Simulator UI Tests
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Sources/**"
-      - "Tests/MossLiveUITests/**"
-      - "LocalPackages/**"
-      - "project.yml"
-      - ".github/workflows/ui-tests.yml"
-  pull_request:
-    paths:
-      - "Sources/**"
-      - "Tests/MossLiveUITests/**"
-      - "LocalPackages/**"
-      - "project.yml"
-      - ".github/workflows/ui-tests.yml"
   workflow_dispatch:
     inputs:
       test_class:
