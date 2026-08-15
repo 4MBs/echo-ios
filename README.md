@@ -11,14 +11,14 @@ answers. The interface is in German.
   <img src="docs/screenshots/recording.png" width="880" alt="Recording in progress: the sidebar on the left, the waveform and stop button in a bar at the bottom, and the AI answer note in the top right corner">
 </p>
 
-## "Wait, what are you selling me?"
+## Half of a pair
 
-Nothing. Echo is not on the App Store, has no hosted mode, and does nothing on
-its own. Without the companion backend and a working
-[Tailscale](https://tailscale.com) connection to it, the app is an empty shell.
+Echo is the iPad half. The other half is a backend on your own machine, and
+without it — and a working [Tailscale](https://tailscale.com) connection to it —
+the app is an empty shell. There is no App Store build and no hosted mode.
 
-It was built for one student on one iPad, and the code is here so you can read
-it, fork it, or point it at your own server.
+It was written for one student on one iPad. The code is here to be read, forked,
+or pointed at your own server.
 
 ## Installation
 
@@ -64,7 +64,7 @@ MossLive.xcodeproj` behaves exactly as you would expect.
 Details, including linting locally through Docker and the Codemagic fallback, are
 in [docs/building.md](./docs/building.md).
 
-## Some notes
+## What it doesn't do
 
 - **It is not usable without a server.** If the machine at home is off, the app
   has nothing to talk to.
@@ -75,8 +75,7 @@ in [docs/building.md](./docs/building.md).
 
 ## Documentation
 
-There's no docs site. The written-out version of everything above lives in
-[docs/](./docs).
+The long version of all of the above lives in [docs/](./docs).
 
 - [What Echo does](./docs/features.md) — live transcription, the lesson archive,
   chat, the schoolbook reader
