@@ -10,6 +10,9 @@ struct LearnView: View {
     @State private var errorMessage: String?
 
     private var api: BackendAPI { model.api }
+    private var practiceCards: [BackendAPI.LearnCard] {
+        cards.filter { $0.learningState != "suspended" }
+    }
 
     var body: some View {
         NavigationStack {
@@ -81,9 +84,9 @@ struct LearnView: View {
                         Text("Für heute ist nichts mehr fällig.")
                             .foregroundStyle(.secondary)
                     }
-                    if !cards.isEmpty {
+                    if !practiceCards.isEmpty {
                         NavigationLink {
-                            LearnReviewView(api: api, cards: cards, mode: "practice")
+                            LearnReviewView(api: api, cards: practiceCards, mode: "practice")
                         } label: {
                             Label("Optional weiter üben", systemImage: "rectangle.stack")
                         }
