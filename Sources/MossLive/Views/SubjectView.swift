@@ -422,7 +422,6 @@ private struct SubjectLessonRow: View {
     private var timeText: String {
         info.startedAt.formatted(date: .omitted, time: .shortened)
     }
-
 }
 
 // MARK: - Numbers the screen prints
