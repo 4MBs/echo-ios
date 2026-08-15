@@ -58,6 +58,11 @@ extension BackendAPI {
         let difficultyScore: Double
         let reps: Int
         let lapses: Int
+        let learningState: String?
+        let scheduledIntervalDays: Int?
+        let successfulRecalls: Int?
+        let promptVariant: String?
+        let subjectMode: String?
         let sources: [LearnSource]
 
         enum CodingKeys: String, CodingKey {
@@ -72,10 +77,50 @@ extension BackendAPI {
             case sourceRevision = "source_revision"
             case dueDate = "due_date"
             case difficultyScore = "difficulty_score"
+            case learningState = "learning_state"
+            case scheduledIntervalDays = "scheduled_interval_days"
+            case successfulRecalls = "successful_recalls"
+            case promptVariant = "prompt_variant"
+            case subjectMode = "subject_mode"
         }
 
         var displayConcept: String { concept ?? question }
         var primarySource: LearnSource? { sources.first }
+    }
+
+    struct LearnCardDraft: Codable, Hashable, Identifiable, Sendable {
+        var id: String
+        var sessionId: String
+        var subject: String?
+        var lessonTitle: String?
+        var question: String
+        var options: [String]
+        var answer: Int
+        var expectedAnswer: String?
+        var explanation: String
+        var concept: String
+        var difficulty: Int
+        var kind: LearnCard.Kind
+        var sourceLabel: String?
+        var sourceStartMs: Int?
+        var sourceEndMs: Int?
+        var sourceRevision: Int
+        var promptVariant: String
+        var subjectMode: String
+        var sources: [LearnSource]
+
+        enum CodingKeys: String, CodingKey {
+            case id, subject, question, options, answer, explanation, concept, difficulty, kind, sources
+            case sessionId = "session_id"
+            case lessonTitle = "lesson_title"
+            case expectedAnswer = "expected_answer"
+            case sourceLabel = "source_label"
+            case sourceStartMs = "source_start_ms"
+            case sourceEndMs = "source_end_ms"
+            case sourceRevision = "source_revision"
+            case promptVariant = "prompt_variant"
+            case subjectMode = "subject_mode"
+        }
     }
 
     struct LearnSubjectSummary: Codable, Hashable, Identifiable, Sendable {
@@ -95,6 +140,11 @@ extension BackendAPI {
         let mastery: Double
         let subjects: [LearnSubjectSummary]
         let sessionsWithCards: [String]
+        let stateCounts: [String: Int]?
+        let overdueTotal: Int?
+        let memoryStrength: Double?
+        let readiness: Double?
+        let readinessStatus: String?
 
         enum CodingKeys: String, CodingKey {
             case subjects, mastery
@@ -102,6 +152,10 @@ extension BackendAPI {
             case cardTotal = "card_total"
             case estimatedMinutes = "estimated_minutes"
             case sessionsWithCards = "sessions_with_cards"
+            case stateCounts = "state_counts"
+            case overdueTotal = "overdue_total"
+            case memoryStrength = "memory_strength"
+            case readiness, readinessStatus = "readiness_status"
         }
     }
 
@@ -194,6 +248,34 @@ extension BackendAPI {
         return try JSONDecoder().decode(Response.self, from: data).cards
     }
 
+    func generateLearnDrafts(sessionId: String) async throws -> [LearnCardDraft] {
+        struct Response: Decodable { let drafts: [LearnCardDraft] }
+        let data = try await request(
+            "/learn/generate", method: "POST",
+            jsonBody: ["session_id": sessionId, "preview": true]
+        )
+        return try JSONDecoder().decode(Response.self, from: data).drafts
+    }
+
+    func saveLearnDrafts(_ drafts: [LearnCardDraft], sessionId: String) async throws -> [LearnCard] {
+        struct Response: Decodable { let cards: [LearnCard] }
+        let encoded = try JSONEncoder().encode(drafts)
+        let objects = try JSONSerialization.jsonObject(with: encoded) as? [[String: Any]] ?? []
+        let data = try await request(
+            "/learn/cards/batch", method: "POST",
+            jsonBody: ["session_id": sessionId, "drafts": objects]
+        )
+        return try JSONDecoder().decode(Response.self, from: data).cards
+    }
+
+    func updateLearnCard(id: String, draft: LearnCardDraft) async throws -> LearnCard {
+        struct Response: Decodable { let card: LearnCard }
+        let encoded = try JSONEncoder().encode(draft)
+        let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+        let data = try await request("/learn/cards/\(id)", method: "PATCH", jsonBody: object)
+        return try JSONDecoder().decode(Response.self, from: data).card
+    }
+
     func evaluateLearnAnswer(
         cardId: String,
         answer: String,
@@ -203,7 +285,9 @@ extension BackendAPI {
             let evaluation: LearnEvaluation
             let card: LearnCard
         }
-        var body: [String: Any] = ["card_id": cardId, "answer": answer]
+        var body: [String: Any] = [
+            "card_id": cardId, "answer": answer, "attempt_uuid": UUID().uuidString
+        ]
         if let confidence { body["confidence"] = confidence }
         let data = try await request("/learn/evaluate", method: "POST", jsonBody: body)
         let response = try JSONDecoder().decode(Response.self, from: data)

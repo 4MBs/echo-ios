@@ -189,6 +189,13 @@ private struct LearnLessonPickerView: View {
     @State private var generating: String?
     @State private var generated: Set<String> = []
     @State private var errorMessage: String?
+    @State private var preview: DraftPreview?
+
+    private struct DraftPreview: Identifiable {
+        let lesson: BackendAPI.LessonInfo
+        let drafts: [BackendAPI.LearnCardDraft]
+        var id: String { lesson.id }
+    }
 
     var body: some View {
         List {
@@ -225,6 +232,16 @@ private struct LearnLessonPickerView: View {
             }
         }
         .navigationTitle("Stunden auswählen")
+        .sheet(item: $preview) { value in
+            LearnCardDraftPreviewView(
+                api: api,
+                sessionId: value.lesson.id,
+                drafts: value.drafts
+            ) {
+                generated.insert(value.lesson.id)
+                await onGenerated()
+            }
+        }
     }
 
     private func lessonMetadata(_ lesson: BackendAPI.LessonInfo) -> String {
@@ -237,9 +254,8 @@ private struct LearnLessonPickerView: View {
         generating = lesson.id
         errorMessage = nil
         do {
-            _ = try await api.generateLearnCards(sessionId: lesson.id)
-            generated.insert(lesson.id)
-            await onGenerated()
+            let drafts = try await api.generateLearnDrafts(sessionId: lesson.id)
+            preview = DraftPreview(lesson: lesson, drafts: drafts)
         } catch {
             errorMessage = error.localizedDescription
         }
