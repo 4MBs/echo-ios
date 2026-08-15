@@ -320,8 +320,8 @@ private struct RowPressStyle: ButtonStyle {
 /// server asked for a topic has none, and falls back to the opening sentence
 /// of its summary — prose in a heading's place, which is exactly what
 /// `scripts/backfill_topics.py` exists to fix. A lesson with no summary at all
-/// heads itself with its date, spelled out, and its meta line carries the time
-/// of day rather than repeating that date.
+/// falls back to its timetable label or subject; only a completely unnamed
+/// lesson uses its date and moves the date out of the metadata line.
 private struct SubjectLessonRow: View {
     let info: BackendAPI.LessonInfo
 
@@ -331,8 +331,8 @@ private struct SubjectLessonRow: View {
     private struct Lines {
         let headline: String
         let detail: String?
-        /// The heading is the date, because there was nothing else to head it
-        /// with — which is what moves the date out of the meta line.
+        /// The heading is the date because there was no topic, timetable label,
+        /// or subject, which is what moves the date out of the meta line.
         let dated: Bool
     }
 
