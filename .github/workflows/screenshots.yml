@@ -18,7 +18,6 @@ concurrency:
 
 env:
   XCODE_PATH: /Applications/Xcode_26.5.app
-  BUNDLE_ID: com.fourmbs.mosslive
 
 jobs:
   screenshots:
@@ -86,48 +85,68 @@ jobs:
             --wifiBars 3 \
             --cellularMode notSupported || true
 
-      - name: Build app
+      - name: Build for testing
         run: |
           set -o pipefail
-          xcodebuild build \
+          xcodebuild build-for-testing \
             -project MossLive.xcodeproj \
-            -scheme MossLive \
-            -configuration Debug \
+            -scheme MossLiveUITests \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -clonedSourcePackagesDirPath .spm-packages \
             -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -40
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -30
 
-      - name: Install app
-        run: |
-          APP="DerivedData/Build/Products/Debug-iphonesimulator/MossLive.app"
-          test -d "$APP" || { echo "::error::$APP not found"; exit 1; }
-          xcrun simctl install "${{ steps.simulator.outputs.udid }}" "$APP"
-
-      # Each shot launches the app fresh in one deterministic mock state,
-      # waits for the first frame to settle, and photographs the device.
+      # The capture itself is an XCUITest: it launches each mock state in the
+      # app's own locale, rotates to landscape, and attaches one named
+      # screenshot per screen.
       - name: Capture screens
-        env:
-          UDID: ${{ steps.simulator.outputs.udid }}
         run: |
-          mkdir -p screenshots
-          shoot() {
-            local name="$1" scenario="$2" tab="$3" settle="$4"
-            echo "→ $name (scenario=$scenario tab=$tab)"
-            xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-            xcrun simctl launch "$UDID" "$BUNDLE_ID" \
-              -UITesting -UITestScenario "$scenario" -UITestTab "$tab"
-            sleep "$settle"
-            xcrun simctl io "$UDID" screenshot "screenshots/${name}.png"
-          }
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project MossLive.xcodeproj \
+            -scheme MossLiveUITests \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -clonedSourcePackagesDirPath .spm-packages \
+            -derivedDataPath DerivedData \
+            -resultBundlePath Screenshots.xcresult \
+            -only-testing:MossLiveUITests/DocumentationScreenshots \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -30
 
-          shoot recording recording aufnahme 12
-          shoot lessons populated stunden 10
-          shoot learn populated lernen 10
-          shoot chat populated chat 10
-          shoot library populated bibliothek 10
+      # Attachments come out with generated filenames; manifest.json carries
+      # the name each `shot(...)` gave them.
+      - name: Name the screenshots
+        run: |
+          rm -rf exported screenshots
+          mkdir -p exported screenshots
+          xcrun xcresulttool export attachments \
+            --path Screenshots.xcresult \
+            --output-path exported
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import shutil
 
-          xcrun simctl terminate "$UDID" "$BUNDLE_ID" || true
+          exported = pathlib.Path("exported")
+          out = pathlib.Path("screenshots")
+          manifest = json.loads((exported / "manifest.json").read_text())
+          wanted = {"recording", "lessons", "learn", "chat", "library"}
+          found = set()
+
+          for test in manifest:
+              for attachment in test.get("attachments", []):
+                  name = attachment.get("suggestedHumanReadableName", "")
+                  # XCTest exports "<attachment name>_<index>_<uuid>.png".
+                  stem = name.split("_", 1)[0]
+                  if stem in wanted:
+                      source = exported / attachment["exportedFileName"]
+                      shutil.copyfile(source, out / f"{stem}.png")
+                      found.add(stem)
+
+          missing = wanted - found
+          if missing:
+              raise SystemExit(f"::error::no screenshot captured for: {sorted(missing)}")
+          print("captured:", sorted(found))
+          PY
           ls -la screenshots
 
       - name: Upload screenshots
