@@ -113,11 +113,20 @@ not create server-side note attachments.
 Echo has no note editor or drawing canvas. Goodnotes and Notability remain the
 place where notes are written; Echo only imports, reads and links them.
 
-Echo also installs an iOS Share Extension. A page or document shared from
-Goodnotes, Notability or Files is placed in Echo's App Group inbox. Open the
-destination lesson, choose **Unterrichtsnotizen**, then tap the queued document
-under **Aus dem Teilen-Menü**. The extension never guesses which lesson a file
-belongs to and does not upload anything before that explicit choice.
+Echo also installs an iOS Share Extension. Share a page or document from
+Goodnotes, Notability, Photos or Files to **Echo** and the main app opens
+immediately. During a recording the document is attached to that running
+lesson automatically. Without a recording, Echo shows the recorded lessons
+newest first and asks for the destination, including each lesson's subject,
+AI-generated title and date. A failed import stays in the App Group inbox and
+can still be selected later under **Unterrichtsnotizen**.
+
+LiveContainer 3.8.5 cannot register a guest app's embedded Share Extension.
+Use LiveContainer's own share action instead and choose Echo as the guest app.
+Echo declares Goodnotes, Notability, PDF, JPEG and PNG as supported document
+types, copies the temporary incoming file into its own container immediately,
+and then uses the same running-recording or lesson-selection flow as a normal
+installation.
 
 ### Chat and the answer note
 

@@ -59,9 +59,9 @@ final class ShareViewController: UIViewController {
             do {
                 guard let url else { throw error ?? PendingNoteImports.StorageError.unreadableFile }
                 let filename = Self.filename(for: provider, source: url, typeIdentifier: typeIdentifier)
-                _ = try PendingNoteImports.enqueue(from: url, suggestedName: filename)
+                let item = try PendingNoteImports.enqueue(from: url, suggestedName: filename)
                 DispatchQueue.main.async {
-                    self?.showSuccess()
+                    self?.openEcho(for: item)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -100,10 +100,27 @@ final class ShareViewController: UIViewController {
         return nil
     }
 
-    private func showSuccess() {
+    private func openEcho(for item: PendingNoteImports.Item) {
+        guard let url = URL(string: "echo://note-import/\(item.id)") else {
+            showQueuedFallback()
+            return
+        }
+        messageLabel.text = "Echo wird geöffnet…"
+        extensionContext?.open(url) { [weak self] opened in
+            DispatchQueue.main.async {
+                if opened {
+                    self?.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+                } else {
+                    self?.showQueuedFallback()
+                }
+            }
+        }
+    }
+
+    private func showQueuedFallback() {
         spinner.stopAnimating()
-        messageLabel.text = "Gespeichert. Öffne in Echo die gewünschte Stunde und wähle "
-            + "„Unterrichtsnotizen“, um den Import abzuschließen."
+        messageLabel.text = "Die Datei ist in Echo gespeichert. iOS konnte Echo nicht automatisch öffnen; "
+            + "du findest sie dort unter „Unterrichtsnotizen“."
         doneButton.isHidden = false
     }
 
