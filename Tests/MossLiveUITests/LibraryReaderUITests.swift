@@ -8,10 +8,11 @@ final class LibraryReaderUITests: EchoUITestCase {
         shot("reader-double-page")
 
         tap(app.buttons["Nächste Seite"])
-        let pageIndicator = app.buttons
+        let turned = app.buttons
+            .matching(NSPredicate(format: "NOT (label BEGINSWITH 'Seite 1 ')"))
             .matching(NSPredicate(format: "label MATCHES 'Seite [0-9]+.*'"))
             .firstMatch
-        XCTAssertTrue(pageIndicator.waitForExistence(timeout: 4))
+        XCTAssertTrue(turned.waitForExistence(timeout: 5), "The page never turned")
         shot("reader-next-page")
         tap(app.buttons["Vorherige Seite"])
 
@@ -28,8 +29,20 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(indicator)
         let pageField = app.textFields["Seitennummer"]
         XCTAssertTrue(pageField.waitForExistence(timeout: 3))
+        // Typing the number is the whole interaction: there is nothing to
+        // confirm, so no control is tapped between the digit and the page.
         replaceText(pageField, with: "5")
-        tap(app.buttons["Seite öffnen"])
+        XCTAssertFalse(
+            app.buttons["Seite öffnen"].exists,
+            "The page jump still asks for the number to be confirmed"
+        )
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        // Wait for the jump to land before keeping the picture: a screenshot
+        // taken mid-transition shows two half-drawn pages and proves nothing.
+        let atFive = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH 'Seite 5 ' OR label BEGINSWITH 'Seite 4 '"))
+            .firstMatch
+        XCTAssertTrue(atFive.waitForExistence(timeout: 5), "The page jump never arrived")
         shot("reader-page-five")
 
         tap(app.buttons["Buchoptionen"])
@@ -179,6 +192,40 @@ final class LibraryReaderUITests: EchoUITestCase {
             "The drag on the page did not produce a selected region"
         )
         shot("reader-region-selected")
+
+        // The selection is meant to be adjustable afterwards: the overlay says
+        // so to VoiceOver, so its handles have to be reachable and it has to
+        // move when dragged.
+        let adjustment = app.descendants(matching: .any)["Ausgewählter Buchbereich"]
+        XCTAssertTrue(adjustment.waitForExistence(timeout: 4), "The chosen region cannot be adjusted")
+        let before = adjustment.frame
+        adjustment.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(
+                forDuration: 0.2,
+                thenDragTo: adjustment.coordinate(withNormalizedOffset: CGVector(dx: 1.1, dy: 1.1))
+            )
+        let moved = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                guard let element = object as? XCUIElement else { return false }
+                return element.exists && element.frame.origin != before.origin
+            },
+            object: adjustment
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [moved], timeout: 5),
+            .completed,
+            "Dragging the chosen region did not move it"
+        )
+        shot("reader-region-adjusted")
+        // Compact widths keep the assistant aside while the region is being
+        // adjusted, and come back through the banner.
+        if app.buttons["Fertig"].exists {
+            tap(app.buttons["Fertig"])
+            XCTAssertTrue(
+                app.buttons["bookAI.region"].waitForExistence(timeout: 5),
+                "The assistant did not come back with the marked region"
+            )
+        }
         tap(app.buttons["Aufheben"])
     }
 

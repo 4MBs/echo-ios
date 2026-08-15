@@ -3,8 +3,11 @@ import XCTest
 final class ShellAndStateUITests: EchoUITestCase {
     func testEveryPrimaryDestinationLaunchesAndRotates() {
         let destinations = ["aufnahme", "stunden", "lernen", "bibliothek", "chat", "einstellungen"]
+        // One launch, then the sidebar: relaunching for each destination costs
+        // a dozen seconds apiece and tests a launch flag instead of navigation.
+        launch(tab: destinations[0])
         for tab in destinations {
-            launch(tab: tab)
+            if tab != destinations[0] { switchTo(tab: tab) }
             XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
             switch tab {
             case "aufnahme": XCTAssertTrue(app.buttons["Aufnahme starten"].exists)
@@ -17,7 +20,7 @@ final class ShellAndStateUITests: EchoUITestCase {
             shot("shell-\(tab)-portrait")
             assertVisibleElementsStayOnScreen()
         }
-        launch(tab: "aufnahme")
+        switchTo(tab: "aufnahme")
         rotateAndCapture("shell-recording")
     }
 
@@ -50,10 +53,11 @@ final class ShellAndStateUITests: EchoUITestCase {
     func testEmptyLoadingOfflineUnauthorizedAndLongContentMatrix() {
         executionTimeAllowance = 600
         let states = ["empty", "loading", "offline", "unauthorized", "serverError", "longContent"]
-        let tabs = ["stunden", "bibliothek", "chat"]
+        let tabs = ["stunden", "lernen", "bibliothek", "chat"]
         for state in states {
+            launch(tab: tabs[0], scenario: state)
             for tab in tabs {
-                launch(tab: tab, scenario: state)
+                if tab != tabs[0] { switchTo(tab: tab) }
                 XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
                 shot("state-\(state)-\(tab)")
             }
@@ -81,8 +85,10 @@ final class ShellAndStateUITests: EchoUITestCase {
 
     func testAccessibilityAuditOnEveryPrimaryDestination() throws {
         var findings: [String] = []
-        for tab in ["aufnahme", "stunden", "lernen", "bibliothek", "chat", "einstellungen"] {
-            launch(tab: tab)
+        let destinations = ["aufnahme", "stunden", "lernen", "bibliothek", "chat", "einstellungen"]
+        launch(tab: destinations[0])
+        for tab in destinations {
+            if tab != destinations[0] { switchTo(tab: tab) }
             try app.performAccessibilityAudit(
                 for: [.dynamicType, .hitRegion, .textClipped, .sufficientElementDescription]
             ) { issue in

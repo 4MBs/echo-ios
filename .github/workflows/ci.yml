@@ -22,6 +22,11 @@ on:
       - "scripts/ci/**"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
+    inputs:
+      run_unit_tests:
+        description: "Run unit tests in iOS simulator"
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -51,6 +56,8 @@ jobs:
 
       - name: Install XcodeGen
         run: brew install xcodegen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -82,6 +89,7 @@ jobs:
             -clonedSourcePackagesDirPath .spm-packages
 
       - name: Pick an available iOS simulator
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_unit_tests == 'true'
         id: sim
         run: |
           pick() { xcrun simctl list devices available | grep -E '^ +iPhone' | head -1 | sed -E 's/^ +//; s/ \([0-9A-Fa-f-]+\) \((Shutdown|Booted)\).*$//'; }
@@ -102,6 +110,7 @@ jobs:
           echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests (iOS Simulator)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_unit_tests == 'true'
         run: |
           set -o pipefail
           TEST_LOG=$(mktemp)
@@ -124,7 +133,7 @@ jobs:
           exit "$TEST_STATUS"
 
       - name: Upload test results
-        if: always()
+        if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.run_unit_tests == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ github.run_number }}

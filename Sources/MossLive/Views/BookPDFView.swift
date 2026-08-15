@@ -18,6 +18,10 @@ final class BookPDFView: PDFView {
     private var resizeSnapshotFollowsFit = false
     private var pageRenderCache: BookPageRenderCache?
     private var finalQualityOverlay: UIView?
+    /// The page rectangles the sharp overlay was built for. If the layout moves
+    /// away from them — a spread, a zoom, a rotation — the images it holds no
+    /// longer belong on the page and have to go.
+    private var finalQualityFrames: [Int: CGRect] = [:]
     private var layoutTransitionOverlay: UIView?
     private var navigationGeneration = 0
     private var layoutGeneration = 0
@@ -57,6 +61,7 @@ final class BookPDFView: PDFView {
         }
         super.layoutSubviews()
         applyScaleLimits()
+        discardFinalQualityOverlayIfStale()
         prepareVisibleAndNeighboringPages()
         selectionOverlay?.frame = bounds
         observeScrollingIfNeeded()
@@ -233,6 +238,7 @@ final class BookPDFView: PDFView {
 
     @objc private func readerInteractionBegan(_ recognizer: UIGestureRecognizer) {
         guard recognizer.state == .began else { return }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         discardFinalQualityOverlay()
     }
 
@@ -245,6 +251,7 @@ final class BookPDFView: PDFView {
     }
 
     @objc private func tappedOutsideSelection(_ recognizer: UITapGestureRecognizer) {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         guard let overlay = adjustmentOverlay, !overlay.isHidden, !overlay.isInteracting else { return }
         let point = recognizer.location(in: self)
         guard !regionControlsContain(point) else { return }
@@ -559,6 +566,7 @@ final class BookPDFView: PDFView {
         }
         addSubview(overlay)
         finalQualityOverlay = overlay
+        finalQualityFrames = Dictionary(uniqueKeysWithValues: pageFrames)
         if let adjustmentOverlay { bringSubviewToFront(adjustmentOverlay) }
         if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
     }
@@ -566,6 +574,27 @@ final class BookPDFView: PDFView {
     private func discardFinalQualityOverlay() {
         finalQualityOverlay?.removeFromSuperview()
         finalQualityOverlay = nil
+        finalQualityFrames = [:]
+    }
+
+    /// The sharp overlay is a picture of the pages where they were. Once they
+    /// are somewhere else it is a second, wrongly sized copy of the page drawn
+    /// over the real one, so it goes and is built again for the new layout.
+    private func discardFinalQualityOverlayIfStale() {
+        guard finalQualityOverlay != nil, let document else { return }
+        let current = visiblePages.map { page -> (Int, CGRect) in
+            (document.index(for: page), convert(page.bounds(for: .cropBox), from: page).standardized)
+        }
+        let matches = current.count == finalQualityFrames.count
+            && current.allSatisfy { index, frame in
+                guard let known = finalQualityFrames[index] else { return false }
+                return abs(known.minX - frame.minX) < 0.5
+                    && abs(known.minY - frame.minY) < 0.5
+                    && abs(known.width - frame.width) < 0.5
+                    && abs(known.height - frame.height) < 0.5
+            }
+        guard !matches else { return }
+        discardFinalQualityOverlay()
     }
 
     private func completePendingResize() {

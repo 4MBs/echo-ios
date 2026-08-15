@@ -197,83 +197,6 @@ struct BookReaderView: View {
     }
 }
 
-/// The reader itself: a PDFKit page view with page controls underneath and
-/// "Seite fragen" in the reader's stable navigation toolbar.
-struct AutoFocusPageNumberField: UIViewRepresentable {
-    @Binding var text: String
-    let onCommit: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    func makeUIView(context: Context) -> UITextField {
-        let field = FirstResponderNumberField()
-        field.keyboardType = .numberPad
-        field.textAlignment = .center
-        field.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
-        field.textColor = .label
-        field.tintColor = .systemBlue
-        field.backgroundColor = .clear
-        field.delegate = context.coordinator
-        field.addTarget(context.coordinator, action: #selector(Coordinator.changed), for: .editingChanged)
-        field.accessibilityLabel = "Seitennummer"
-
-        let toolbar = UIToolbar()
-        toolbar.sizeToFit()
-        toolbar.items = [
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-            UIBarButtonItem(
-                title: "Fertig",
-                style: .done,
-                target: context.coordinator,
-                action: #selector(Coordinator.commit)
-            ),
-        ]
-        field.inputAccessoryView = toolbar
-        context.coordinator.field = field
-        return field
-    }
-
-    func updateUIView(_ field: UITextField, context: Context) {
-        context.coordinator.parent = self
-        if field.text != text { field.text = text }
-    }
-
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        var parent: AutoFocusPageNumberField
-        weak var field: UITextField?
-
-        init(parent: AutoFocusPageNumberField) {
-            self.parent = parent
-        }
-
-        @objc func changed(_ sender: UITextField) {
-            parent.text = sender.text ?? ""
-        }
-
-        @objc func commit() {
-            parent.onCommit()
-            field?.resignFirstResponder()
-        }
-    }
-
-    private final class FirstResponderNumberField: UITextField {
-        private var focusedOnce = false
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            guard window != nil, !focusedOnce else { return }
-            focusedOnce = true
-            DispatchQueue.main.async { [weak self] in
-                guard let self, window != nil else { return }
-                becomeFirstResponder()
-                selectAll(nil)
-            }
-        }
-    }
-}
-
 /// Hands a freshly parsed document back from the loading task. PDFDocument is
 /// not `Sendable`, but nothing touches this one until the reader owns it.
 struct LoadedDocument: @unchecked Sendable {
@@ -421,10 +344,15 @@ final class BookPageRenderCache {
               let page = document.page(at: pageIndex + 1)
         else { return nil }
 
-        var pageSize = page.getBoxRect(.cropBox).standardized.size
-        let rotation = abs(page.rotationAngle) % 180
-        if rotation == 90 { pageSize = CGSize(width: pageSize.height, height: pageSize.width) }
-        guard pageSize.width > 0, pageSize.height > 0 else { return nil }
+        let box = page.getBoxRect(.cropBox).standardized
+        guard box.width > 0, box.height > 0 else { return nil }
+        // /Rotate turns the sheet clockwise for display, so a quarter turn
+        // trades the page's width for its height.
+        let rotation = ((Int(page.rotationAngle) % 360) + 360) % 360
+        let quarterTurned = rotation == 90 || rotation == 270
+        let pageSize = quarterTurned
+            ? CGSize(width: box.height, height: box.width)
+            : box.size
 
         let maximum = CGFloat(max(256, maxPixelDimension))
         let scale = maximum / max(pageSize.width, pageSize.height)
@@ -445,14 +373,31 @@ final class BookPageRenderCache {
         let target = CGRect(x: 0, y: 0, width: width, height: height)
         context.setFillColor(UIColor.white.cgColor)
         context.fill(target)
-        context.concatenate(
-            page.getDrawingTransform(
-                .cropBox,
-                rect: target,
-                rotate: 0,
-                preserveAspectRatio: true
-            )
+
+        // The page is mapped onto the bitmap by hand. getDrawingTransform fits a
+        // box into a rectangle but never enlarges it, so a page prepared for a
+        // Retina screen came back at its printed point size — a postage stamp in
+        // the middle of a white sheet, which is what the reader then showed
+        // until a zoom threw the picture away.
+        context.scaleBy(
+            x: CGFloat(width) / pageSize.width,
+            y: CGFloat(height) / pageSize.height
         )
+        switch rotation {
+        case 90:
+            context.translateBy(x: 0, y: pageSize.height)
+            context.rotate(by: -.pi / 2)
+        case 180:
+            context.translateBy(x: pageSize.width, y: pageSize.height)
+            context.rotate(by: .pi)
+        case 270:
+            context.translateBy(x: pageSize.width, y: 0)
+            context.rotate(by: .pi / 2)
+        default:
+            break
+        }
+        context.translateBy(x: -box.minX, y: -box.minY)
+        context.clip(to: box)
         context.drawPDFPage(page)
         guard let rendered = context.makeImage() else { return nil }
         return UIImage(cgImage: rendered)

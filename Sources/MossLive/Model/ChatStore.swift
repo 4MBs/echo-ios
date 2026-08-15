@@ -401,7 +401,10 @@ final class ChatStore {
                         Message(id: messageID, role: .assistant, text: "")
                     )
                     let words = answer.split(separator: " ", omittingEmptySubsequences: false)
-                    let wordDelay = UITestRuntime.scenario == .longContent ? 80 : 28
+                    // Long content is the scenario a stop button is tested
+                    // against, so it has to stay stoppable for long enough
+                    // that a slow runner cannot finish it first.
+                    let wordDelay = UITestRuntime.scenario == .longContent ? 200 : 28
                     for (wordIndex, word) in words.enumerated() {
                         try await Task.sleep(for: .milliseconds(wordDelay))
                         guard !Task.isCancelled,

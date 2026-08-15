@@ -43,11 +43,13 @@ struct PDFReader: View {
     @State private var resumeAssistantAfterRegion = false
     @State private var askingForPage = false
     @State private var typedPage = ""
+    @State private var openedAt = "1"
     @State private var adjustingNumbering = false
     @State private var typedNumbering = ""
     @State private var numberingPage = 1
     @State private var numberingPlaceholder = "1"
     @FocusState private var numberingFocused: Bool
+    @FocusState private var pageFieldFocused: Bool
 
     /// One transaction drives the panel and every part of the reader whose
     /// available width changes with it.
@@ -90,6 +92,30 @@ struct PDFReader: View {
             .onChange(of: askingBookAI) {
                 guard horizontalSizeClass != .compact, !reduceMotion else { return }
                 proxy.prepareForAnimatedResize(duration: 0.48)
+            }
+            .onChange(of: askingForPage) { _, asking in
+                if asking {
+                    pageFieldFocused = true
+                } else {
+                    pageFieldFocused = false
+                    typedPage = ""
+                }
+            }
+            .onChange(of: pageFieldFocused) { _, focused in
+                if !focused {
+                    askingForPage = false
+                    typedPage = ""
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                pageFieldFocused = false
+                askingForPage = false
+                typedPage = ""
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                pageFieldFocused = false
+                askingForPage = false
+                typedPage = ""
             }
     }
 
@@ -217,6 +243,12 @@ struct PDFReader: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if resumeAssistantAfterRegion {
+                Button("Fertig", action: resumeAssistant)
+                    .font(.subheadline.weight(.medium))
+                    .frame(minHeight: 44)
+                    .accessibilityHint("Fragt mit dem markierten Bereich weiter")
+            }
             Button("Aufheben", systemImage: "xmark", action: clearRegionSelection)
                 .labelStyle(.iconOnly)
                 .frame(minWidth: 44, minHeight: 44)
@@ -255,7 +287,10 @@ struct PDFReader: View {
                 selectedRegion = region
                 selectingRegion = false
             }
-            resumeAssistant()
+            // The assistant stays aside for a moment longer on compact widths:
+            // the fresh selection can be dragged and resized on the page, which
+            // is impossible underneath a presented sheet. The banner's "Fertig"
+            // brings the assistant back when the student is happy with it.
         }
     }
 
@@ -271,6 +306,7 @@ struct PDFReader: View {
         selectingRegion = false
         proxy.cancelRegionSelection()
         proxy.clearRegionSelection()
+        resumeAssistant()
     }
 
     /// Teach the reader where the printed numbering starts: turn to a page whose
@@ -348,6 +384,8 @@ struct PDFReader: View {
     private var pageControls: some View {
         HStack(spacing: 12) {
             Button {
+                pageFieldFocused = false
+                askingForPage = false
                 proxy.step(-1)
             } label: {
                 Image(systemName: "arrow.left")
@@ -362,21 +400,14 @@ struct PDFReader: View {
             }
 
             Button {
-                if askingForPage {
-                    confirmPageJump()
-                } else {
-                    proxy.step(1)
-                }
+                pageFieldFocused = false
+                askingForPage = false
+                proxy.step(1)
             } label: {
-                Image(systemName: askingForPage ? "checkmark" : "arrow.right")
-                    .contentTransition(.symbolEffect(.replace))
+                Image(systemName: "arrow.right")
             }
-            .disabled(
-                askingForPage
-                    ? numbering.pdfPage(forPrinted: Int(typedPage) ?? 0) == nil
-                    : pageCount > 0 && currentPage >= pageCount
-            )
-            .accessibilityLabel(askingForPage ? "Seite öffnen" : "Nächste Seite")
+            .disabled(pageCount > 0 && currentPage >= pageCount)
+            .accessibilityLabel("Nächste Seite")
         }
         .buttonStyle(.glass)
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: askingForPage)
@@ -385,7 +416,8 @@ struct PDFReader: View {
     /// The current page, and the way to jump to another one.
     private var pageIndicator: some View {
         Button {
-            typedPage = printedLabel(currentPage)
+            typedPage = ""
+            openedAt = printedLabel(currentPage)
             askingForPage = true
         } label: {
             // Fixed slots either side of the slash: the indicator stays put
@@ -402,33 +434,43 @@ struct PDFReader: View {
         .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
     }
 
-    /// The current value is selected when the field becomes first responder,
-    /// so typing replaces it immediately. The keyboard's Done button and the
-    /// row's checkmark share the same direct navigation path.
+    /// Type a page and the book goes there — nothing to confirm.
     private var pageJump: some View {
-        HStack(spacing: 8) {
-            AutoFocusPageNumberField(text: $typedPage, onCommit: confirmPageJump)
-                .frame(width: 48, height: 32)
+        HStack(spacing: 4) {
+            TextField(openedAt, text: $typedPage)
+                .multilineTextAlignment(.trailing)
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                .frame(width: 36)
+                .keyboardType(.numberPad)
+                .focused($pageFieldFocused)
+                .onSubmit {
+                    pageFieldFocused = false
+                    askingForPage = false
+                    typedPage = ""
+                }
                 .accessibilityLabel("Seitennummer")
 
             Text("/ \(printedLast)")
-                .font(.subheadline)
+                .font(.subheadline.monospacedDigit().weight(.semibold))
                 .foregroundStyle(.secondary)
+                .frame(minWidth: 42, alignment: .leading)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.interactive(), in: Capsule())
         .onChange(of: typedPage) { _, text in
+            guard askingForPage else { return }
             let digits = String(text.filter(\.isNumber).prefix(5))
-            if digits != text { typedPage = digits }
+            if digits != text {
+                typedPage = digits
+                return
+            }
+            guard let printed = Int(digits),
+                  let pdfPage = numbering.pdfPage(forPrinted: printed),
+                  pdfPage != currentPage
+            else { return }
+            proxy.go(toPage: pdfPage)
         }
-    }
-
-    private func confirmPageJump() {
-        guard let requested = Int(typedPage), printedLast > 0 else { return }
-        let first = numbering.printedNumber(1) ?? 1
-        let constrained = min(max(requested, first), printedLast)
-        guard let pdfPage = numbering.pdfPage(forPrinted: constrained) else { return }
-        typedPage = String(constrained)
-        proxy.go(toPage: pdfPage)
-        askingForPage = false
     }
 
     /// The book's own numbering, shared with the assistant panel so a cited page is

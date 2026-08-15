@@ -76,6 +76,24 @@ final class LessonsUITests: EchoUITestCase {
         XCTAssertFalse(question.exists, "The confirmation stayed open after tapping away")
     }
 
+    func testVocabularyChangeFailureIsReportedToTheStudent() {
+        launch(tab: "stunden", scenario: "writeError")
+        tap(button(containing: "Mathematik"))
+        tap(button(containing: "Ursache und Wirkung"))
+        tapToolbarAction("Transkriptoptionen")
+        tap(app.buttons["Fachwörterbuch"])
+        XCTAssertTrue(app.navigationBars["Mathematik"].waitForExistence(timeout: 5))
+
+        typeText("Testbegriff", into: app.textFields["Begriff oder mehrere mit Komma"])
+        tap(app.buttons["Hinzufügen"])
+        XCTAssertTrue(
+            app.staticTexts["Wörterbuch konnte nicht geändert werden"].waitForExistence(timeout: 8),
+            "A refused vocabulary change left the student without an explanation"
+        )
+        shot("lesson-vocabulary-write-error")
+        tap(app.buttons["OK"])
+    }
+
     func testTranscriptSaveFailureIsReportedToTheStudent() {
         launch(tab: "stunden", scenario: "writeError")
         tap(button(containing: "Mathematik"))
