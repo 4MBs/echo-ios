@@ -100,7 +100,11 @@ class EchoUITestCase: XCTestCase {
 
     func replaceText(_ field: XCUIElement, with value: String) {
         focus(field)
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 100))
+        let existing = (field.value as? String) ?? ""
+        if !existing.isEmpty {
+            let deleteCount = min(max(existing.count, 1), 32)
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: deleteCount))
+        }
         field.typeText(value)
     }
 
@@ -111,7 +115,6 @@ class EchoUITestCase: XCTestCase {
 
     private func focus(_ field: XCUIElement) {
         tap(field)
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     func assertVisibleElementsStayOnScreen(file: StaticString = #filePath, line: UInt = #line) {

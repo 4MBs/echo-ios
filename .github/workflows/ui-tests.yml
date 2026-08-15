@@ -17,6 +17,21 @@ on:
       - "project.yml"
       - ".github/workflows/ui-tests.yml"
   workflow_dispatch:
+    inputs:
+      test_class:
+        description: 'Test class to run (or "all")'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - LibraryReaderUITests
+          - LearnUITests
+          - ChatUITests
+          - LessonsUITests
+          - SettingsUITests
+          - ShellAndStateUITests
+          - DestructiveFlowsUITests
 
 concurrency:
   group: ui-tests-${{ github.ref }}
@@ -27,7 +42,7 @@ env:
 
 jobs:
   simulator-suite:
-    name: ${{ matrix.form-factor }} complete suite
+    name: ${{ matrix.form-factor }} ${{ github.event.inputs.test_class || 'complete' }} suite
     runs-on: macos-26
     timeout-minutes: 60
     strategy:
@@ -91,11 +106,15 @@ jobs:
           PY
           echo "Selected ${{ steps.simulator.outputs.name }} (${{ steps.simulator.outputs.udid }})"
 
-      - name: Boot simulator
+      - name: Boot and configure simulator
         run: |
           # Headless: the Simulator window is only overhead on a runner.
           xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
+          # Disable software keyboard predictions and autocorrect overhead
+          xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardAutocorrection -bool false || true
+          xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardPrediction -bool false || true
+          xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardShowPredictionBar -bool false || true
 
       # Building once up front keeps the compile out of the timed test run and
       # lets the suite start on every clone at the same moment.
@@ -114,9 +133,15 @@ jobs:
       # two simulator clones, and sharing its cores made every UI interaction
       # slow enough that timing-sensitive flows started failing. One simulator,
       # one test at a time, with the waiting taken out of the fixtures instead.
-      - name: Run complete XCUITest suite
+      - name: Run XCUITest suite
         run: |
           set -o pipefail
+          TEST_FILTER=""
+          CLASS="${{ github.event.inputs.test_class }}"
+          if [ -n "$CLASS" ] && [ "$CLASS" != "all" ]; then
+            TEST_FILTER="-only-testing:MossLiveUITests/$CLASS"
+            echo "Running only target test class: $CLASS"
+          fi
           xcodebuild test-without-building \
             -project MossLive.xcodeproj \
             -scheme MossLiveUITests \
@@ -127,6 +152,7 @@ jobs:
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 240 \
             -maximum-test-execution-time-allowance 600 \
+            $TEST_FILTER \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-test.log
 
       - name: Export screenshots

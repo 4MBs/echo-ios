@@ -150,12 +150,12 @@ enum UITestRuntime {
         if scenario == .loading {
             // Long enough to be seen and asserted, short enough that the suite
             // does not spend its time waiting on purpose.
-            try await Task.sleep(for: .milliseconds(2200))
+            try await Task.sleep(for: .milliseconds(1000))
         } else {
-            try await Task.sleep(for: .milliseconds(120))
+            try await Task.sleep(for: .milliseconds(50))
         }
         if path == "/answer" || path.hasSuffix("/ask") {
-            try await Task.sleep(for: .milliseconds(2000))
+            try await Task.sleep(for: .milliseconds(300))
         }
         if scenario == .writeError, method != "GET" {
             throw BackendAPI.APIError(message: "Der Testserver lehnt Änderungen ab.", status: 500)
