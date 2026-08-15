@@ -94,9 +94,18 @@ jobs:
           echo "Selected ${{ steps.simulator.outputs.name }} (${{ steps.simulator.outputs.udid }})"
 
       - name: Boot and configure simulator
+        env:
+          TEST_CLASS: ${{ github.event.inputs.test_class }}
         run: |
           # Headless: the Simulator window is only overhead on a runner.
+          # Set this before boot so focused keyboard tests do not need to wait
+          # for a running simulator merely to expose the software keyboard.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
           xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
+          if [ "$TEST_CLASS" != "all" ]; then
+            echo "Simulator boot continues while the focused test compiles."
+            exit 0
+          fi
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
           # Disable software keyboard predictions and autocorrect overhead
           xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardAutocorrection -bool false || true
