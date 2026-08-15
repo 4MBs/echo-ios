@@ -43,6 +43,7 @@ struct PDFReader: View {
     @State private var resumeAssistantAfterRegion = false
     @State private var askingForPage = false
     @State private var typedPage = ""
+    @State private var openedAt = "1"
     @State private var adjustingNumbering = false
     @State private var typedNumbering = ""
     @State private var numberingPage = 1
@@ -386,7 +387,8 @@ struct PDFReader: View {
     /// The current page, and the way to jump to another one.
     private var pageIndicator: some View {
         Button {
-            typedPage = printedLabel(currentPage)
+            typedPage = ""
+            openedAt = printedLabel(currentPage)
             askingForPage = true
         } label: {
             // Fixed slots either side of the slash: the indicator stays put
@@ -409,11 +411,15 @@ struct PDFReader: View {
     /// it at once. The keyboard's Done button only puts the indicator back.
     private var pageJump: some View {
         HStack(spacing: 8) {
-            AutoFocusPageNumberField(text: $typedPage, onCommit: closePageJump)
-                .frame(width: 48, height: 32)
-                .accessibilityLabel("Seitennummer")
+            AutoFocusPageNumberField(
+                text: $typedPage,
+                placeholder: openedAt,
+                onCommit: closePageJump
+            )
+            .frame(width: 48, height: 32)
+            .accessibilityLabel("Seitennummer")
 
-            Text("/ \(printedLast)")
+            Text("von \(printedLast)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

@@ -201,6 +201,7 @@ struct BookReaderView: View {
 /// "Seite fragen" in the reader's stable navigation toolbar.
 struct AutoFocusPageNumberField: UIViewRepresentable {
     @Binding var text: String
+    var placeholder: String = ""
     let onCommit: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -215,6 +216,7 @@ struct AutoFocusPageNumberField: UIViewRepresentable {
         field.textColor = .label
         field.tintColor = .systemBlue
         field.backgroundColor = .clear
+        field.placeholder = placeholder
         field.delegate = context.coordinator
         field.addTarget(context.coordinator, action: #selector(Coordinator.changed), for: .editingChanged)
         field.accessibilityLabel = "Seitennummer"
@@ -238,6 +240,7 @@ struct AutoFocusPageNumberField: UIViewRepresentable {
     func updateUIView(_ field: UITextField, context: Context) {
         context.coordinator.parent = self
         if field.text != text { field.text = text }
+        if field.placeholder != placeholder { field.placeholder = placeholder }
     }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
