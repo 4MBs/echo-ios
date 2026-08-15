@@ -238,6 +238,7 @@ final class BookPDFView: PDFView {
 
     @objc private func readerInteractionBegan(_ recognizer: UIGestureRecognizer) {
         guard recognizer.state == .began else { return }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         discardFinalQualityOverlay()
     }
 
@@ -250,6 +251,7 @@ final class BookPDFView: PDFView {
     }
 
     @objc private func tappedOutsideSelection(_ recognizer: UITapGestureRecognizer) {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         guard let overlay = adjustmentOverlay, !overlay.isHidden, !overlay.isInteracting else { return }
         let point = recognizer.location(in: self)
         guard !regionControlsContain(point) else { return }

@@ -107,6 +107,16 @@ struct PDFReader: View {
                     typedPage = ""
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                pageFieldFocused = false
+                askingForPage = false
+                typedPage = ""
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                pageFieldFocused = false
+                askingForPage = false
+                typedPage = ""
+            }
     }
 
     /// On iPad the panel and reader share one animatable layout. A native
@@ -433,6 +443,11 @@ struct PDFReader: View {
                 .frame(width: 36)
                 .keyboardType(.numberPad)
                 .focused($pageFieldFocused)
+                .onSubmit {
+                    pageFieldFocused = false
+                    askingForPage = false
+                    typedPage = ""
+                }
                 .accessibilityLabel("Seitennummer")
 
             Text("/ \(printedLast)")
