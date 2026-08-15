@@ -36,6 +36,7 @@ struct MainTabView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingNoteImportCount = 0
+    @State private var noteImportCoordinator = IncomingNoteImportCoordinator()
     @ScaledMetric(relativeTo: .body) private var sidebarFooterRowHeight: CGFloat = 52
 
     /// Which place the sidebar is on. It lives on the model rather than in this
@@ -92,6 +93,9 @@ struct MainTabView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
+        .onOpenURL { url in
+            noteImportCoordinator.receive(url, model: model)
+        }
         .onAppear {
             pendingNoteImportCount = PendingNoteImports.all().count
             if !model.settings.isConfigured {
@@ -103,9 +107,46 @@ struct MainTabView: View {
                 pendingNoteImportCount = PendingNoteImports.all().count
             }
         }
+        .onChange(of: model.sessionId) { _, _ in
+            noteImportCoordinator.modelDidChange(model)
+        }
+        .onChange(of: model.phase) { _, _ in
+            noteImportCoordinator.modelDidChange(model)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pendingNoteImportsChanged)) { _ in
             pendingNoteImportCount = PendingNoteImports.all().count
         }
+        .sheet(item: destinationItemBinding, onDismiss: {
+            noteImportCoordinator.destinationSheetDismissed()
+        }) { item in
+            IncomingNoteDestinationView(
+                item: item,
+                api: model.api,
+                coordinator: noteImportCoordinator
+            )
+        }
+        .overlay(alignment: .top) {
+            if let message = noteImportCoordinator.status.message,
+               noteImportCoordinator.destinationItem == nil {
+                IncomingNoteImportBanner(
+                    message: message,
+                    isError: noteImportCoordinator.status.isFailure,
+                    retry: { noteImportCoordinator.retry(model: model) },
+                    dismiss: noteImportCoordinator.dismissStatus
+                )
+                .padding(.top, 12)
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    private var destinationItemBinding: Binding<PendingNoteImports.Item?> {
+        Binding(
+            get: { noteImportCoordinator.destinationItem },
+            set: { item in
+                if item == nil { noteImportCoordinator.destinationSheetDismissed() }
+            }
+        )
     }
 
     /// Settings sits under the navigation list rather than inside it. It is not
@@ -148,6 +189,36 @@ struct MainTabView: View {
         case .chat: ChatView()
         case .einstellungen: SettingsView()
         }
+    }
+}
+
+private struct IncomingNoteImportBanner: View {
+    let message: String
+    let isError: Bool
+    let retry: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: isError ? "exclamationmark.triangle.fill" : "doc.badge.arrow.up")
+                .foregroundStyle(isError ? .red : Theme.accent)
+            Text(message)
+                .font(.callout)
+                .lineLimit(3)
+            Spacer(minLength: 8)
+            if isError {
+                Button("Erneut", action: retry)
+                    .buttonStyle(.bordered)
+            }
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Hinweis schließen")
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
     }
 }
 
