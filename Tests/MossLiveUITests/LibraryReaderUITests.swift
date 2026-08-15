@@ -8,10 +8,11 @@ final class LibraryReaderUITests: EchoUITestCase {
         shot("reader-double-page")
 
         tap(app.buttons["Nächste Seite"])
-        let pageIndicator = app.buttons
+        let turned = app.buttons
+            .matching(NSPredicate(format: "NOT (label BEGINSWITH 'Seite 1 ')"))
             .matching(NSPredicate(format: "label MATCHES 'Seite [0-9]+.*'"))
             .firstMatch
-        XCTAssertTrue(pageIndicator.waitForExistence(timeout: 4))
+        XCTAssertTrue(turned.waitForExistence(timeout: 5), "The page never turned")
         shot("reader-next-page")
         tap(app.buttons["Vorherige Seite"])
 
@@ -30,6 +31,12 @@ final class LibraryReaderUITests: EchoUITestCase {
         XCTAssertTrue(pageField.waitForExistence(timeout: 3))
         replaceText(pageField, with: "5")
         tap(app.buttons["Seite öffnen"])
+        // Wait for the jump to land before keeping the picture: a screenshot
+        // taken mid-transition shows two half-drawn pages and proves nothing.
+        let atFive = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH 'Seite 5 ' OR label BEGINSWITH 'Seite 4 '"))
+            .firstMatch
+        XCTAssertTrue(atFive.waitForExistence(timeout: 5), "The page jump never arrived")
         shot("reader-page-five")
 
         tap(app.buttons["Buchoptionen"])

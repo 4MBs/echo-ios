@@ -764,6 +764,12 @@ private struct ChatAttachmentChip: View {
 private struct ChatSentAttachments: View {
     let attachments: [ChatStore.Attachment]
 
+    // The chip grows with the student's text instead of holding one size and
+    // cutting the name in half against the message underneath it.
+    @ScaledMetric(relativeTo: .caption) private var tileWidth: CGFloat = 160
+    @ScaledMetric(relativeTo: .caption) private var thumbnailWidth: CGFloat = 150
+    @ScaledMetric(relativeTo: .caption) private var thumbnailHeight: CGFloat = 110
+
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
@@ -773,7 +779,7 @@ private struct ChatSentAttachments: View {
                             Image(uiImage: image)
                                 .resizable()
                                 .scaledToFill()
-                                .frame(width: 150, height: 110)
+                                .frame(width: thumbnailWidth, height: thumbnailHeight)
                                 .clipped()
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         } else {
@@ -789,7 +795,8 @@ private struct ChatSentAttachments: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("chat.attachment.name")
                     }
-                    .frame(maxWidth: 160, alignment: .leading)
+                    .frame(maxWidth: tileWidth, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     // "Versuchsprotokoll.pdf" spoken as one word is not a
                     // sentence anyone can follow: say what it is instead.
                     .accessibilityElement(children: .ignore)
