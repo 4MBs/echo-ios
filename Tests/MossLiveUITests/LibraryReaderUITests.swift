@@ -23,6 +23,10 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(app.buttons["Doppelseite"])
         shot("reader-return-double-page")
 
+        let indicator = app.buttons
+            .matching(NSPredicate(format: "label MATCHES 'Seite [0-9]+.*'"))
+            .firstMatch
+        tap(indicator)
         let pageField = app.textFields["Seitennummer"]
         XCTAssertTrue(pageField.waitForExistence(timeout: 3))
         // Typing the number is the whole interaction: there is nothing to
@@ -32,19 +36,13 @@ final class LibraryReaderUITests: EchoUITestCase {
             app.buttons["Seite öffnen"].exists,
             "The page jump still asks for the number to be confirmed"
         )
-        if app.buttons["Fertig"].exists {
-            tap(app.buttons["Fertig"].firstMatch)
-        } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-        }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
         // Wait for the jump to land before keeping the picture: a screenshot
         // taken mid-transition shows two half-drawn pages and proves nothing.
         let atFive = app.buttons
             .matching(NSPredicate(format: "label BEGINSWITH 'Seite 5 ' OR label BEGINSWITH 'Seite 4 '"))
             .firstMatch
-        if !atFive.exists {
-            XCTAssertTrue(pageField.waitForExistence(timeout: 5))
-        }
+        XCTAssertTrue(atFive.waitForExistence(timeout: 5), "The page jump never arrived")
         shot("reader-page-five")
 
         tap(app.buttons["Buchoptionen"])

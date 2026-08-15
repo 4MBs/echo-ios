@@ -41,13 +41,15 @@ struct PDFReader: View {
     @State private var selectedRegion: BackendAPI.BookPageRegion?
     @State private var selectingRegion = false
     @State private var resumeAssistantAfterRegion = false
+    @State private var askingForPage = false
     @State private var typedPage = ""
+    @State private var openedAt = "1"
     @State private var adjustingNumbering = false
     @State private var typedNumbering = ""
     @State private var numberingPage = 1
     @State private var numberingPlaceholder = "1"
     @FocusState private var numberingFocused: Bool
-    @FocusState private var editingPage: Bool
+    @FocusState private var pageFieldFocused: Bool
 
     /// One transaction drives the panel and every part of the reader whose
     /// available width changes with it.
@@ -91,30 +93,19 @@ struct PDFReader: View {
                 guard horizontalSizeClass != .compact, !reduceMotion else { return }
                 proxy.prepareForAnimatedResize(duration: 0.48)
             }
-            .onChange(of: editingPage) { _, editing in
-                if editing {
-                    typedPage = ""
+            .onChange(of: askingForPage) { _, asking in
+                if asking {
+                    pageFieldFocused = true
                 } else {
-                    typedPage = printedLabel(currentPage)
+                    pageFieldFocused = false
+                    typedPage = ""
                 }
             }
-            .onChange(of: currentPage) { _, page in
-                if !editingPage {
-                    typedPage = printedLabel(page)
+            .onChange(of: pageFieldFocused) { _, focused in
+                if !focused {
+                    askingForPage = false
+                    typedPage = ""
                 }
-            }
-            .onChange(of: typedPage) { _, text in
-                guard editingPage else { return }
-                let digits = String(text.filter(\.isNumber).prefix(5))
-                if digits != text {
-                    typedPage = digits
-                    return
-                }
-                guard let printed = Int(digits),
-                      let pdfPage = numbering.pdfPage(forPrinted: printed),
-                      pdfPage != currentPage
-                else { return }
-                proxy.go(toPage: pdfPage)
             }
     }
 
@@ -377,11 +368,14 @@ struct PDFReader: View {
         .background(Color.black.ignoresSafeArea())
     }
 
-    /// Previous/next buttons around an editable current-page field.
+    /// Previous/next buttons around the current page. Editing happens directly
+    /// in this stable control row so the first tap can focus the field and show
+    /// the number pad without presenting an unfocused intermediate popover.
     private var pageControls: some View {
         HStack(spacing: 12) {
             Button {
-                editingPage = false
+                pageFieldFocused = false
+                askingForPage = false
                 proxy.step(-1)
             } label: {
                 Image(systemName: "arrow.left")
@@ -389,26 +383,15 @@ struct PDFReader: View {
             .disabled(currentPage <= 1)
             .accessibilityLabel("Vorherige Seite")
 
-            HStack(spacing: 4) {
-                TextField(printedLabel(currentPage), text: $typedPage)
-                    .multilineTextAlignment(.trailing)
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .frame(width: 36)
-                    .keyboardType(.numberPad)
-                    .focused($editingPage)
-                    .accessibilityLabel("Seitennummer")
-
-                Text("/ \(printedLast)")
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 42, alignment: .leading)
+            if askingForPage {
+                pageJump
+            } else {
+                pageIndicator
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.regularMaterial, in: Capsule())
 
             Button {
-                editingPage = false
+                pageFieldFocused = false
+                askingForPage = false
                 proxy.step(1)
             } label: {
                 Image(systemName: "arrow.right")
@@ -417,6 +400,62 @@ struct PDFReader: View {
             .accessibilityLabel("Nächste Seite")
         }
         .buttonStyle(.glass)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: askingForPage)
+    }
+
+    /// The current page, and the way to jump to another one.
+    private var pageIndicator: some View {
+        Button {
+            typedPage = ""
+            openedAt = printedLabel(currentPage)
+            askingForPage = true
+        } label: {
+            // Fixed slots either side of the slash: the indicator stays put
+            // whether the page number is 1 or 320 digits wide.
+            HStack(spacing: 4) {
+                Text(printedLabel(currentPage))
+                    .frame(width: 36, alignment: .trailing)
+                Text("/ \(printedLast)")
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 42, alignment: .leading)
+            }
+            .font(.subheadline.monospacedDigit().weight(.semibold))
+        }
+        .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
+    }
+
+    /// Type a page and the book goes there — nothing to confirm.
+    private var pageJump: some View {
+        HStack(spacing: 4) {
+            TextField(openedAt, text: $typedPage)
+                .multilineTextAlignment(.trailing)
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                .frame(width: 36)
+                .keyboardType(.numberPad)
+                .focused($pageFieldFocused)
+                .accessibilityLabel("Seitennummer")
+
+            Text("/ \(printedLast)")
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 42, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .onChange(of: typedPage) { _, text in
+            guard askingForPage else { return }
+            let digits = String(text.filter(\.isNumber).prefix(5))
+            if digits != text {
+                typedPage = digits
+                return
+            }
+            guard let printed = Int(digits),
+                  let pdfPage = numbering.pdfPage(forPrinted: printed),
+                  pdfPage != currentPage
+            else { return }
+            proxy.go(toPage: pdfPage)
+        }
     }
 
     /// The book's own numbering, shared with the assistant panel so a cited page is
