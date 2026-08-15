@@ -110,6 +110,10 @@ struct PDFReader: View {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 endPageEntry()
             }
+            // The canvas resigns the keyboard itself, but the sidebar, the
+            // navigation bar and the assistant panel are not part of it. One
+            // tap anywhere ends the entry.
+            .endsEditingOnTouchOutsideTextInput(while: pageFieldFocused, perform: endPageEntry)
     }
 
     /// On iPad the panel and reader share one animatable layout. A native
@@ -378,7 +382,7 @@ struct PDFReader: View {
 
     /// Previous/next buttons around the current page. Editing happens directly
     /// in this stable control row so the first tap can focus the field and show
-    /// the full keyboard without mounting an intermediate control.
+    /// the number pad without mounting an intermediate control.
     private var pageControls: some View {
         HStack(spacing: 12) {
             Button {
@@ -404,16 +408,22 @@ struct PDFReader: View {
         .buttonStyle(.glass)
     }
 
-    /// The page field stays mounted so the first tap can focus it reliably.
+    /// The page field stays mounted so the first tap can focus it reliably, and
+    /// so the control keeps one size: the indicator it replaced was a glass
+    /// button with its own padding, and swapping the two made the capsule and
+    /// both arrows jump outwards every time the field was tapped.
     private var pageJump: some View {
         HStack(spacing: 4) {
             TextField(printedLabel(currentPage), text: $typedPage)
                 .multilineTextAlignment(.trailing)
                 .font(.subheadline.monospacedDigit().weight(.semibold))
                 .frame(width: 36)
-                .keyboardType(.default)
+                .keyboardType(.numberPad)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                // Only a hardware keyboard has a Return key here; the touch
+                // keypad is left because a page number is digits and nothing
+                // else, and every way out of it now ends the entry anyway.
                 .submitLabel(.done)
                 .focused($pageFieldFocused)
                 .onSubmit(endPageEntry)

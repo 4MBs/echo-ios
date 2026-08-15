@@ -2,34 +2,40 @@ import UIKit
 import XCTest
 
 final class LibraryReaderUITests: EchoUITestCase {
-    func testReaderPageEntryFocusSubmitAndOutsideDismissal() {
+    /// The two things the page control got wrong in use: it grew while it was
+    /// being typed into, and a tap somewhere else did not always end the entry.
+    func testReaderPageEntryKeepsItsSizeAndEndsOnTheFirstTapOutside() {
         openReader()
         XCTAssertTrue(app.buttons["Nächste Seite"].waitForExistence(timeout: 8))
 
         let pageField = app.textFields["Seitennummer"]
+        let back = app.buttons["Vorherige Seite"]
+        let forward = app.buttons["Nächste Seite"]
         XCTAssertTrue(
             pageField.waitForExistence(timeout: 3),
             "The mounted page field is unavailable before the first tap"
         )
+        // Only the horizontal geometry is compared: a keyboard is allowed to
+        // lift the whole bar, but nothing in it may change size or slide
+        // sideways just because the field is being typed into.
+        let restingField = pageField.frame
+        let restingBack = back.frame
+        let restingForward = forward.frame
 
-        pageField.tap()
+        tap(pageField)
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(
             keyboard.waitForExistence(timeout: 3),
             "A single tap did not focus the page field"
         )
-        let done = keyboard.buttons["Fertig"]
-        XCTAssertTrue(
-            done.waitForExistence(timeout: 3),
-            "The page field still uses the number pad without a Done key"
-        )
+        shot("reader-page-entry-focused")
+        XCTAssertEqual(pageField.frame.width, restingField.width, "The page field grew while it was being edited")
+        XCTAssertEqual(back.frame.minX, restingBack.minX, "Editing pushed the previous-page button aside")
+        XCTAssertEqual(back.frame.width, restingBack.width, "Editing resized the previous-page button")
+        XCTAssertEqual(forward.frame.maxX, restingForward.maxX, "Editing pushed the next-page button aside")
+        XCTAssertEqual(forward.frame.width, restingForward.width, "Editing resized the next-page button")
 
         pageField.typeText("5")
-        done.tap()
-        XCTAssertTrue(
-            keyboard.waitForNonExistence(timeout: 3),
-            "Return did not close the keyboard"
-        )
         // Double-page mode anchors the visible 4–5 spread at printed page 4.
         let atRequestedSpread = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == '4'"),
@@ -41,14 +47,25 @@ final class LibraryReaderUITests: EchoUITestCase {
             "The page jump never arrived at the spread containing printed page 5"
         )
 
-        pageField.tap()
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        // Once on the book itself, which PDFKit hears, and once on the sidebar,
+        // which it does not. Both are "somewhere else" to the student.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
         XCTAssertTrue(
             keyboard.waitForNonExistence(timeout: 3),
-            "Tapping the PDF did not close the keyboard"
+            "One tap on the book did not end the page entry"
         )
         XCTAssertEqual(pageField.value as? String, "4")
+        XCTAssertEqual(pageField.frame.width, restingField.width, "The page field kept its editing size")
+
+        tap(pageField)
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        // The navigation bar is not part of the book, so PDFKit never hears
+        // this one — and it is exactly where the second tap used to be needed.
+        app.navigationBars.firstMatch.tap()
+        XCTAssertTrue(
+            keyboard.waitForNonExistence(timeout: 3),
+            "One tap outside the book did not end the page entry"
+        )
     }
 
     func testShelfReaderNavigationLayoutPageJumpAndRename() {
@@ -86,10 +103,6 @@ final class LibraryReaderUITests: EchoUITestCase {
         XCTAssertTrue(
             app.keyboards.firstMatch.waitForExistence(timeout: 3),
             "A single tap did not focus the page field"
-        )
-        XCTAssertTrue(
-            app.keyboards.buttons["Fertig"].waitForExistence(timeout: 3),
-            "The page field still uses the number pad without a Done key"
         )
         // Typing the number is the whole interaction: there is nothing to
         // confirm, so no control is tapped between the digit and the page.

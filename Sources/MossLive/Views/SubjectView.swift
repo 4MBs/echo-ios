@@ -156,7 +156,7 @@ struct SubjectView: View {
                     onChangeSubject: { pendingSubjectChange = $0 },
                     onDelete: { pendingDelete = $0 }
                 )
-                    .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity)
             }
         }
     }

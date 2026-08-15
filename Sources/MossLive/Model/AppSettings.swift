@@ -66,6 +66,13 @@ final class AppSettings {
         didSet { defaults.set(recordButtonHue, forKey: "recordButtonHue") }
     }
 
+    /// Whether the recording dock shows the subject picker. Off: WebUntis names
+    /// the recording on its own, and the picker is only there for the rare
+    /// correction — an empty seat next to the record button the rest of the time.
+    var showRecordingSubjectPicker: Bool {
+        didSet { defaults.set(showRecordingSubjectPicker, forKey: "showRecordingSubjectPicker") }
+    }
+
     /// Whether a book shows the control for adjusting its page numbering. Off
     /// once the books are lined up: the numbering each book already learned
     /// stays in force either way, this only takes the control off the screen.
@@ -93,6 +100,7 @@ final class AppSettings {
         lessonNotifications = defaults.bool(forKey: "lessonNotifications")
         autoStopAtLessonEnd = defaults.bool(forKey: "autoStopAtLessonEnd")
         timetableConnected = defaults.bool(forKey: "timetableConnected")
+        showRecordingSubjectPicker = defaults.bool(forKey: "showRecordingSubjectPicker")
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
         showBookRenaming = defaults.object(forKey: "showBookRenaming") as? Bool ?? true
@@ -112,6 +120,9 @@ final class AppSettings {
             autoStopAtLessonEnd = true
             showPageNumberEditor = true
             showBookRenaming = true
+            // Shown in tests so the optional control stays covered; switching
+            // it off is covered on its own.
+            showRecordingSubjectPicker = true
         }
         // propagate whatever is already configured to the widget container,
         // so widgets work immediately after this app version's first launch
