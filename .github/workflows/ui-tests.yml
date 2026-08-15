@@ -115,13 +115,19 @@ jobs:
       # Building once up front keeps the compile out of the timed test run and
       # lets the suite start on every clone at the same moment.
       - name: Build for testing
-        if: ${{ github.event.inputs.test_class == 'all' }}
         run: |
           set -o pipefail
+          DESTINATION="platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}"
+          CLASS="${{ github.event.inputs.test_class }}"
+          if [ -n "$CLASS" ] && [ "$CLASS" != "all" ]; then
+            # This build does not wait for the concrete simulator to finish
+            # booting. The following test step uses the resulting products.
+            DESTINATION="generic/platform=iOS Simulator"
+          fi
           xcodebuild build-for-testing \
             -project MossLive.xcodeproj \
             -scheme MossLiveUITests \
-            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -destination "$DESTINATION" \
             -clonedSourcePackagesDirPath .spm-packages \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
@@ -139,13 +145,7 @@ jobs:
             TEST_FILTER="-only-testing:MossLiveUITests/$CLASS"
             echo "Running only target test class: $CLASS"
           fi
-          ACTION="test-without-building"
-          if [ -n "$TEST_FILTER" ]; then
-            # A focused run compiles and executes in one Xcode invocation.
-            # This avoids a separate dependency-resolution and build startup.
-            ACTION="test"
-          fi
-          xcodebuild "$ACTION" \
+          xcodebuild test-without-building \
             -project MossLive.xcodeproj \
             -scheme MossLiveUITests \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
