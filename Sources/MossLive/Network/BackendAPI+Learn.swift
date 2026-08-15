@@ -214,6 +214,51 @@ extension BackendAPI {
         let remediation: LearnRemediation?
     }
 
+    struct LearnExam: Codable, Identifiable, Sendable {
+        let id: String
+        let name: String
+        let subject: String
+        let examDate: String
+        let dailyMinutes: Int
+        let sessionIds: [String]
+        let cardCount: Int
+        let readiness: Double
+        let daysRemaining: Int
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, subject, readiness
+            case examDate = "exam_date"
+            case dailyMinutes = "daily_minutes"
+            case sessionIds = "session_ids"
+            case cardCount = "card_count"
+            case daysRemaining = "days_remaining"
+        }
+    }
+
+    struct LearnAnalytics: Codable, Sendable {
+        let due: Int
+        let overdue: Int
+        let stateDistribution: [String: Int]
+        let recallSuccess: Double?
+        let averageResponseMs: Int?
+        let lapses: Int
+        let repeatedMisconceptions: Int
+        let activity7Days: Int
+        let activity30Days: Int
+        let neverRecalled: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case due, overdue, lapses
+            case stateDistribution = "state_distribution"
+            case recallSuccess = "recall_success"
+            case averageResponseMs = "average_response_ms"
+            case repeatedMisconceptions = "repeated_misconceptions"
+            case activity7Days = "activity_7_days"
+            case activity30Days = "activity_30_days"
+            case neverRecalled = "never_recalled"
+        }
+    }
+
     struct LearnRemediation: Codable, Sendable {
         let diagnosis: String
         let explanation: String
@@ -250,6 +295,15 @@ extension BackendAPI {
             Response.self,
             from: request("/learn/cards", query: query)
         ).cards
+    }
+
+    func learnExams() async throws -> [LearnExam] {
+        struct Response: Decodable { let exams: [LearnExam] }
+        return try await JSONDecoder().decode(Response.self, from: request("/learn/exams")).exams
+    }
+
+    func learnAnalytics() async throws -> LearnAnalytics {
+        try await JSONDecoder().decode(LearnAnalytics.self, from: request("/learn/analytics"))
     }
 
     func deleteLearnCard(id: String) async throws {

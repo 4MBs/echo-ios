@@ -95,6 +95,11 @@ struct LearnView: View {
 
             Section {
                 NavigationLink {
+                    LearnAnalyticsView(api: api)
+                } label: {
+                    Label("Lernanalyse", systemImage: "chart.bar.xaxis")
+                }
+                NavigationLink {
                     LearnConceptLibraryView(cards: cards, api: api, onDeleted: reload)
                 } label: {
                     Label("Gelernte Konzepte", systemImage: "books.vertical")
