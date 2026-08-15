@@ -95,7 +95,7 @@ struct LearnView: View {
 
             Section {
                 NavigationLink {
-                    LearnConceptLibraryView(cards: cards)
+                    LearnConceptLibraryView(cards: cards, api: api, onDeleted: reload)
                 } label: {
                     Label("Gelernte Konzepte", systemImage: "books.vertical")
                         .badge(cards.count)
@@ -248,8 +248,22 @@ private struct LearnLessonPickerView: View {
 }
 
 private struct LearnConceptLibraryView: View {
-    let cards: [BackendAPI.LearnCard]
+    @State private var cards: [BackendAPI.LearnCard]
+    let api: BackendAPI
+    let onDeleted: () async -> Void
     @State private var query = ""
+    @State private var pendingDelete: BackendAPI.LearnCard?
+    @State private var errorMessage: String?
+
+    init(
+        cards: [BackendAPI.LearnCard],
+        api: BackendAPI,
+        onDeleted: @escaping () async -> Void
+    ) {
+        _cards = State(initialValue: cards)
+        self.api = api
+        self.onDeleted = onDeleted
+    }
 
     private var filtered: [BackendAPI.LearnCard] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -262,24 +276,68 @@ private struct LearnConceptLibraryView: View {
 
     var body: some View {
         List(filtered) { card in
-            if let source = card.primarySource {
-                NavigationLink {
-                    LearnSourceView(source: source)
-                } label: {
-                    conceptRow(card)
+            conceptLink(card)
+                .swipeActions {
+                    Button("Konzept löschen", role: .destructive) { pendingDelete = card }
                 }
-            } else {
-                conceptRow(card)
-            }
+                .contextMenu {
+                    Button("Konzept löschen", systemImage: "trash", role: .destructive) {
+                        pendingDelete = card
+                    }
+                }
+                .accessibilityIdentifier("learn-concept-\(card.id)")
         }
         .navigationTitle("Gelernte Konzepte")
         .searchable(text: $query, prompt: "Konzept oder Fach")
+        .confirmationDialog(
+            "Konzept endgültig löschen?",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { card in
+            Button("Konzept löschen", role: .destructive) { Task { await delete(card) } }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { _ in
+            Text("Das Konzept wird einschließlich aller Stundenquellen und Lernverläufe gelöscht.")
+        }
+        .alert(
+            "Konzept konnte nicht gelöscht werden",
+            isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func conceptLink(_ card: BackendAPI.LearnCard) -> some View {
+        if let source = card.primarySource {
+            NavigationLink {
+                LearnSourceView(source: source)
+            } label: {
+                conceptRow(card)
+            }
+        } else {
+            conceptRow(card)
+        }
     }
 
     private func conceptRow(_ card: BackendAPI.LearnCard) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(card.displayConcept).font(.headline)
             Text(card.subject ?? "Sonstige").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func delete(_ card: BackendAPI.LearnCard) async {
+        do {
+            try await api.deleteLearnCard(id: card.id)
+            cards.removeAll { $0.id == card.id }
+            OfflineCache.save(cards, as: OfflineCache.Key.learnCards)
+            await onDeleted()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }

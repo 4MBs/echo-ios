@@ -41,4 +41,19 @@ final class LearnUITests: EchoUITestCase {
         XCTAssertTrue(aiLesson.waitForExistence(timeout: 5))
         XCTAssertTrue(aiLesson.label.contains("Mathematik"), "The AI title must retain its subject")
     }
+
+    func testConceptCanBeDeletedFromLibraryAfterConfirmation() {
+        launch(tab: "lernen")
+        tap(app.buttons["Gelernte Konzepte"])
+        let concept = app.descendants(matching: .any)["learn-concept-learn-1"]
+        XCTAssertTrue(concept.waitForExistence(timeout: 5))
+
+        concept.press(forDuration: 1.2)
+        tap(app.buttons["Konzept löschen"])
+        XCTAssertTrue(app.staticTexts["Konzept endgültig löschen?"].waitForExistence(timeout: 3))
+        tap(app.buttons["Konzept löschen"])
+
+        XCTAssertFalse(concept.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.descendants(matching: .any)["learn-concept-learn-2"].exists)
+    }
 }
