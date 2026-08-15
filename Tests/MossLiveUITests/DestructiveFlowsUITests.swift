@@ -10,8 +10,7 @@ final class DestructiveFlowsUITests: EchoUITestCase {
 
         let conversation = button(containing: "Ohne Kontext")
         XCTAssertTrue(conversation.waitForExistence(timeout: 5))
-        conversation.press(forDuration: 1.2)
-        tap(app.buttons["Umbenennen"])
+        tap(openContextMenu(on: conversation, expecting: "Umbenennen"))
 
         let title = app.alerts.textFields.firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 4))
@@ -23,8 +22,7 @@ final class DestructiveFlowsUITests: EchoUITestCase {
         XCTAssertTrue(renamed.waitForExistence(timeout: 4), "The conversation kept its old title")
         shot("chat-history-renamed")
 
-        renamed.press(forDuration: 1.2)
-        tap(app.buttons["Löschen"])
+        tap(openContextMenu(on: renamed, expecting: "Löschen"))
         expectToDisappear(renamed, "The deleted conversation is still listed")
         shot("chat-history-deleted")
         tap(app.buttons["Fertig"])
@@ -50,9 +48,9 @@ final class DestructiveFlowsUITests: EchoUITestCase {
         launch(tab: "chat")
         let question = app.staticTexts["Erkläre Ursache und Wirkung."]
         XCTAssertTrue(question.waitForExistence(timeout: 5))
-        question.press(forDuration: 1.2)
+        let edit = openContextMenu(on: question, expecting: "Bearbeiten")
         shot("chat-message-context-menu")
-        tap(app.buttons["Bearbeiten"])
+        tap(edit)
 
         XCTAssertTrue(app.navigationBars["Nachricht bearbeiten"].waitForExistence(timeout: 4))
         // The sheet does not cover the whole screen on iPad, so the editor has
@@ -83,8 +81,7 @@ final class DestructiveFlowsUITests: EchoUITestCase {
         let lesson = button(containing: "Ursache und Wirkung")
         XCTAssertTrue(lesson.waitForExistence(timeout: 6))
 
-        lesson.press(forDuration: 1.2)
-        tap(app.buttons["Stunde löschen"])
+        tap(openContextMenu(on: lesson, expecting: "Stunde löschen"))
         XCTAssertTrue(app.staticTexts["Stunde löschen?"].waitForExistence(timeout: 4))
         shot("lesson-delete-confirmation")
         // iOS 26 anchors the dialog to the row it belongs to and shows only the
@@ -97,8 +94,7 @@ final class DestructiveFlowsUITests: EchoUITestCase {
         XCTAssertTrue(lesson.waitForExistence(timeout: 4), "Cancelling the dialog removed the lesson anyway")
         XCTAssertFalse(app.staticTexts["Stunde löschen?"].exists, "The dialog stayed open after tapping away")
 
-        lesson.press(forDuration: 1.2)
-        tap(app.buttons["Stunde löschen"])
+        tap(openContextMenu(on: lesson, expecting: "Stunde löschen"))
         tap(app.buttons["Löschen"])
         expectToDisappear(lesson, "The confirmed deletion left the lesson in the list")
         XCTAssertFalse(
@@ -117,8 +113,7 @@ final class DestructiveFlowsUITests: EchoUITestCase {
 
         let conversation = button(containing: "Zweite Unterhaltung")
         XCTAssertTrue(conversation.waitForExistence(timeout: 5))
-        conversation.press(forDuration: 1.2)
-        tap(app.buttons["Umbenennen"])
+        tap(openContextMenu(on: conversation, expecting: "Umbenennen"))
         let title = app.alerts.textFields.firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 4))
         replaceText(title, with: "Buchunterhaltung")

@@ -148,12 +148,14 @@ enum UITestRuntime {
             }
         }
         if scenario == .loading {
-            try await Task.sleep(for: .seconds(4))
+            // Long enough to be seen and asserted, short enough that the suite
+            // does not spend its time waiting on purpose.
+            try await Task.sleep(for: .milliseconds(1000))
         } else {
-            try await Task.sleep(for: .milliseconds(120))
+            try await Task.sleep(for: .milliseconds(50))
         }
         if path == "/answer" || path.hasSuffix("/ask") {
-            try await Task.sleep(for: .milliseconds(4000))
+            try await Task.sleep(for: .milliseconds(300))
         }
         if scenario == .writeError, method != "GET" {
             throw BackendAPI.APIError(message: "Der Testserver lehnt Änderungen ab.", status: 500)
@@ -405,8 +407,10 @@ enum UITestRuntime {
     }
 
     private static func chatAnswer(for question: String) -> String {
+        // Six sentences still wrap, scroll and resize like a long answer, and
+        // stream in about ten seconds rather than half a minute.
         let suffix = scenario == .longContent
-            ? String(repeating: " Langer Testinhalt prüft Umbruch, Scrollen und Größenänderungen.", count: 20)
+            ? String(repeating: " Langer Testinhalt prüft Umbruch, Scrollen und Größenänderungen.", count: 6)
             : ""
         return "Antwort auf „\(question.prefix(80))“. **Fett**, normal und reproduzierbar.\(suffix)"
     }

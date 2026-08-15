@@ -39,6 +39,19 @@ class EchoUITestCase: XCTestCase {
         return app
     }
 
+    /// Move between destinations the way a student does. Relaunching the app
+    /// for each one costs a dozen seconds on a hosted simulator, and tapping
+    /// the sidebar exercises the navigation itself rather than a launch flag.
+    func switchTo(tab: String, file: StaticString = #filePath, line: UInt = #line) {
+        let item = app.descendants(matching: .any).matching(identifier: "tab.\(tab)").firstMatch
+        if !item.waitForExistence(timeout: 3) {
+            let toggle = app.buttons["ToggleSidebar"]
+            if toggle.exists { toggle.tap() }
+        }
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "No sidebar entry for \(tab)", file: file, line: line)
+        tap(item)
+    }
+
     func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
@@ -65,9 +78,33 @@ class EchoUITestCase: XCTestCase {
         }
     }
 
+    /// A long press can be swallowed while a list is still settling, which on
+    /// the slower tablet runner reads as a missing menu. Ask twice before
+    /// believing the menu never opened.
+    @discardableResult
+    func openContextMenu(on element: XCUIElement, expecting item: String,
+                         file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        element.press(forDuration: 1.2)
+        let entry = app.buttons[item]
+        if !entry.waitForExistence(timeout: 4) {
+            element.press(forDuration: 1.4)
+            XCTAssertTrue(
+                entry.waitForExistence(timeout: 6),
+                "The context menu never offered \(item)",
+                file: file,
+                line: line
+            )
+        }
+        return entry
+    }
+
     func replaceText(_ field: XCUIElement, with value: String) {
         focus(field)
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 100))
+        let existing = (field.value as? String) ?? ""
+        if !existing.isEmpty {
+            let deleteCount = min(max(existing.count, 1), 32)
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: deleteCount))
+        }
         field.typeText(value)
     }
 
@@ -78,7 +115,6 @@ class EchoUITestCase: XCTestCase {
 
     private func focus(_ field: XCUIElement) {
         tap(field)
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     func assertVisibleElementsStayOnScreen(file: StaticString = #filePath, line: UInt = #line) {

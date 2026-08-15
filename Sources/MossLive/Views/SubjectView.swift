@@ -32,6 +32,7 @@ struct SubjectView: View {
     /// The row whose context menu asked for a deletion, held until it is
     /// confirmed. Also what the dialog is presented from.
     @State private var pendingDelete: BackendAPI.LessonInfo?
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyIconSize: CGFloat = 52
 
     /// Where a second column stops crowding the rows. A row is a heading, a
     /// meta line and a line of summary; below this, two of them side by side
@@ -139,6 +140,9 @@ struct SubjectView: View {
                 Image(subjectStyle(for: folder.name).icon)
                     .resizable()
                     .scaledToFit()
+                    // A resizable icon with nothing to constrain it fills half
+                    // an iPad. Keep it the size of the symbol it replaces.
+                    .frame(width: emptyIconSize, height: emptyIconSize)
             }
         } description: {
             Text(folder.isOther

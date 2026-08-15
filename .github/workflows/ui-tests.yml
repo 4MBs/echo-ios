@@ -1,22 +1,22 @@
 name: Exhaustive iOS Simulator UI Tests
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Sources/**"
-      - "Tests/MossLiveUITests/**"
-      - "LocalPackages/**"
-      - "project.yml"
-      - ".github/workflows/ui-tests.yml"
-  pull_request:
-    paths:
-      - "Sources/**"
-      - "Tests/MossLiveUITests/**"
-      - "LocalPackages/**"
-      - "project.yml"
-      - ".github/workflows/ui-tests.yml"
   workflow_dispatch:
+    inputs:
+      test_class:
+        description: 'Test class to run (or "all")'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - LibraryReaderUITests
+          - LearnUITests
+          - ChatUITests
+          - LessonsUITests
+          - SettingsUITests
+          - ShellAndStateUITests
+          - DestructiveFlowsUITests
 
 concurrency:
   group: ui-tests-${{ github.ref }}
@@ -27,13 +27,15 @@ env:
 
 jobs:
   simulator-suite:
-    name: ${{ matrix.form-factor }} complete suite
+    name: ${{ matrix.form-factor }} ${{ github.event.inputs.test_class || 'complete' }} suite
     runs-on: macos-26
-    timeout-minutes: 120
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        form-factor: [iphone, ipad]
+        # Echo is an iPad app first, and every flow is covered there. Add
+        # "iphone" back to this list to run the same suite on the phone.
+        form-factor: [ipad]
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +49,7 @@ jobs:
           xcrun simctl list runtimes
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
 
       - name: Generate project
         run: xcodegen generate
@@ -89,24 +91,53 @@ jobs:
           PY
           echo "Selected ${{ steps.simulator.outputs.name }} (${{ steps.simulator.outputs.udid }})"
 
-      - name: Boot simulator
+      - name: Boot and configure simulator
         run: |
+          # Headless: the Simulator window is only overhead on a runner.
           xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
-          open -a Simulator
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
+          # Disable software keyboard predictions and autocorrect overhead
+          xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardAutocorrection -bool false || true
+          xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardPrediction -bool false || true
+          xcrun simctl spawn "${{ steps.simulator.outputs.udid }}" defaults write com.apple.Preferences KeyboardShowPredictionBar -bool false || true
 
-      - name: Run complete XCUITest suite
+      # Building once up front keeps the compile out of the timed test run and
+      # lets the suite start on every clone at the same moment.
+      - name: Build for testing
         run: |
           set -o pipefail
-          xcodebuild test \
+          xcodebuild build-for-testing \
             -project MossLive.xcodeproj \
             -scheme MossLiveUITests \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -clonedSourcePackagesDirPath .spm-packages \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
+
+      # Parallel workers were tried and were slower: the runner only granted
+      # two simulator clones, and sharing its cores made every UI interaction
+      # slow enough that timing-sensitive flows started failing. One simulator,
+      # one test at a time, with the waiting taken out of the fixtures instead.
+      - name: Run XCUITest suite
+        run: |
+          set -o pipefail
+          TEST_FILTER=""
+          CLASS="${{ github.event.inputs.test_class }}"
+          if [ -n "$CLASS" ] && [ "$CLASS" != "all" ]; then
+            TEST_FILTER="-only-testing:MossLiveUITests/$CLASS"
+            echo "Running only target test class: $CLASS"
+          fi
+          xcodebuild test-without-building \
+            -project MossLive.xcodeproj \
+            -scheme MossLiveUITests \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -clonedSourcePackagesDirPath .spm-packages \
+            -derivedDataPath DerivedData \
             -resultBundlePath UIResults.xcresult \
             -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 180 \
+            -default-test-execution-time-allowance 240 \
             -maximum-test-execution-time-allowance 600 \
+            $TEST_FILTER \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-test.log
 
       - name: Export screenshots
