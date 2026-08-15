@@ -125,18 +125,19 @@ struct MainTabView: View {
                 coordinator: noteImportCoordinator
             )
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .safeAreaInset(edge: .top, spacing: 0) {
             if let message = noteImportCoordinator.status.message,
-               noteImportCoordinator.destinationItem == nil {
+               noteImportCoordinator.destinationItem == nil,
+               showsIncomingNoteStatus {
                 IncomingNoteImportBanner(
                     message: message,
                     isError: noteImportCoordinator.status.isFailure,
                     retry: { noteImportCoordinator.retry(model: model) },
                     dismiss: noteImportCoordinator.dismissStatus
                 )
-                .frame(maxWidth: 440)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .frame(maxWidth: 300)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
@@ -149,6 +150,10 @@ struct MainTabView: View {
                 if item == nil { noteImportCoordinator.destinationSheetDismissed() }
             }
         )
+    }
+
+    private var showsIncomingNoteStatus: Bool {
+        model.selectedTab == .aufnahme || model.selectedTab == .chat
     }
 
     /// Settings sits under the navigation list rather than inside it. It is not
@@ -214,14 +219,16 @@ private struct IncomingNoteImportBanner: View {
                     .controlSize(.small)
             }
             Button(action: dismiss) {
-                Image(systemName: "xmark")
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Hinweis schließen")
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 13))
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: Capsule())
     }
 }
 

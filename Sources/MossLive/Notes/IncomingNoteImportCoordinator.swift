@@ -14,9 +14,10 @@ final class IncomingNoteImportCoordinator {
         var message: String? {
             switch self {
             case .idle: nil
-            case .waiting(let filename): "\(filename) wird angehängt, sobald die Aufnahme verbunden ist."
-            case .importing(let filename): "\(filename) wird zur Stunde hinzugefügt…"
-            case .success(let message), .failure(_, let message): message
+            case .waiting: "Datei wartet auf Verbindung"
+            case .importing: "Datei wird hinzugefügt…"
+            case .success: "Datei hinzugefügt"
+            case .failure(_, let message): message
             }
         }
 
@@ -31,6 +32,7 @@ final class IncomingNoteImportCoordinator {
     private(set) var status: Status = .idle
     private var waitingItem: PendingNoteImports.Item?
     private var importTask: Task<Void, Never>?
+    private var statusDismissTask: Task<Void, Never>?
 
     func receive(_ url: URL, model: AppModel) {
         do {
@@ -78,7 +80,7 @@ final class IncomingNoteImportCoordinator {
     ) {
         startImport(item, sessionID: lesson.id, api: api) { [weak self] in
             self?.completedLesson = lesson
-            self?.status = .success("\(item.filename) wurde zu \(lesson.displayTitle) hinzugefügt.")
+            self?.showSuccess()
         }
     }
 
@@ -88,6 +90,8 @@ final class IncomingNoteImportCoordinator {
     }
 
     func dismissStatus() {
+        statusDismissTask?.cancel()
+        statusDismissTask = nil
         status = .idle
     }
 
@@ -122,7 +126,7 @@ final class IncomingNoteImportCoordinator {
         api: BackendAPI
     ) {
         startImport(item, sessionID: sessionID, api: api) { [weak self] in
-            self?.status = .success("\(item.filename) wurde an die laufende Stunde angehängt.")
+            self?.showSuccess()
         }
     }
 
@@ -136,6 +140,8 @@ final class IncomingNoteImportCoordinator {
             status = .failure(item, "Ein anderes Dokument wird gerade importiert. Versuche es gleich erneut.")
             return
         }
+        statusDismissTask?.cancel()
+        statusDismissTask = nil
         status = .importing(item.filename)
         importTask = Task { [weak self] in
             defer { self?.importTask = nil }
@@ -152,6 +158,21 @@ final class IncomingNoteImportCoordinator {
             } catch {
                 self?.status = .failure(item, error.localizedDescription)
             }
+        }
+    }
+
+    private func showSuccess() {
+        statusDismissTask?.cancel()
+        status = .success("Datei hinzugefügt")
+        statusDismissTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(4))
+            } catch {
+                return
+            }
+            guard self?.status == .success("Datei hinzugefügt") else { return }
+            self?.status = .idle
+            self?.statusDismissTask = nil
         }
     }
 
