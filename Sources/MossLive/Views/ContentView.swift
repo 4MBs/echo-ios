@@ -17,6 +17,7 @@ struct LiveView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) { RecordDeck() }
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { AnswerButton() } }
                 .animation(.snappy, value: model.bannerMessage)
+                .animation(.snappy, value: model.recordingSubjectError)
                 // No title: the sidebar already says which screen this is, and a
                 // second "Aufnahme" across the top of an otherwise empty page had
                 // nothing to do. The bar itself has to stay — it carries the
@@ -32,6 +33,7 @@ struct LiveView: View {
     /// microphone is doing, and it took a banner's worth of the page to say so.
     private var hasNotices: Bool {
         if case .error = model.phase { return true }
+        if model.recordingSubjectError != nil { return true }
         if model.bannerMessage != nil { return true }
         return model.phase == .reconnecting && model.bufferedSeconds >= 1
     }
@@ -42,6 +44,15 @@ struct LiveView: View {
             VStack(spacing: 8) {
                 if case .error(let message) = model.phase {
                     NoticeBanner(text: message, systemImage: "exclamationmark.triangle.fill", tint: .red)
+                }
+                if let subjectError = model.recordingSubjectError {
+                    NoticeBanner(
+                        text: subjectError,
+                        systemImage: "books.vertical.fill",
+                        tint: .red,
+                        dismiss: model.dismissRecordingSubjectError
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if let banner = model.bannerMessage {
                     NoticeBanner(text: banner, systemImage: "info.circle.fill", tint: .orange)
@@ -476,13 +487,26 @@ struct NoticeBanner: View {
     let text: String
     let systemImage: String
     var tint: Color = .orange
+    var dismiss: (() -> Void)? = nil
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: systemImage)
-                .foregroundStyle(tint)
-            Text(text)
-            Spacer(minLength: 0)
+        ZStack(alignment: .topTrailing) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(tint)
+                Text(text)
+                Spacer(minLength: 0)
+            }
+            .padding(.trailing, dismiss == nil ? 0 : 24)
+
+            if let dismiss {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hinweis schließen")
+            }
         }
         .font(.footnote)
         .padding(.horizontal, 14)

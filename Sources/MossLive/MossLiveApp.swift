@@ -125,7 +125,7 @@ struct MainTabView: View {
                 coordinator: noteImportCoordinator
             )
         }
-        .overlay(alignment: .top) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if let message = noteImportCoordinator.status.message,
                noteImportCoordinator.destinationItem == nil {
                 IncomingNoteImportBanner(
@@ -134,8 +134,10 @@ struct MainTabView: View {
                     retry: { noteImportCoordinator.retry(model: model) },
                     dismiss: noteImportCoordinator.dismissStatus
                 )
-                .padding(.top, 12)
-                .padding(.horizontal, 20)
+                .frame(maxWidth: 440)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
@@ -199,16 +201,17 @@ private struct IncomingNoteImportBanner: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 9) {
             Image(systemName: isError ? "exclamationmark.triangle.fill" : "doc.badge.arrow.up")
                 .foregroundStyle(isError ? .red : Theme.accent)
             Text(message)
-                .font(.callout)
-                .lineLimit(3)
+                .font(.footnote)
+                .lineLimit(2)
             Spacer(minLength: 8)
             if isError {
                 Button("Erneut", action: retry)
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
             Button(action: dismiss) {
                 Image(systemName: "xmark")
@@ -216,9 +219,9 @@ private struct IncomingNoteImportBanner: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Hinweis schließen")
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 13))
     }
 }
 
