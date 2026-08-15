@@ -263,6 +263,21 @@ extension BackendAPI {
     }
 
     struct LearnExamRun: Codable, Identifiable, Sendable {
+        struct Result: Codable, Identifiable, Sendable {
+            let cardId: String
+            let concept: String
+            let correct: Bool
+            let points: Double
+            let maxPoints: Double
+            let feedback: String
+            var id: String { cardId }
+
+            enum CodingKeys: String, CodingKey {
+                case concept, correct, points, feedback
+                case cardId = "card_id"
+                case maxPoints = "max_points"
+            }
+        }
         struct Question: Codable, Identifiable, Sendable {
             let id: String
             let question: String
@@ -288,16 +303,25 @@ extension BackendAPI {
         let startedAt: String
         let score: Double?
         let maxPoints: Double
+        let timeLimitMinutes: Int
+        let results: [Result]?
 
         enum CodingKeys: String, CodingKey {
             case id, status, questions, answers, score
             case examId = "exam_id"
             case startedAt = "started_at"
             case maxPoints = "max_points"
+            case timeLimitMinutes = "time_limit_minutes"
+            case results
         }
     }
 
     struct LearnAnalytics: Codable, Sendable {
+        struct Activity: Codable, Identifiable, Sendable {
+            let date: String
+            let count: Int
+            var id: String { date }
+        }
         let due: Int
         let overdue: Int
         let stateDistribution: [String: Int]
@@ -308,6 +332,9 @@ extension BackendAPI {
         let activity7Days: Int
         let activity30Days: Int
         let neverRecalled: [String]
+        let recallBySubject: [String: Double]
+        let recallByConcept: [String: Double]
+        let activitySeries: [Activity]
 
         enum CodingKeys: String, CodingKey {
             case due, overdue, lapses
@@ -318,6 +345,9 @@ extension BackendAPI {
             case activity7Days = "activity_7_days"
             case activity30Days = "activity_30_days"
             case neverRecalled = "never_recalled"
+            case recallBySubject = "recall_by_subject"
+            case recallByConcept = "recall_by_concept"
+            case activitySeries = "activity_series"
         }
     }
 
@@ -377,6 +407,15 @@ extension BackendAPI {
         _ = try await request("/learn/exams/\(id)", method: "DELETE")
     }
 
+    func updateLearnExam(_ exam: LearnExam, name: String, subject: String, date: String, sessionIds: [String]) async throws -> LearnExam {
+        struct Response: Decodable { let exam: LearnExam }
+        let data = try await request("/learn/exams/\(exam.id)", method: "PATCH", jsonBody: [
+            "name": name, "subject": subject, "exam_date": date,
+            "session_ids": sessionIds, "daily_minutes": exam.dailyMinutes
+        ])
+        return try JSONDecoder().decode(Response.self, from: data).exam
+    }
+
     func startLearnExam(id: String) async throws -> LearnExamRun {
         struct Response: Decodable { let run: LearnExamRun }
         let data = try await request("/learn/exams/\(id)/runs", method: "POST")
@@ -388,6 +427,14 @@ extension BackendAPI {
             "/learn/exam-runs/\(runId)/answers/\(cardId)", method: "PATCH",
             jsonBody: ["answer": answer]
         )
+    }
+
+    func setLearnExamRunStatus(runId: String, status: String) async throws -> LearnExamRun {
+        struct Response: Decodable { let run: LearnExamRun }
+        let data = try await request(
+            "/learn/exam-runs/\(runId)/status", method: "PATCH", jsonBody: ["status": status]
+        )
+        return try JSONDecoder().decode(Response.self, from: data).run
     }
 
     func submitLearnExam(runId: String) async throws -> LearnExamRun {
@@ -434,6 +481,17 @@ extension BackendAPI {
         return try JSONDecoder().decode(Response.self, from: data).cards
     }
 
+    func regenerateLearnDraft(_ draft: LearnCardDraft) async throws -> LearnCardDraft {
+        struct Response: Decodable { let draft: LearnCardDraft }
+        let encoded = try JSONEncoder().encode(draft)
+        let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+        let data = try await request(
+            "/learn/drafts/regenerate", method: "POST",
+            jsonBody: ["session_id": draft.sessionId, "draft": object]
+        )
+        return try JSONDecoder().decode(Response.self, from: data).draft
+    }
+
     func updateLearnCard(id: String, draft: LearnCardDraft) async throws -> LearnCard {
         struct Response: Decodable { let card: LearnCard }
         let encoded = try JSONEncoder().encode(draft)
@@ -460,7 +518,9 @@ extension BackendAPI {
     func evaluateLearnAnswer(
         cardId: String,
         answer: String,
-        confidence: Int? = nil
+        confidence: Int? = nil,
+        responseDurationMs: Int? = nil,
+        mode: String = "review"
     ) async throws -> LearnEvaluationResult {
         struct Response: Decodable {
             let evaluation: LearnEvaluation
@@ -471,6 +531,8 @@ extension BackendAPI {
             "card_id": cardId, "answer": answer, "attempt_uuid": UUID().uuidString
         ]
         if let confidence { body["confidence"] = confidence }
+        if let responseDurationMs { body["response_ms"] = responseDurationMs }
+        body["mode"] = mode
         let data = try await request("/learn/evaluate", method: "POST", jsonBody: body)
         let response = try JSONDecoder().decode(Response.self, from: data)
         return LearnEvaluationResult(

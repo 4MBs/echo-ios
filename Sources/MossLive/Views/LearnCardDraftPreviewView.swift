@@ -12,6 +12,7 @@ struct LearnCardDraftPreviewView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var confirmDiscard = false
+    @State private var regenerating: String?
 
     init(
         api: BackendAPI,
@@ -47,6 +48,10 @@ struct LearnCardDraftPreviewView: View {
                         TextField("Erklärung", text: $drafts[index].explanation, axis: .vertical)
                             .lineLimit(2 ... 6)
                         Stepper("Schwierigkeit \(drafts[index].difficulty) von 5", value: $drafts[index].difficulty, in: 1 ... 5)
+                        Button("Diese Karte neu formulieren", systemImage: "arrow.clockwise") {
+                            Task { await regenerate(index) }
+                        }
+                        .disabled(regenerating != nil)
                     }
 
                     Section("Entwürfe") {
@@ -118,5 +123,16 @@ struct LearnCardDraftPreviewView: View {
             errorMessage = error.localizedDescription
         }
         isSaving = false
+    }
+
+    private func regenerate(_ index: Int) async {
+        regenerating = drafts[index].id
+        errorMessage = nil
+        do {
+            let replacement = try await api.regenerateLearnDraft(drafts[index])
+            drafts[index] = replacement
+            selection = replacement.id
+        } catch { errorMessage = error.localizedDescription }
+        regenerating = nil
     }
 }

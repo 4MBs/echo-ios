@@ -2,16 +2,20 @@ import SwiftUI
 
 struct LearnReviewView: View {
     let api: BackendAPI
+    let mode: String
     @State private var session: LearnReviewSession
     @State private var answer = ""
     @State private var evaluation: BackendAPI.LearnEvaluation?
     @State private var remediation: BackendAPI.LearnRemediation?
     @State private var isEvaluating = false
     @State private var errorMessage: String?
+    @State private var confidence: Int?
+    @State private var questionStartedAt = Date()
     @FocusState private var answerFocused: Bool
 
-    init(api: BackendAPI, cards: [BackendAPI.LearnCard]) {
+    init(api: BackendAPI, cards: [BackendAPI.LearnCard], mode: String = "review") {
         self.api = api
+        self.mode = mode
         _session = State(initialValue: LearnReviewSession(cards: cards))
     }
 
@@ -58,6 +62,12 @@ struct LearnReviewView: View {
                 } else {
                     LearnAnswerSpecView(spec: card.answerSpec, answer: $answer)
                         .focused($answerFocused)
+                    Picker("Wie sicher bist du?", selection: $confidence) {
+                        Text("Nicht angegeben").tag(Int?.none)
+                        Text("Unsicher").tag(Int?.some(1))
+                        Text("Teilweise sicher").tag(Int?.some(2))
+                        Text("Sehr sicher").tag(Int?.some(4))
+                    }
                     Button {
                         Task { await evaluate(card) }
                     } label: {
@@ -112,7 +122,12 @@ struct LearnReviewView: View {
         isEvaluating = true
         errorMessage = nil
         do {
-            let result = try await api.evaluateLearnAnswer(cardId: card.id, answer: answer)
+            let duration = max(0, Int(Date().timeIntervalSince(questionStartedAt) * 1_000))
+            let result = try await api.evaluateLearnAnswer(
+                cardId: card.id, answer: answer, confidence: confidence,
+                responseDurationMs: duration,
+                mode: mode
+            )
             evaluation = result.evaluation
             remediation = result.remediation
         } catch is CancellationError {
@@ -128,6 +143,8 @@ struct LearnReviewView: View {
         answer = ""
         evaluation = nil
         remediation = nil
+        confidence = nil
+        questionStartedAt = Date()
         errorMessage = nil
         answerFocused = true
     }

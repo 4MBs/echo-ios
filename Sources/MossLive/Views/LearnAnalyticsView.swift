@@ -22,6 +22,21 @@ struct LearnAnalyticsView: View {
                     LabeledContent("Letzte 7 Tage", value: "\(analytics.activity7Days) Antworten")
                     LabeledContent("Letzte 30 Tage", value: "\(analytics.activity30Days) Antworten")
                 }
+                if !analytics.recallBySubject.isEmpty {
+                    Section("Abrufquote nach Fach") {
+                        ForEach(analytics.recallBySubject.keys.sorted(), id: \.self) { subject in
+                            LabeledContent(subject, value: analytics.recallBySubject[subject, default: 0].formatted(.percent))
+                        }
+                    }
+                }
+                let weaknesses = analytics.recallByConcept.sorted { $0.value < $1.value }.prefix(8)
+                if !weaknesses.isEmpty {
+                    Section("Aktuelle Wissenslücken") {
+                        ForEach(Array(weaknesses), id: \.key) { concept, score in
+                            LabeledContent(concept, value: score.formatted(.percent))
+                        }
+                    }
+                }
                 if !analytics.neverRecalled.isEmpty {
                     Section("Noch nie sicher abgerufen") {
                         ForEach(analytics.neverRecalled, id: \.self) { Text($0) }
