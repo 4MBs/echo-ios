@@ -70,7 +70,9 @@ private struct StructuredFields: View {
             return values.indices.contains(index) ? values[index] : ""
         } set: { value in
             var values = answer.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-            while values.count <= index { values.append("") }
+            while values.count <= index {
+                values.append("")
+            }
             values[index] = value
             answer = values.joined(separator: "|")
         }

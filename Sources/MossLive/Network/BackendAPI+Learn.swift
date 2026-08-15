@@ -312,6 +312,7 @@ extension BackendAPI {
                 case maxPoints = "max_points"
             }
         }
+
         struct Question: Codable, Identifiable, Sendable {
             let id: String
             let question: String
@@ -358,12 +359,14 @@ extension BackendAPI {
             let count: Int
             var id: String { date }
         }
+
         struct ResponseTime: Codable, Identifiable, Sendable {
             let date: String
             let averageMs: Int?
             var id: String { date }
             enum CodingKeys: String, CodingKey { case date; case averageMs = "average_ms" }
         }
+
         let due: Int
         let overdue: Int
         let stateDistribution: [String: Int]
@@ -438,7 +441,8 @@ extension BackendAPI {
         return try await JSONDecoder().decode(Response.self, from: request("/learn/exams")).exams
     }
 
-    func createLearnExam(name: String, subject: String, date: String, sessionIds: [String], dailyMinutes: Int) async throws -> LearnExam {
+    func createLearnExam(name: String, subject: String, date: String, sessionIds: [String],
+                         dailyMinutes: Int) async throws -> LearnExam {
         struct Response: Decodable { let exam: LearnExam }
         let data = try await request("/learn/exams", method: "POST", jsonBody: [
             "name": name, "subject": subject, "exam_date": date,
@@ -451,7 +455,14 @@ extension BackendAPI {
         _ = try await request("/learn/exams/\(id)", method: "DELETE")
     }
 
-    func updateLearnExam(_ exam: LearnExam, name: String, subject: String, date: String, sessionIds: [String], dailyMinutes: Int) async throws -> LearnExam {
+    func updateLearnExam(
+        _ exam: LearnExam,
+        name: String,
+        subject: String,
+        date: String,
+        sessionIds: [String],
+        dailyMinutes: Int
+    ) async throws -> LearnExam {
         struct Response: Decodable { let exam: LearnExam }
         let data = try await request("/learn/exams/\(exam.id)", method: "PATCH", jsonBody: [
             "name": name, "subject": subject, "exam_date": date,

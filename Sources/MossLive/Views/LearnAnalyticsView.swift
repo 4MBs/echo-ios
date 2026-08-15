@@ -11,10 +11,16 @@ struct LearnAnalyticsView: View {
                 Section("Jetzt wichtig") {
                     LabeledContent("Fällig", value: "\(analytics.due)")
                     LabeledContent("Überfällig", value: "\(analytics.overdue)")
-                    LabeledContent("Erneut zu lernen", value: "\(analytics.stateDistribution["relearning", default: 0])")
+                    LabeledContent(
+                        "Erneut zu lernen",
+                        value: "\(analytics.stateDistribution["relearning", default: 0])"
+                    )
                 }
                 Section("Lernergebnis") {
-                    LabeledContent("Abrufquote", value: analytics.recallSuccess.map { $0.formatted(.percent) } ?? "Noch nicht genug Daten")
+                    LabeledContent(
+                        "Abrufquote",
+                        value: analytics.recallSuccess.map { $0.formatted(.percent) } ?? "Noch nicht genug Daten"
+                    )
                     LabeledContent("Fehlversuche", value: "\(analytics.lapses)")
                     LabeledContent("Wiederholte Missverständnisse", value: "\(analytics.repeatedMisconceptions)")
                 }
@@ -22,13 +28,16 @@ struct LearnAnalyticsView: View {
                     LabeledContent("Letzte 7 Tage", value: "\(analytics.activity7Days) Antworten")
                     LabeledContent("Letzte 30 Tage", value: "\(analytics.activity30Days) Antworten")
                     if let latest = analytics.responseTimeSeries.last(where: { $0.averageMs != nil })?.averageMs {
-                        LabeledContent("Ø Antwortzeit zuletzt", value: "\(latest / 1_000) Sek.")
+                        LabeledContent("Ø Antwortzeit zuletzt", value: "\(latest / 1000) Sek.")
                     }
                 }
                 if !analytics.recallBySubject.isEmpty {
                     Section("Abrufquote nach Fach") {
                         ForEach(analytics.recallBySubject.keys.sorted(), id: \.self) { subject in
-                            LabeledContent(subject, value: analytics.recallBySubject[subject, default: 0].formatted(.percent))
+                            LabeledContent(
+                                subject,
+                                value: analytics.recallBySubject[subject, default: 0].formatted(.percent)
+                            )
                         }
                     }
                 }
@@ -46,7 +55,11 @@ struct LearnAnalyticsView: View {
                     }
                 }
             } else if let errorMessage {
-                ContentUnavailableView("Analytik nicht verfügbar", systemImage: "chart.bar.xaxis", description: Text(errorMessage))
+                ContentUnavailableView(
+                    "Analytik nicht verfügbar",
+                    systemImage: "chart.bar.xaxis",
+                    description: Text(errorMessage)
+                )
             } else {
                 ProgressView("Lernbelege werden geladen …")
             }

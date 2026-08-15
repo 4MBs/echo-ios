@@ -47,7 +47,11 @@ struct LearnCardDraftPreviewView: View {
                         .lineLimit(2 ... 8)
                         TextField("Erklärung", text: $drafts[index].explanation, axis: .vertical)
                             .lineLimit(2 ... 6)
-                        Stepper("Schwierigkeit \(drafts[index].difficulty) von 5", value: $drafts[index].difficulty, in: 1 ... 5)
+                        Stepper(
+                            "Schwierigkeit \(drafts[index].difficulty) von 5",
+                            value: $drafts[index].difficulty,
+                            in: 1 ... 5
+                        )
                         Button("Diese Karte neu formulieren", systemImage: "arrow.clockwise") {
                             Task { await regenerate(index) }
                         }

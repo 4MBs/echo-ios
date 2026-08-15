@@ -9,20 +9,32 @@ struct LearnExamRunView: View {
     @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
 
-    init(api: BackendAPI, initialRun: BackendAPI.LearnExamRun) { self.api = api; _run = State(initialValue: initialRun) }
+    init(api: BackendAPI, initialRun: BackendAPI.LearnExamRun) { self.api = api; _run = State(initialValue: initialRun)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     if run.status == "submitted" {
-                        ContentUnavailableView("Probeprüfung abgegeben", systemImage: "checkmark.seal.fill", description: Text("\(run.score ?? 0, specifier: "%.0f") von \(run.maxPoints, specifier: "%.0f") Punkten"))
+                        ContentUnavailableView(
+                            "Probeprüfung abgegeben",
+                            systemImage: "checkmark.seal.fill",
+                            description: Text(
+                                "\(run.score ?? 0, specifier: "%.0f") von \(run.maxPoints, specifier: "%.0f") Punkten"
+                            )
+                        )
                         ForEach(run.results ?? []) { result in
                             VStack(alignment: .leading, spacing: 6) {
-                                Label(result.concept, systemImage: result.correct ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                    .font(.headline).foregroundStyle(result.correct ? .green : .red)
-                                Text("\(result.points, specifier: "%.0f") / \(result.maxPoints, specifier: "%.0f") Punkte")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                Label(
+                                    result.concept,
+                                    systemImage: result.correct ? "checkmark.circle.fill" : "xmark.circle.fill"
+                                )
+                                .font(.headline).foregroundStyle(result.correct ? .green : .red)
+                                Text(
+                                    "\(result.points, specifier: "%.0f") / \(result.maxPoints, specifier: "%.0f") Punkte"
+                                )
+                                .font(.caption).foregroundStyle(.secondary)
                                 Text(result.feedback)
                             }
                             .padding().background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
@@ -32,14 +44,18 @@ struct LearnExamRunView: View {
                         HStack {
                             Text("Aufgabe \(index + 1) von \(run.questions.count) · \(question.points) Punkte")
                             Spacer()
-                            TimelineView(.periodic(from: .now, by: 1)) { context in Text(remaining(at: context.date)).monospacedDigit() }
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                Text(remaining(at: context.date)).monospacedDigit()
+                            }
                         }.font(.caption).foregroundStyle(.secondary)
                         ProgressView(value: Double(index), total: Double(max(1, run.questions.count)))
                         Text(question.question).font(.title2.bold())
                         LearnAnswerSpecView(spec: question.answerSpec, answer: $answer)
                             .disabled(run.status == "paused")
-                        Button(index + 1 == run.questions.count ? "Prüfung abgeben" : "Antwort speichern und weiter") { Task { await next(question) } }
-                            .buttonStyle(.borderedProminent).disabled(submitting || run.status == "paused")
+                        Button(index + 1 == run.questions.count ? "Prüfung abgeben" : "Antwort speichern und weiter") {
+                            Task { await next(question) }
+                        }
+                        .buttonStyle(.borderedProminent).disabled(submitting || run.status == "paused")
                     } else {
                         ContentUnavailableView("Keine Aufgaben", systemImage: "doc.text")
                     }
@@ -78,12 +94,15 @@ struct LearnExamRunView: View {
     }
 
     private func togglePause() async {
-        do { run = try await api.setLearnExamRunStatus(runId: run.id, status: run.status == "paused" ? "active" : "paused") }
-        catch { errorMessage = error.localizedDescription }
+        do { run = try await api.setLearnExamRunStatus(
+            runId: run.id,
+            status: run.status == "paused" ? "active" : "paused"
+        ) } catch { errorMessage = error.localizedDescription }
     }
 
     private func remaining(at date: Date) -> String {
-        guard run.status != "paused", let start = ISO8601DateFormatter().date(from: run.startedAt) else { return "Pausiert" }
+        guard run.status != "paused",
+              let start = ISO8601DateFormatter().date(from: run.startedAt) else { return "Pausiert" }
         let seconds = remainingSeconds(at: date, start: start)
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }

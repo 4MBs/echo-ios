@@ -34,8 +34,12 @@ struct LearnRemediationView: View {
                 .padding(8)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
             if let feedback {
-                Label(feedback.feedback, systemImage: feedback.category == .correct ? "checkmark.circle.fill" : "arrow.counterclockwise.circle")
-                    .foregroundStyle(feedback.category == .correct ? .green : .orange)
+                Label(
+                    feedback.feedback,
+                    systemImage: feedback
+                        .category == .correct ? "checkmark.circle.fill" : "arrow.counterclockwise.circle"
+                )
+                .foregroundStyle(feedback.category == .correct ? .green : .orange)
             }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             Button(feedback?.category == .correct ? "Weiter" : "Kontrollantwort prüfen") {

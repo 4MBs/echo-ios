@@ -12,21 +12,30 @@ struct LearnExamListView: View {
     var body: some View {
         List {
             if exams.isEmpty {
-                ContentUnavailableView("Keine Prüfungen", systemImage: "doc.text.magnifyingglass", description: Text("Lege eine Prüfung an oder synchronisiere WebUntis."))
+                ContentUnavailableView(
+                    "Keine Prüfungen",
+                    systemImage: "doc.text.magnifyingglass",
+                    description: Text("Lege eine Prüfung an oder synchronisiere WebUntis.")
+                )
             }
             ForEach(exams) { exam in
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack { Text(exam.name).font(.headline); Spacer(); Text(exam.subject).foregroundStyle(Theme.accent) }
+                    HStack {
+                        Text(exam.name).font(.headline); Spacer(); Text(exam.subject).foregroundStyle(Theme.accent)
+                    }
                     Text("In \(exam.daysRemaining) Tagen · \(exam.cardCount) Konzepte")
                         .font(.caption).foregroundStyle(.secondary)
                     if let readiness = exam.readiness {
                         ProgressView(value: readiness)
                         Text("Prüfungsbereitschaft \(readiness.formatted(.percent))").font(.caption)
                     } else {
-                        Text("Noch nicht genug Abrufdaten für eine Bereitschaft").font(.caption).foregroundStyle(.secondary)
+                        Text("Noch nicht genug Abrufdaten für eine Bereitschaft").font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Button(exam.activeRunId == nil ? "Probeprüfung starten" : "Probeprüfung fortsetzen") { Task { await start(exam) } }
-                        .buttonStyle(.borderedProminent).disabled(exam.cardCount == 0)
+                    Button(exam.activeRunId == nil ? "Probeprüfung starten" : "Probeprüfung fortsetzen") {
+                        Task { await start(exam) }
+                    }
+                    .buttonStyle(.borderedProminent).disabled(exam.cardCount == 0)
                 }
                 .swipeActions {
                     Button("Bearbeiten") { editing = exam }.tint(.blue)
@@ -39,7 +48,9 @@ struct LearnExamListView: View {
         }
         .navigationTitle("Prüfungen")
         .toolbar { Button("Prüfung", systemImage: "plus") { creating = true } }
-        .sheet(isPresented: $creating) { LearnExamEditorView(api: api, lessons: lessons, existing: nil) { exams.append($0) } }
+        .sheet(isPresented: $creating) {
+            LearnExamEditorView(api: api, lessons: lessons, existing: nil) { exams.append($0) }
+        }
         .sheet(item: $editing) { exam in
             LearnExamEditorView(api: api, lessons: lessons, existing: exam) { updated in
                 if let index = exams.firstIndex(where: { $0.id == updated.id }) { exams[index] = updated }
@@ -51,14 +62,22 @@ struct LearnExamListView: View {
         .task { await load() }
     }
 
-    private func load() async { do { exams = try await api.learnExams() } catch { errorMessage = error.localizedDescription } }
+    private func load() async {
+        do { exams = try await api.learnExams() } catch { errorMessage = error.localizedDescription }
+    }
+
     private func start(_ exam: BackendAPI.LearnExam) async {
         do {
             if let runId = exam.activeRunId { run = try await api.learnExamRun(id: runId) }
             else { run = try await api.startLearnExam(id: exam.id) }
         } catch { errorMessage = error.localizedDescription }
     }
-    private func delete(_ exam: BackendAPI.LearnExam) async { do { try await api.deleteLearnExam(id: exam.id); exams.removeAll { $0.id == exam.id } } catch { errorMessage = error.localizedDescription } }
+
+    private func delete(_ exam: BackendAPI.LearnExam) async {
+        do { try await api.deleteLearnExam(id: exam.id); exams.removeAll { $0.id == exam.id } } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }
 
 struct LearnExamEditorView: View {
@@ -69,12 +88,17 @@ struct LearnExamEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var subject = ""
-    @State private var date = Date().addingTimeInterval(7 * 86_400)
+    @State private var date = Date().addingTimeInterval(7 * 86400)
     @State private var selected = Set<String>()
     @State private var dailyMinutes = 30
     @State private var errorMessage: String?
 
-    init(api: BackendAPI, lessons: [BackendAPI.LessonInfo], existing: BackendAPI.LearnExam?, onSaved: @escaping (BackendAPI.LearnExam) -> Void) {
+    init(
+        api: BackendAPI,
+        lessons: [BackendAPI.LessonInfo],
+        existing: BackendAPI.LearnExam?,
+        onSaved: @escaping (BackendAPI.LearnExam) -> Void
+    ) {
         self.api = api; self.lessons = lessons; self.existing = existing; self.onSaved = onSaved
         _name = State(initialValue: existing?.name ?? "")
         _subject = State(initialValue: existing?.subject ?? "")
@@ -93,7 +117,10 @@ struct LearnExamEditorView: View {
                 Section("Enthaltene Stunden") {
                     ForEach(lessons) { lesson in
                         Button { toggle(lesson.id) } label: {
-                            HStack { Text(lesson.displayTitle); Spacer(); if selected.contains(lesson.id) { Image(systemName: "checkmark") } }
+                            HStack {
+                                Text(lesson.displayTitle); Spacer(); if selected
+                                    .contains(lesson.id) { Image(systemName: "checkmark") }
+                            }
                         }
                     }
                 }
@@ -102,7 +129,9 @@ struct LearnExamEditorView: View {
             .navigationTitle(existing == nil ? "Prüfung anlegen" : "Prüfung bearbeiten")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Speichern") { Task { await save() } }.disabled(name.isEmpty || subject.isEmpty) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Speichern") { Task { await save() } }.disabled(name.isEmpty || subject.isEmpty)
+                }
             }
         }
     }
@@ -111,12 +140,29 @@ struct LearnExamEditorView: View {
     private func save() async {
         do {
             let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
-            let isoDate = String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
-            let value: BackendAPI.LearnExam
-            if let existing {
-                value = try await api.updateLearnExam(existing, name: name, subject: subject, date: isoDate, sessionIds: Array(selected), dailyMinutes: dailyMinutes)
+            let isoDate = String(
+                format: "%04d-%02d-%02d",
+                components.year ?? 0,
+                components.month ?? 0,
+                components.day ?? 0
+            )
+            let value: BackendAPI.LearnExam = if let existing {
+                try await api.updateLearnExam(
+                    existing,
+                    name: name,
+                    subject: subject,
+                    date: isoDate,
+                    sessionIds: Array(selected),
+                    dailyMinutes: dailyMinutes
+                )
             } else {
-                value = try await api.createLearnExam(name: name, subject: subject, date: isoDate, sessionIds: Array(selected), dailyMinutes: dailyMinutes)
+                try await api.createLearnExam(
+                    name: name,
+                    subject: subject,
+                    date: isoDate,
+                    sessionIds: Array(selected),
+                    dailyMinutes: dailyMinutes
+                )
             }
             onSaved(value); dismiss()
         } catch { errorMessage = error.localizedDescription }

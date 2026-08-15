@@ -66,8 +66,10 @@ struct LearnReviewView: View {
                             .font(.headline).foregroundStyle(Theme.accent)
                         Text(card.explanation)
                         if let expected = card.expectedAnswer, !expected.isEmpty { Text(expected) }
-                        Text("Das Ansehen allein zählt noch nicht als gelernt. Danach folgen Lückenschritt und Transferaufgabe.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                        Text(
+                            "Das Ansehen allein zählt noch nicht als gelernt. Danach folgen Lückenschritt und Transferaufgabe."
+                        )
+                        .font(.footnote).foregroundStyle(.secondary)
                         Button("Beispiel verstanden – weiter") { Task { await finishStudyExample(card) } }
                             .buttonStyle(.borderedProminent)
                     }
@@ -140,7 +142,7 @@ struct LearnReviewView: View {
         isEvaluating = true
         errorMessage = nil
         do {
-            let duration = max(0, Int(Date().timeIntervalSince(questionStartedAt) * 1_000))
+            let duration = max(0, Int(Date().timeIntervalSince(questionStartedAt) * 1000))
             let result = try await api.evaluateLearnAnswer(
                 cardId: card.id, answer: answer, confidence: confidence,
                 responseDurationMs: duration,

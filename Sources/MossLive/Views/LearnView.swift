@@ -335,7 +335,10 @@ private struct LearnConceptLibraryView: View {
                     Button("Neu formulieren", systemImage: "arrow.clockwise") {
                         Task { await regenerate(card) }
                     }
-                    Button(card.learningState == "suspended" ? "Aktivieren" : "Pausieren", systemImage: card.learningState == "suspended" ? "play" : "pause") {
+                    Button(
+                        card.learningState == "suspended" ? "Aktivieren" : "Pausieren",
+                        systemImage: card.learningState == "suspended" ? "play" : "pause"
+                    ) {
                         Task { await toggleSuspended(card) }
                     }
                     Button("Konzept löschen", systemImage: "trash", role: .destructive) {
@@ -404,7 +407,7 @@ private struct LearnConceptLibraryView: View {
     private func regenerate(_ card: BackendAPI.LearnCard) async {
         regenerating.insert(card.id)
         do {
-            replace(try await api.regenerateLearnCard(
+            try await replace(api.regenerateLearnCard(
                 id: card.id, concept: card.displayConcept, question: card.question
             ))
         } catch { errorMessage = error.localizedDescription }
@@ -418,7 +421,7 @@ private struct LearnConceptLibraryView: View {
 
     private func toggleSuspended(_ card: BackendAPI.LearnCard) async {
         do {
-            replace(try await api.updateLearnCard(
+            try await replace(api.updateLearnCard(
                 id: card.id,
                 changes: ["learning_state": card.learningState == "suspended" ? "review" : "suspended"]
             ))
