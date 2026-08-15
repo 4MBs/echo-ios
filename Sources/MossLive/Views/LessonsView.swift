@@ -161,7 +161,7 @@ struct LessonsView: View {
             .accessibilityHint("Noch keine Aufnahmen")
         } else {
             NavigationLink {
-                SubjectView(api: api, folder: folder) { await load() }
+                SubjectView(api: api, folder: folder, catalogue: catalogue) { await load() }
             } label: {
                 tile(folder)
             }

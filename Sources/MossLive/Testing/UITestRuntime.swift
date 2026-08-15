@@ -42,12 +42,14 @@ enum UITestRuntime {
     /// resurrect it and make a working feature look broken.
     private nonisolated(unsafe) static var deletedSessionIDs: Set<String> = []
     private nonisolated(unsafe) static var deletedNoteIDs: Set<String> = []
+    private nonisolated(unsafe) static var deletedLearnCardIDs: Set<String> = []
 
     @MainActor
     static func installFixtures() {
         guard isEnabled else { return }
         deletedSessionIDs.removeAll()
         deletedNoteIDs.removeAll()
+        deletedLearnCardIDs.removeAll()
         if let identifier = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: identifier)
         }
@@ -146,6 +148,9 @@ enum UITestRuntime {
             } else if parts.count == 1 {
                 deletedSessionIDs.insert(String(parts[0]))
             }
+        }
+        if method == "DELETE", path.hasPrefix("/learn/cards/") {
+            deletedLearnCardIDs.insert(String(path.dropFirst("/learn/cards/".count)))
         }
         if scenario == .loading {
             try await Task.sleep(for: .seconds(4))
@@ -519,7 +524,10 @@ private extension UITestRuntime {
             expected: "Die vom Chlorophyll aufgenommene Lichtenergie.",
             concept: "Lichtreaktion",
             startMs: 16000
-        )]
+        )].filter { card in
+            guard let id = card["id"] as? String else { return true }
+            return !deletedLearnCardIDs.contains(id)
+        }
     }
 
     static func learnCard(

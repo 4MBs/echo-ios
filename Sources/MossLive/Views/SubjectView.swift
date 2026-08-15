@@ -25,6 +25,7 @@ import SwiftUI
 struct SubjectView: View {
     let api: BackendAPI
     let folder: SubjectFolder
+    let catalogue: [BackendAPI.SubjectInfo]
     let onChanged: () async -> Void
 
     @State private var lessons: [BackendAPI.LessonInfo]
@@ -32,6 +33,7 @@ struct SubjectView: View {
     /// The row whose context menu asked for a deletion, held until it is
     /// confirmed. Also what the dialog is presented from.
     @State private var pendingDelete: BackendAPI.LessonInfo?
+    @State private var pendingSubjectChange: BackendAPI.LessonInfo?
 
     /// Where a second column stops crowding the rows. A row is a heading, a
     /// meta line and a line of summary; below this, two of them side by side
@@ -45,9 +47,15 @@ struct SubjectView: View {
     /// each is not a second column, it is the same list drawn twice as wide.
     private static let twoColumnMinimumRows = 4
 
-    init(api: BackendAPI, folder: SubjectFolder, onChanged: @escaping () async -> Void) {
+    init(
+        api: BackendAPI,
+        folder: SubjectFolder,
+        catalogue: [BackendAPI.SubjectInfo],
+        onChanged: @escaping () async -> Void
+    ) {
         self.api = api
         self.folder = folder
+        self.catalogue = catalogue
         self.onChanged = onChanged
         _lessons = State(initialValue: folder.lessons)
     }
@@ -89,8 +97,24 @@ struct SubjectView: View {
                     + "Transkript und Aufnahme werden vom Server gelöscht."
             )
         }
+        .confirmationDialog(
+            "Fach ändern",
+            isPresented: Binding(
+                get: { pendingSubjectChange != nil },
+                set: { if !$0 { pendingSubjectChange = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingSubjectChange
+        ) { lesson in
+            ForEach(catalogue) { subject in
+                Button(subject.name) { Task { await changeSubject(of: lesson, to: subject) } }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { _ in
+            Text("Das Fach wird für die gesamte Aufnahme geändert.")
+        }
         .alert(
-            "Stunde konnte nicht gelöscht werden",
+            "Änderung fehlgeschlagen",
             isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
         ) {
             Button("OK", role: .cancel) {}
@@ -125,7 +149,12 @@ struct SubjectView: View {
         let split = splitIntoColumns(rows, count: wide ? 2 : 1)
         return HStack(alignment: .top, spacing: 24) {
             ForEach(Array(split.enumerated()), id: \.offset) { _, column in
-                SubjectLessonCard(api: api, lessons: column) { pendingDelete = $0 }
+                SubjectLessonCard(
+                    api: api,
+                    lessons: column,
+                    onChangeSubject: { pendingSubjectChange = $0 },
+                    onDelete: { pendingDelete = $0 }
+                )
                     .frame(maxWidth: .infinity)
             }
         }
@@ -190,6 +219,19 @@ struct SubjectView: View {
             await onChanged()
         } catch {
             lessons = previous
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func changeSubject(
+        of lesson: BackendAPI.LessonInfo,
+        to subject: BackendAPI.SubjectInfo
+    ) async {
+        do {
+            _ = try await api.updateLessonSubject(sessionId: lesson.id, subject: subject.name)
+            lessons.removeAll { $0.id == lesson.id }
+            await onChanged()
+        } catch {
             actionError = error.localizedDescription
         }
     }
@@ -258,6 +300,7 @@ private struct SubjectHoursHeader: View {
 private struct SubjectLessonCard: View {
     let api: BackendAPI
     let lessons: [BackendAPI.LessonInfo]
+    let onChangeSubject: (BackendAPI.LessonInfo) -> Void
     let onDelete: (BackendAPI.LessonInfo) -> Void
 
     private static let corner: CGFloat = 20
@@ -272,6 +315,11 @@ private struct SubjectLessonCard: View {
                 }
                 .buttonStyle(RowPressStyle())
                 .contextMenu {
+                    Button {
+                        onChangeSubject(lesson)
+                    } label: {
+                        Label("Fach ändern", systemImage: "books.vertical")
+                    }
                     Button(role: .destructive) {
                         onDelete(lesson)
                     } label: {

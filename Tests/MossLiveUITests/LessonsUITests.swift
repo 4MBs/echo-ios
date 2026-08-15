@@ -31,6 +31,17 @@ final class LessonsUITests: EchoUITestCase {
         rotateAndCapture("lesson-detail")
     }
 
+    func testArchivedLessonOffersSubjectChange() {
+        launch(tab: "stunden")
+        tap(button(containing: "Mathematik"))
+        let lesson = button(containing: "Ursache und Wirkung")
+        XCTAssertTrue(lesson.waitForExistence(timeout: 5))
+
+        lesson.press(forDuration: 1.2)
+
+        XCTAssertTrue(app.buttons["Fach ändern"].waitForExistence(timeout: 3))
+    }
+
     func testManualRetranscriptionExplainsAMissingSafetyRecording() {
         openLesson()
         tapToolbarAction("Transkriptoptionen")

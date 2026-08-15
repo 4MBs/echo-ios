@@ -471,6 +471,11 @@ final class AppModel {
 
     private func configureUITestState() {
         selectedTab = UITestRuntime.requestedTab ?? .aufnahme
+        let subjects = OfflineCache.load(
+            [BackendAPI.SubjectInfo].self,
+            key: OfflineCache.Key.timetableSubjects
+        ) ?? []
+        recordingSubjectSelection.refresh(catalogue: subjects, current: timetable.current)
         connectivity.configureForUITests(online: UITestRuntime.scenario != .offline)
         switch UITestRuntime.scenario {
         case .recording:

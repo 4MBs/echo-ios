@@ -23,9 +23,13 @@ final class ShellAndStateUITests: EchoUITestCase {
 
     func testRecordingIdleActiveReconnectingAndFailureStates() {
         launch(tab: "aufnahme")
+        let subjectPicker = app.buttons["recording-subject-picker"]
+        XCTAssertTrue(subjectPicker.waitForExistence(timeout: 5))
+        XCTAssertTrue(subjectPicker.label.contains("Mathematik"))
         shot("recording-idle")
         tap(app.buttons["Aufnahme starten"])
         XCTAssertTrue(app.buttons["Aufnahme beenden"].waitForExistence(timeout: 3))
+        XCTAssertTrue(subjectPicker.isEnabled, "Das Fach muss während der Aufnahme änderbar bleiben")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'transkribiert'")).firstMatch.exists)
         shot("recording-active")
         tap(app.buttons["Aufnahme beenden"])

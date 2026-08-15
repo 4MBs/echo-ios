@@ -84,7 +84,11 @@ struct RecordDeck: View {
                     .transition(.opacity)
             }
             caption
-            RecordButton()
+            HStack(spacing: 16) {
+                RecordingSubjectPicker()
+                RecordButton()
+                Color.clear.frame(width: 112, height: 1)
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, isRecording ? 12 : 16)
