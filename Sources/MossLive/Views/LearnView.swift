@@ -73,7 +73,7 @@ struct LearnView: View {
                     .foregroundStyle(.secondary)
                     if let plan, !plan.cards.isEmpty {
                         NavigationLink {
-                            LearnReviewView(api: api, cards: plan.cards)
+                            LearnReviewView(api: api, cards: plan.cards, onChanged: reload)
                         } label: {
                             Label("Wiederholung starten", systemImage: "play.fill")
                                 .frame(maxWidth: .infinity)
@@ -86,7 +86,7 @@ struct LearnView: View {
                     }
                     if !practiceCards.isEmpty {
                         NavigationLink {
-                            LearnReviewView(api: api, cards: practiceCards, mode: "practice")
+                            LearnReviewView(api: api, cards: practiceCards, mode: "practice", onChanged: reload)
                         } label: {
                             Label("Optional weiter üben", systemImage: "rectangle.stack")
                         }

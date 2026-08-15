@@ -55,6 +55,16 @@ struct LearnExamRunView: View {
             }
         }
         .interactiveDismissDisabled(run.status == "active")
+        .task(id: run.status) {
+            while !Task.isCancelled, run.status == "active" {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if remainingSeconds(at: Date()) == 0 {
+                    do { run = try await api.submitLearnExam(runId: run.id) }
+                    catch { errorMessage = error.localizedDescription }
+                    break
+                }
+            }
+        }
     }
 
     private func next(_ question: BackendAPI.LearnExamRun.Question) async {
@@ -74,7 +84,12 @@ struct LearnExamRunView: View {
 
     private func remaining(at date: Date) -> String {
         guard run.status != "paused", let start = ISO8601DateFormatter().date(from: run.startedAt) else { return "Pausiert" }
-        let seconds = max(0, run.timeLimitMinutes * 60 - Int(date.timeIntervalSince(start)) + run.pausedSeconds)
+        let seconds = remainingSeconds(at: date, start: start)
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func remainingSeconds(at date: Date, start: Date? = nil) -> Int {
+        guard let start = start ?? ISO8601DateFormatter().date(from: run.startedAt) else { return 0 }
+        return max(0, run.timeLimitMinutes * 60 - Int(date.timeIntervalSince(start)) + run.pausedSeconds)
     }
 }

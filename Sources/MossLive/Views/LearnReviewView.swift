@@ -3,6 +3,7 @@ import SwiftUI
 struct LearnReviewView: View {
     let api: BackendAPI
     let mode: String
+    let onChanged: (() async -> Void)?
     @State private var session: LearnReviewSession
     @State private var answer = ""
     @State private var evaluation: BackendAPI.LearnEvaluation?
@@ -13,9 +14,15 @@ struct LearnReviewView: View {
     @State private var questionStartedAt = Date()
     @FocusState private var answerFocused: Bool
 
-    init(api: BackendAPI, cards: [BackendAPI.LearnCard], mode: String = "review") {
+    init(
+        api: BackendAPI,
+        cards: [BackendAPI.LearnCard],
+        mode: String = "review",
+        onChanged: (() async -> Void)? = nil
+    ) {
         self.api = api
         self.mode = mode
+        self.onChanged = onChanged
         _session = State(initialValue: LearnReviewSession(cards: cards))
     }
 
@@ -156,6 +163,7 @@ struct LearnReviewView: View {
         remediation = nil
         confidence = nil
         questionStartedAt = Date()
+        if session.isComplete, let onChanged { Task { await onChanged() } }
         errorMessage = nil
         answerFocused = true
     }
