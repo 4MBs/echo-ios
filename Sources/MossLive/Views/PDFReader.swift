@@ -372,21 +372,12 @@ struct PDFReader: View {
             }
 
             Button {
-                if askingForPage {
-                    confirmPageJump()
-                } else {
-                    proxy.step(1)
-                }
+                proxy.step(1)
             } label: {
-                Image(systemName: askingForPage ? "checkmark" : "arrow.right")
-                    .contentTransition(.symbolEffect(.replace))
+                Image(systemName: "arrow.right")
             }
-            .disabled(
-                askingForPage
-                    ? numbering.pdfPage(forPrinted: Int(typedPage) ?? 0) == nil
-                    : pageCount > 0 && currentPage >= pageCount
-            )
-            .accessibilityLabel(askingForPage ? "Seite öffnen" : "Nächste Seite")
+            .disabled(pageCount > 0 && currentPage >= pageCount)
+            .accessibilityLabel("Nächste Seite")
         }
         .buttonStyle(.glass)
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: askingForPage)
@@ -412,12 +403,13 @@ struct PDFReader: View {
         .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
     }
 
-    /// The current value is selected when the field becomes first responder,
-    /// so typing replaces it immediately. The keyboard's Done button and the
-    /// row's checkmark share the same direct navigation path.
+    /// Type a page and the book goes there — nothing to confirm. The current
+    /// value is selected when the field becomes first responder, so typing
+    /// replaces it immediately, and each digit that names a real page turns to
+    /// it at once. The keyboard's Done button only puts the indicator back.
     private var pageJump: some View {
         HStack(spacing: 8) {
-            AutoFocusPageNumberField(text: $typedPage, onCommit: confirmPageJump)
+            AutoFocusPageNumberField(text: $typedPage, onCommit: closePageJump)
                 .frame(width: 48, height: 32)
                 .accessibilityLabel("Seitennummer")
 
@@ -427,17 +419,19 @@ struct PDFReader: View {
         }
         .onChange(of: typedPage) { _, text in
             let digits = String(text.filter(\.isNumber).prefix(5))
-            if digits != text { typedPage = digits }
+            if digits != text {
+                typedPage = digits
+                return
+            }
+            guard let printed = Int(digits),
+                  let pdfPage = numbering.pdfPage(forPrinted: printed),
+                  pdfPage != currentPage
+            else { return }
+            proxy.go(toPage: pdfPage)
         }
     }
 
-    private func confirmPageJump() {
-        guard let requested = Int(typedPage), printedLast > 0 else { return }
-        let first = numbering.printedNumber(1) ?? 1
-        let constrained = min(max(requested, first), printedLast)
-        guard let pdfPage = numbering.pdfPage(forPrinted: constrained) else { return }
-        typedPage = String(constrained)
-        proxy.go(toPage: pdfPage)
+    private func closePageJump() {
         askingForPage = false
     }
 

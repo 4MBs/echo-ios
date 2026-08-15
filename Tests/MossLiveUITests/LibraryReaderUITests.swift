@@ -29,8 +29,14 @@ final class LibraryReaderUITests: EchoUITestCase {
         tap(indicator)
         let pageField = app.textFields["Seitennummer"]
         XCTAssertTrue(pageField.waitForExistence(timeout: 3))
+        // Typing the number is the whole interaction: there is nothing to
+        // confirm, so no control is tapped between the digit and the page.
         replaceText(pageField, with: "5")
-        tap(app.buttons["Seite öffnen"])
+        XCTAssertFalse(
+            app.buttons["Seite öffnen"].exists,
+            "The page jump still asks for the number to be confirmed"
+        )
+        tap(app.buttons["Fertig"].firstMatch)
         // Wait for the jump to land before keeping the picture: a screenshot
         // taken mid-transition shows two half-drawn pages and proves nothing.
         let atFive = app.buttons

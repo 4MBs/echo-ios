@@ -253,8 +253,14 @@ struct AutoFocusPageNumberField: UIViewRepresentable {
         }
 
         @objc func commit() {
-            parent.onCommit()
             field?.resignFirstResponder()
+            parent.onCommit()
+        }
+
+        /// However the keyboard goes away, the field has said what it had to
+        /// say: the page was turned while it was being typed.
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            parent.onCommit()
         }
     }
 
@@ -421,10 +427,15 @@ final class BookPageRenderCache {
               let page = document.page(at: pageIndex + 1)
         else { return nil }
 
-        var pageSize = page.getBoxRect(.cropBox).standardized.size
-        let rotation = abs(page.rotationAngle) % 180
-        if rotation == 90 { pageSize = CGSize(width: pageSize.height, height: pageSize.width) }
-        guard pageSize.width > 0, pageSize.height > 0 else { return nil }
+        let box = page.getBoxRect(.cropBox).standardized
+        guard box.width > 0, box.height > 0 else { return nil }
+        // /Rotate turns the sheet clockwise for display, so a quarter turn
+        // trades the page's width for its height.
+        let rotation = ((Int(page.rotationAngle) % 360) + 360) % 360
+        let quarterTurned = rotation == 90 || rotation == 270
+        let pageSize = quarterTurned
+            ? CGSize(width: box.height, height: box.width)
+            : box.size
 
         let maximum = CGFloat(max(256, maxPixelDimension))
         let scale = maximum / max(pageSize.width, pageSize.height)
@@ -445,14 +456,31 @@ final class BookPageRenderCache {
         let target = CGRect(x: 0, y: 0, width: width, height: height)
         context.setFillColor(UIColor.white.cgColor)
         context.fill(target)
-        context.concatenate(
-            page.getDrawingTransform(
-                .cropBox,
-                rect: target,
-                rotate: 0,
-                preserveAspectRatio: true
-            )
+
+        // The page is mapped onto the bitmap by hand. getDrawingTransform fits a
+        // box into a rectangle but never enlarges it, so a page prepared for a
+        // Retina screen came back at its printed point size — a postage stamp in
+        // the middle of a white sheet, which is what the reader then showed
+        // until a zoom threw the picture away.
+        context.scaleBy(
+            x: CGFloat(width) / pageSize.width,
+            y: CGFloat(height) / pageSize.height
         )
+        switch rotation {
+        case 90:
+            context.translateBy(x: 0, y: pageSize.height)
+            context.rotate(by: -.pi / 2)
+        case 180:
+            context.translateBy(x: pageSize.width, y: pageSize.height)
+            context.rotate(by: .pi)
+        case 270:
+            context.translateBy(x: pageSize.width, y: 0)
+            context.rotate(by: .pi / 2)
+        default:
+            break
+        }
+        context.translateBy(x: -box.minX, y: -box.minY)
+        context.clip(to: box)
         context.drawPDFPage(page)
         guard let rendered = context.makeImage() else { return nil }
         return UIImage(cgImage: rendered)
