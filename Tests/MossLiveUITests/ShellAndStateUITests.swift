@@ -2,13 +2,14 @@ import XCTest
 
 final class ShellAndStateUITests: EchoUITestCase {
     func testEveryPrimaryDestinationLaunchesAndRotates() {
-        let destinations = ["aufnahme", "stunden", "bibliothek", "chat", "einstellungen"]
+        let destinations = ["aufnahme", "stunden", "lernen", "bibliothek", "chat", "einstellungen"]
         for tab in destinations {
             launch(tab: tab)
             XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
             switch tab {
             case "aufnahme": XCTAssertTrue(app.buttons["Aufnahme starten"].exists)
             case "stunden": XCTAssertTrue(app.navigationBars["Stunden"].exists)
+            case "lernen": XCTAssertTrue(app.navigationBars["Lernen"].exists)
             case "bibliothek": XCTAssertTrue(app.navigationBars["Bibliothek"].exists)
             case "chat": XCTAssertTrue(app.buttons["Chatverlauf"].exists)
             default: XCTAssertTrue(app.navigationBars["Einstellungen"].exists)
@@ -76,7 +77,7 @@ final class ShellAndStateUITests: EchoUITestCase {
 
     func testAccessibilityAuditOnEveryPrimaryDestination() throws {
         var findings: [String] = []
-        for tab in ["aufnahme", "stunden", "bibliothek", "chat", "einstellungen"] {
+        for tab in ["aufnahme", "stunden", "lernen", "bibliothek", "chat", "einstellungen"] {
             launch(tab: tab)
             try app.performAccessibilityAudit(
                 for: [.dynamicType, .hitRegion, .textClipped, .sufficientElementDescription]
@@ -86,7 +87,7 @@ final class ShellAndStateUITests: EchoUITestCase {
                 // frame. Suppress only that identified system-row false
                 // positive; all app content remains audited for clipping.
                 let sidebarLabels: Set<String> = [
-                    "Aufnahme", "Stunden", "Bibliothek", "Chat mit KI", "Einstellungen",
+                    "Aufnahme", "Stunden", "Lernen", "Bibliothek", "Chat mit KI", "Einstellungen",
                 ]
                 let isSystemSidebarNode = issue.element?.identifier.hasPrefix("tab.") == true
                     || sidebarLabels.contains(issue.element?.label ?? "")
