@@ -12,7 +12,7 @@ final class LibraryReaderUITests: EchoUITestCase {
             "The mounted page field is unavailable before the first tap"
         )
 
-        tap(pageField)
+        pageField.tap()
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(
             keyboard.waitForExistence(timeout: 3),
@@ -25,29 +25,30 @@ final class LibraryReaderUITests: EchoUITestCase {
         )
 
         pageField.typeText("5")
-        tap(done)
+        done.tap()
         XCTAssertTrue(
             keyboard.waitForNonExistence(timeout: 3),
             "Return did not close the keyboard"
         )
-        let atFive = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == '5'"),
+        // Double-page mode anchors the visible 4–5 spread at printed page 4.
+        let atRequestedSpread = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '4'"),
             object: pageField
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [atFive], timeout: 5),
+            XCTWaiter.wait(for: [atRequestedSpread], timeout: 5),
             .completed,
-            "The page jump never arrived at printed page 5"
+            "The page jump never arrived at the spread containing printed page 5"
         )
 
-        tap(pageField)
+        pageField.tap()
         XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
         XCTAssertTrue(
             keyboard.waitForNonExistence(timeout: 3),
             "Tapping the PDF did not close the keyboard"
         )
-        XCTAssertEqual(pageField.value as? String, "5")
+        XCTAssertEqual(pageField.value as? String, "4")
     }
 
     func testShelfReaderNavigationLayoutPageJumpAndRename() {

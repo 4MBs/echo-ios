@@ -63,6 +63,7 @@ jobs:
           restore-keys: ui-spm-${{ runner.os }}-
 
       - name: Resolve dependencies
+        if: ${{ github.event.inputs.test_class == 'all' }}
         run: |
           xcodebuild -resolvePackageDependencies \
             -project MossLive.xcodeproj \
@@ -105,6 +106,7 @@ jobs:
       # Building once up front keeps the compile out of the timed test run and
       # lets the suite start on every clone at the same moment.
       - name: Build for testing
+        if: ${{ github.event.inputs.test_class == 'all' }}
         run: |
           set -o pipefail
           xcodebuild build-for-testing \
@@ -128,7 +130,13 @@ jobs:
             TEST_FILTER="-only-testing:MossLiveUITests/$CLASS"
             echo "Running only target test class: $CLASS"
           fi
-          xcodebuild test-without-building \
+          ACTION="test-without-building"
+          if [ -n "$TEST_FILTER" ]; then
+            # A focused run compiles and executes in one Xcode invocation.
+            # This avoids a separate dependency-resolution and build startup.
+            ACTION="test"
+          fi
+          xcodebuild "$ACTION" \
             -project MossLive.xcodeproj \
             -scheme MossLiveUITests \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
@@ -142,7 +150,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ui-test.log
 
       - name: Export screenshots
-        if: always()
+        if: ${{ failure() || github.event.inputs.test_class == 'all' }}
         run: |
           mkdir -p UIScreenshots
           if [ -d UIResults.xcresult ]; then
@@ -153,7 +161,7 @@ jobs:
           find UIScreenshots -type f -maxdepth 2 -print | sort || true
 
       - name: Upload result bundle, screenshots, and log
-        if: always()
+        if: ${{ failure() || github.event.inputs.test_class == 'all' }}
         uses: actions/upload-artifact@v4
         with:
           name: simulator-${{ matrix.form-factor }}-${{ github.run_number }}
