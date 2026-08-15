@@ -1,0 +1,144 @@
+# Boots one simulator, photographs the app in its deterministic mock states,
+# and shuts the simulator down again. Manual only: the screenshots in docs/
+# are refreshed when the UI has actually changed, not on every push.
+name: Documentation Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "Simulator to photograph"
+        required: false
+        default: "iPad Pro 13-inch (M5)"
+        type: string
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_PATH: /Applications/Xcode_26.5.app
+  BUNDLE_ID: com.fourmbs.mosslive
+
+jobs:
+  screenshots:
+    name: Capture documentation screenshots
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ -d "$XCODE_PATH" ]; then
+            sudo xcode-select -s "$XCODE_PATH"
+          fi
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .spm-packages
+          key: shots-spm-${{ runner.os }}-${{ hashFiles('project.yml', 'LocalPackages/OpusShim/Package.swift') }}
+          restore-keys: shots-spm-${{ runner.os }}-
+
+      - name: Pick simulator
+        id: simulator
+        env:
+          WANTED: ${{ github.event.inputs.device || 'iPad Pro 13-inch (M5)' }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import subprocess
+
+          devices = json.loads(
+              subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"])
+          )["devices"]
+          wanted = os.environ["WANTED"]
+          matches = [device for runtime in devices.values() for device in runtime
+                     if device["name"].startswith("iPad")]
+          if not matches:
+              raise SystemExit("No available iPad simulator")
+          picked = next((device for device in matches if device["name"] == wanted), matches[0])
+          print(f"name={picked['name']}")
+          print(f"udid={picked['udid']}")
+          PY
+
+      - name: Boot simulator
+        run: |
+          echo "Booting ${{ steps.simulator.outputs.name }}"
+          xcrun simctl boot "${{ steps.simulator.outputs.udid }}" || true
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
+          # A documentation screenshot should not show a runner's clock or a
+          # half-empty battery.
+          xcrun simctl status_bar "${{ steps.simulator.outputs.udid }}" override \
+            --time "09:41" \
+            --batteryState charged \
+            --batteryLevel 100 \
+            --wifiBars 3 \
+            --cellularMode notSupported || true
+
+      - name: Build app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project MossLive.xcodeproj \
+            -scheme MossLive \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -clonedSourcePackagesDirPath .spm-packages \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -40
+
+      - name: Install app
+        run: |
+          APP="DerivedData/Build/Products/Debug-iphonesimulator/MossLive.app"
+          test -d "$APP" || { echo "::error::$APP not found"; exit 1; }
+          xcrun simctl install "${{ steps.simulator.outputs.udid }}" "$APP"
+
+      # Each shot launches the app fresh in one deterministic mock state,
+      # waits for the first frame to settle, and photographs the device.
+      - name: Capture screens
+        env:
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: |
+          mkdir -p screenshots
+          shoot() {
+            local name="$1" scenario="$2" tab="$3" settle="$4"
+            echo "→ $name (scenario=$scenario tab=$tab)"
+            xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+            xcrun simctl launch "$UDID" "$BUNDLE_ID" \
+              -UITesting -UITestScenario "$scenario" -UITestTab "$tab"
+            sleep "$settle"
+            xcrun simctl io "$UDID" screenshot "screenshots/${name}.png"
+          }
+
+          shoot recording recording aufnahme 12
+          shoot lessons populated stunden 10
+          shoot learn populated lernen 10
+          shoot chat populated chat 10
+          shoot library populated bibliothek 10
+
+          xcrun simctl terminate "$UDID" "$BUNDLE_ID" || true
+          ls -la screenshots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-screenshots
+          path: screenshots/
+          retention-days: 7
+
+      - name: Shut down simulator
+        if: always()
+        run: |
+          xcrun simctl status_bar "${{ steps.simulator.outputs.udid }}" clear || true
+          xcrun simctl shutdown "${{ steps.simulator.outputs.udid }}" || true
