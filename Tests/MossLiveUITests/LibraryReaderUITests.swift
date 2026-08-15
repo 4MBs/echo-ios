@@ -2,6 +2,54 @@ import UIKit
 import XCTest
 
 final class LibraryReaderUITests: EchoUITestCase {
+    func testReaderPageEntryFocusSubmitAndOutsideDismissal() {
+        openReader()
+        XCTAssertTrue(app.buttons["Nächste Seite"].waitForExistence(timeout: 8))
+
+        let pageField = app.textFields["Seitennummer"]
+        XCTAssertTrue(
+            pageField.waitForExistence(timeout: 3),
+            "The mounted page field is unavailable before the first tap"
+        )
+
+        tap(pageField)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(
+            keyboard.waitForExistence(timeout: 3),
+            "A single tap did not focus the page field"
+        )
+        let done = keyboard.buttons["Fertig"]
+        XCTAssertTrue(
+            done.waitForExistence(timeout: 3),
+            "The page field still uses the number pad without a Done key"
+        )
+
+        pageField.typeText("5")
+        tap(done)
+        XCTAssertTrue(
+            keyboard.waitForNonExistence(timeout: 3),
+            "Return did not close the keyboard"
+        )
+        let atFive = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '5'"),
+            object: pageField
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [atFive], timeout: 5),
+            .completed,
+            "The page jump never arrived at printed page 5"
+        )
+
+        tap(pageField)
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        XCTAssertTrue(
+            keyboard.waitForNonExistence(timeout: 3),
+            "Tapping the PDF did not close the keyboard"
+        )
+        XCTAssertEqual(pageField.value as? String, "5")
+    }
+
     func testShelfReaderNavigationLayoutPageJumpAndRename() {
         openReader()
         XCTAssertTrue(app.buttons["Nächste Seite"].waitForExistence(timeout: 8))

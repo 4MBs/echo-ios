@@ -416,7 +416,6 @@ struct PDFReader: View {
                 .autocorrectionDisabled()
                 .submitLabel(.done)
                 .focused($pageFieldFocused)
-                .onSubmit(endPageEntry)
                 .accessibilityLabel("Seitennummer")
                 .accessibilityValue(printedLabel(currentPage))
 
