@@ -62,8 +62,11 @@ extension BackendAPI {
         let scheduledIntervalDays: Int?
         let successfulRecalls: Int?
         let promptVariant: String?
+        let promptVariants: [LearnPromptVariant]?
         let subjectMode: String?
         let answerSpec: LearnAnswerSpec?
+        let workedExampleStage: Int?
+        let workedExampleGroup: String?
         let sources: [LearnSource]
 
         enum CodingKeys: String, CodingKey {
@@ -82,12 +85,25 @@ extension BackendAPI {
             case scheduledIntervalDays = "scheduled_interval_days"
             case successfulRecalls = "successful_recalls"
             case promptVariant = "prompt_variant"
+            case promptVariants = "prompt_variants"
             case subjectMode = "subject_mode"
             case answerSpec = "answer_spec"
+            case workedExampleStage = "worked_example_stage"
+            case workedExampleGroup = "worked_example_group"
         }
 
         var displayConcept: String { concept ?? question }
         var primarySource: LearnSource? { sources.first }
+    }
+
+    struct LearnPromptVariant: Codable, Hashable, Sendable {
+        let question: String
+        let promptVariant: String
+
+        enum CodingKeys: String, CodingKey {
+            case question
+            case promptVariant = "prompt_variant"
+        }
     }
 
     struct LearnAnswerSpec: Codable, Hashable, Sendable {
@@ -131,8 +147,11 @@ extension BackendAPI {
         var sourceEndMs: Int?
         var sourceRevision: Int
         var promptVariant: String
+        var promptVariants: [LearnPromptVariant]?
         var subjectMode: String
         var answerSpec: LearnAnswerSpec?
+        var workedExampleStage: Int?
+        var workedExampleGroup: String?
         var sources: [LearnSource]
 
         enum CodingKeys: String, CodingKey {
@@ -145,8 +164,11 @@ extension BackendAPI {
             case sourceEndMs = "source_end_ms"
             case sourceRevision = "source_revision"
             case promptVariant = "prompt_variant"
+            case promptVariants = "prompt_variants"
             case subjectMode = "subject_mode"
             case answerSpec = "answer_spec"
+            case workedExampleStage = "worked_example_stage"
+            case workedExampleGroup = "worked_example_group"
         }
     }
 

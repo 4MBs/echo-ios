@@ -53,7 +53,18 @@ struct LearnReviewView: View {
                     .font(.title2.bold())
                     .accessibilityAddTraits(.isHeader)
 
-                if let remediation {
+                if card.workedExampleStage == 0, evaluation == nil, remediation == nil {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("Durchgerechnetes Beispiel", systemImage: "function")
+                            .font(.headline).foregroundStyle(Theme.accent)
+                        Text(card.explanation)
+                        if let expected = card.expectedAnswer, !expected.isEmpty { Text(expected) }
+                        Text("Das Ansehen allein zählt noch nicht als gelernt. Danach folgen Lückenschritt und Transferaufgabe.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Button("Beispiel verstanden – weiter") { Task { await finishStudyExample(card) } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else if let remediation {
                     LearnRemediationView(api: api, card: card, remediation: remediation) {
                         advance()
                     }
@@ -147,6 +158,13 @@ struct LearnReviewView: View {
         questionStartedAt = Date()
         errorMessage = nil
         answerFocused = true
+    }
+
+    private func finishStudyExample(_ card: BackendAPI.LearnCard) async {
+        do {
+            _ = try await api.updateLearnCard(id: card.id, changes: ["learning_state": "suspended"])
+            advance()
+        } catch { errorMessage = error.localizedDescription }
     }
 }
 
