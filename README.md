@@ -9,7 +9,7 @@ The iPad records, displays and asks. Your machine transcribes, stores and
 answers. The interface is in German.
 
 <p align="center">
-  <img src="docs/screenshots/recording.png" width="880" alt="Recording in progress: the sidebar on the left, the waveform and stop button in a bar at the bottom, and the AI answer note in the top right corner">
+  <img src="docs/screenshots/recording.png" width="880" alt="Recording in progress: the tab sidebar on the left, timestamped transcript lines filling the page as they arrive, and the elapsed time, subject picker and record button at the bottom">
 </p>
 
 ## Half of a pair

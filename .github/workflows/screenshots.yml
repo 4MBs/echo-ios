@@ -147,6 +147,18 @@ jobs:
               raise SystemExit(f"::error::no screenshot captured for: {sorted(missing)}")
           print("captured:", sorted(found))
           PY
+          # XCUIScreen photographs the display buffer, which stays in the
+          # device's native portrait frame however the app is rotated: a
+          # landscape screen arrives as a portrait image with its content
+          # turned on its side. Turn it back.
+          for shot in screenshots/*.png; do
+            read -r width height < <(sips -g pixelWidth -g pixelHeight "$shot" \
+              | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}')
+            if [ "$height" -gt "$width" ]; then
+              sips -r -90 "$shot" >/dev/null
+              echo "rotated $shot to landscape"
+            fi
+          done
           ls -la screenshots
 
       - name: Upload screenshots

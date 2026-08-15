@@ -51,6 +51,10 @@ substitution the timetable never heard about, still lands in the right folder.
 
 ## The lesson archive
 
+<p align="center">
+  <img src="screenshots/lessons.png" width="880" alt="The Stunden tab: one coloured folder per subject, each with its own icon and a count of recordings, and a Sonstige folder at the end">
+</p>
+
 Stunden is a grid of folders, one per subject, each in its own colour with its
 own icon. The folders come from WebUntis rather than from what happens to have
 been recorded, so every subject you take has its place from the first launch and
@@ -116,6 +120,10 @@ A lesson that was recorded, transcribed and summarised is most of the way to
 being revisable, so Echo takes the last step. **Lernen** turns lessons into
 flashcards and schedules them.
 
+<p align="center">
+  <img src="screenshots/learn.png" width="880" alt="The Lernen tab: how many cards are due today with an estimate in minutes, overall mastery as a progress bar, the same figures per subject, and entries for learned concepts and processing lessons into cards">
+</p>
+
 Cards are generated per lesson, on request, from that lesson's transcript. They
 come in several shapes — multiple choice, true/false, cloze, free text and oral
 — and each keeps a link back to where it came from: the lesson, the concept, and
@@ -141,7 +149,7 @@ say" for the last N seconds. A Home and Lock Screen widget does the same and is
 deliberately anonymous-looking, which matters more than it should.
 
 <p align="center">
-  <img src="screenshots/chat.png" width="880" alt="The chat screen before the first question, with a context picker above the input field">
+  <img src="screenshots/chat.png" width="880" alt="The chat screen: a question and answer, a PDF attached to a follow-up question, and a composer whose row of controls holds the attachment button, the lesson context picker, the model, dictation and send">
 </p>
 
 The context picker under the conversation decides what a question is answered
