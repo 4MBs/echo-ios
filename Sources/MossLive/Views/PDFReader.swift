@@ -41,9 +41,7 @@ struct PDFReader: View {
     @State private var selectedRegion: BackendAPI.BookPageRegion?
     @State private var selectingRegion = false
     @State private var resumeAssistantAfterRegion = false
-    @State private var askingForPage = false
-    @State private var typedPage = ""
-    @State private var openedAt = "1"
+    @State private var typedPage = "1"
     @State private var adjustingNumbering = false
     @State private var typedNumbering = ""
     @State private var numberingPage = 1
@@ -93,29 +91,24 @@ struct PDFReader: View {
                 guard horizontalSizeClass != .compact, !reduceMotion else { return }
                 proxy.prepareForAnimatedResize(duration: 0.48)
             }
-            .onChange(of: askingForPage) { _, asking in
-                if asking {
-                    pageFieldFocused = true
-                } else {
-                    pageFieldFocused = false
-                    typedPage = ""
-                }
-            }
             .onChange(of: pageFieldFocused) { _, focused in
-                if !focused {
-                    askingForPage = false
+                if focused {
                     typedPage = ""
+                } else {
+                    synchronizePageEntry()
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                pageFieldFocused = false
-                askingForPage = false
-                typedPage = ""
+            .onChange(of: currentPage) {
+                guard !pageFieldFocused else { return }
+                synchronizePageEntry()
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
-                pageFieldFocused = false
-                askingForPage = false
-                typedPage = ""
+            .onChange(of: pageOffset) {
+                guard !pageFieldFocused else { return }
+                synchronizePageEntry()
+            }
+            .onAppear(perform: synchronizePageEntry)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                endPageEntry()
             }
     }
 
@@ -375,17 +368,21 @@ struct PDFReader: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
-        .background(Color.black.ignoresSafeArea())
+        .background {
+            Color.black
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: endPageEntry)
+        }
     }
 
     /// Previous/next buttons around the current page. Editing happens directly
     /// in this stable control row so the first tap can focus the field and show
-    /// the number pad without presenting an unfocused intermediate popover.
+    /// the full keyboard without mounting an intermediate control.
     private var pageControls: some View {
         HStack(spacing: 12) {
             Button {
-                pageFieldFocused = false
-                askingForPage = false
+                endPageEntry()
                 proxy.step(-1)
             } label: {
                 Image(systemName: "arrow.left")
@@ -393,15 +390,10 @@ struct PDFReader: View {
             .disabled(currentPage <= 1)
             .accessibilityLabel("Vorherige Seite")
 
-            if askingForPage {
-                pageJump
-            } else {
-                pageIndicator
-            }
+            pageJump
 
             Button {
-                pageFieldFocused = false
-                askingForPage = false
+                endPageEntry()
                 proxy.step(1)
             } label: {
                 Image(systemName: "arrow.right")
@@ -410,45 +402,23 @@ struct PDFReader: View {
             .accessibilityLabel("Nächste Seite")
         }
         .buttonStyle(.glass)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: askingForPage)
     }
 
-    /// The current page, and the way to jump to another one.
-    private var pageIndicator: some View {
-        Button {
-            typedPage = ""
-            openedAt = printedLabel(currentPage)
-            askingForPage = true
-        } label: {
-            // Fixed slots either side of the slash: the indicator stays put
-            // whether the page number is 1 or 320 digits wide.
-            HStack(spacing: 4) {
-                Text(printedLabel(currentPage))
-                    .frame(width: 36, alignment: .trailing)
-                Text("/ \(printedLast)")
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 42, alignment: .leading)
-            }
-            .font(.subheadline.monospacedDigit().weight(.semibold))
-        }
-        .accessibilityLabel("Seite \(printedLabel(currentPage)) von \(printedLast)")
-    }
-
-    /// Type a page and the book goes there — nothing to confirm.
+    /// The page field stays mounted so the first tap can focus it reliably.
     private var pageJump: some View {
         HStack(spacing: 4) {
-            TextField(openedAt, text: $typedPage)
+            TextField(printedLabel(currentPage), text: $typedPage)
                 .multilineTextAlignment(.trailing)
                 .font(.subheadline.monospacedDigit().weight(.semibold))
                 .frame(width: 36)
-                .keyboardType(.numberPad)
+                .keyboardType(.default)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
                 .focused($pageFieldFocused)
-                .onSubmit {
-                    pageFieldFocused = false
-                    askingForPage = false
-                    typedPage = ""
-                }
+                .onSubmit(endPageEntry)
                 .accessibilityLabel("Seitennummer")
+                .accessibilityValue(printedLabel(currentPage))
 
             Text("/ \(printedLast)")
                 .font(.subheadline.monospacedDigit().weight(.semibold))
@@ -459,14 +429,13 @@ struct PDFReader: View {
         .padding(.vertical, 8)
         .glassEffect(.regular.interactive(), in: Capsule())
         .onChange(of: typedPage) { _, text in
-            guard askingForPage else { return }
-            let digits = String(text.filter(\.isNumber).prefix(5))
+            guard pageFieldFocused else { return }
+            let digits = ReaderPageEntry.sanitized(text)
             if digits != text {
                 typedPage = digits
                 return
             }
-            guard let printed = Int(digits),
-                  let pdfPage = numbering.pdfPage(forPrinted: printed),
+            guard let pdfPage = ReaderPageEntry.destination(for: digits, numbering: numbering),
                   pdfPage != currentPage
             else { return }
             proxy.go(toPage: pdfPage)
@@ -481,6 +450,18 @@ struct PDFReader: View {
 
     private func printedLabel(_ pdfPage: Int) -> String {
         numbering.printedLabel(pdfPage)
+    }
+
+    private func synchronizePageEntry() {
+        typedPage = ReaderPageEntry.restoredValue(
+            forPDFPage: currentPage,
+            numbering: numbering
+        )
+    }
+
+    private func endPageEntry() {
+        pageFieldFocused = false
+        synchronizePageEntry()
     }
 
     private var printedLast: Int {
@@ -525,10 +506,6 @@ struct PDFReader: View {
         .buttonStyle(.glass)
         .accessibilityLabel("Seitendarstellung")
         .popover(isPresented: $adjustingNumbering) { numberingEditor }
+        .simultaneousGesture(TapGesture().onEnded { endPageEntry() })
     }
 }
-
-/// A number-pad field that becomes first responder as soon as SwiftUI inserts
-/// it into the existing control bar. Unlike a newly presented popover, it has a
-/// window immediately, so one tap on the page indicator reliably shows the
-/// keypad. Selecting the existing value makes the next digit replace it.
