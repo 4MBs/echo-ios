@@ -19,7 +19,12 @@ struct LearnExamListView: View {
                     HStack { Text(exam.name).font(.headline); Spacer(); Text(exam.subject).foregroundStyle(Theme.accent) }
                     Text("In \(exam.daysRemaining) Tagen · \(exam.cardCount) Konzepte")
                         .font(.caption).foregroundStyle(.secondary)
-                    ProgressView(value: exam.readiness)
+                    if let readiness = exam.readiness {
+                        ProgressView(value: readiness)
+                        Text("Prüfungsbereitschaft \(readiness.formatted(.percent))").font(.caption)
+                    } else {
+                        Text("Noch nicht genug Abrufdaten für eine Bereitschaft").font(.caption).foregroundStyle(.secondary)
+                    }
                     Button("Probeprüfung starten") { Task { await start(exam) } }
                         .buttonStyle(.borderedProminent).disabled(exam.cardCount == 0)
                 }
@@ -59,6 +64,7 @@ struct LearnExamEditorView: View {
     @State private var subject = ""
     @State private var date = Date().addingTimeInterval(7 * 86_400)
     @State private var selected = Set<String>()
+    @State private var dailyMinutes = 30
     @State private var errorMessage: String?
 
     init(api: BackendAPI, lessons: [BackendAPI.LessonInfo], existing: BackendAPI.LearnExam?, onSaved: @escaping (BackendAPI.LearnExam) -> Void) {
@@ -66,6 +72,7 @@ struct LearnExamEditorView: View {
         _name = State(initialValue: existing?.name ?? "")
         _subject = State(initialValue: existing?.subject ?? "")
         _selected = State(initialValue: Set(existing?.sessionIds ?? []))
+        _dailyMinutes = State(initialValue: existing?.dailyMinutes ?? 30)
         if let value = existing?.examDate, let parsed = Self.parseDate(value) { _date = State(initialValue: parsed) }
     }
 
@@ -75,6 +82,7 @@ struct LearnExamEditorView: View {
                 TextField("Name", text: $name)
                 TextField("Fach", text: $subject)
                 DatePicker("Datum", selection: $date, displayedComponents: .date)
+                Stepper("Täglich \(dailyMinutes) Minuten", value: $dailyMinutes, in: 5 ... 120, step: 5)
                 Section("Enthaltene Stunden") {
                     ForEach(lessons) { lesson in
                         Button { toggle(lesson.id) } label: {
@@ -99,9 +107,9 @@ struct LearnExamEditorView: View {
             let isoDate = String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
             let value: BackendAPI.LearnExam
             if let existing {
-                value = try await api.updateLearnExam(existing, name: name, subject: subject, date: isoDate, sessionIds: Array(selected))
+                value = try await api.updateLearnExam(existing, name: name, subject: subject, date: isoDate, sessionIds: Array(selected), dailyMinutes: dailyMinutes)
             } else {
-                value = try await api.createLearnExam(name: name, subject: subject, date: isoDate, sessionIds: Array(selected))
+                value = try await api.createLearnExam(name: name, subject: subject, date: isoDate, sessionIds: Array(selected), dailyMinutes: dailyMinutes)
             }
             onSaved(value); dismiss()
         } catch { errorMessage = error.localizedDescription }

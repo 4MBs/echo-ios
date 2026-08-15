@@ -249,11 +249,13 @@ extension BackendAPI {
         let dailyMinutes: Int
         let sessionIds: [String]
         let cardCount: Int
-        let readiness: Double
+        let readiness: Double?
+        let readinessStatus: String?
         let daysRemaining: Int
 
         enum CodingKeys: String, CodingKey {
             case id, name, subject, readiness
+            case readinessStatus = "readiness_status"
             case examDate = "exam_date"
             case dailyMinutes = "daily_minutes"
             case sessionIds = "session_ids"
@@ -304,6 +306,7 @@ extension BackendAPI {
         let score: Double?
         let maxPoints: Double
         let timeLimitMinutes: Int
+        let pausedSeconds: Int
         let results: [Result]?
 
         enum CodingKeys: String, CodingKey {
@@ -312,6 +315,7 @@ extension BackendAPI {
             case startedAt = "started_at"
             case maxPoints = "max_points"
             case timeLimitMinutes = "time_limit_minutes"
+            case pausedSeconds = "paused_seconds"
             case results
         }
     }
@@ -321,6 +325,12 @@ extension BackendAPI {
             let date: String
             let count: Int
             var id: String { date }
+        }
+        struct ResponseTime: Codable, Identifiable, Sendable {
+            let date: String
+            let averageMs: Int?
+            var id: String { date }
+            enum CodingKeys: String, CodingKey { case date; case averageMs = "average_ms" }
         }
         let due: Int
         let overdue: Int
@@ -335,6 +345,7 @@ extension BackendAPI {
         let recallBySubject: [String: Double]
         let recallByConcept: [String: Double]
         let activitySeries: [Activity]
+        let responseTimeSeries: [ResponseTime]
 
         enum CodingKeys: String, CodingKey {
             case due, overdue, lapses
@@ -348,6 +359,7 @@ extension BackendAPI {
             case recallBySubject = "recall_by_subject"
             case recallByConcept = "recall_by_concept"
             case activitySeries = "activity_series"
+            case responseTimeSeries = "response_time_series"
         }
     }
 
@@ -394,11 +406,11 @@ extension BackendAPI {
         return try await JSONDecoder().decode(Response.self, from: request("/learn/exams")).exams
     }
 
-    func createLearnExam(name: String, subject: String, date: String, sessionIds: [String]) async throws -> LearnExam {
+    func createLearnExam(name: String, subject: String, date: String, sessionIds: [String], dailyMinutes: Int) async throws -> LearnExam {
         struct Response: Decodable { let exam: LearnExam }
         let data = try await request("/learn/exams", method: "POST", jsonBody: [
             "name": name, "subject": subject, "exam_date": date,
-            "session_ids": sessionIds, "daily_minutes": 30
+            "session_ids": sessionIds, "daily_minutes": dailyMinutes
         ])
         return try JSONDecoder().decode(Response.self, from: data).exam
     }
@@ -407,11 +419,11 @@ extension BackendAPI {
         _ = try await request("/learn/exams/\(id)", method: "DELETE")
     }
 
-    func updateLearnExam(_ exam: LearnExam, name: String, subject: String, date: String, sessionIds: [String]) async throws -> LearnExam {
+    func updateLearnExam(_ exam: LearnExam, name: String, subject: String, date: String, sessionIds: [String], dailyMinutes: Int) async throws -> LearnExam {
         struct Response: Decodable { let exam: LearnExam }
         let data = try await request("/learn/exams/\(exam.id)", method: "PATCH", jsonBody: [
             "name": name, "subject": subject, "exam_date": date,
-            "session_ids": sessionIds, "daily_minutes": exam.dailyMinutes
+            "session_ids": sessionIds, "daily_minutes": dailyMinutes
         ])
         return try JSONDecoder().decode(Response.self, from: data).exam
     }

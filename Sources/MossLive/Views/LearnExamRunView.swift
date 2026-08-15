@@ -73,7 +73,7 @@ struct LearnExamRunView: View {
 
     private func remaining(at date: Date) -> String {
         guard run.status != "paused", let start = ISO8601DateFormatter().date(from: run.startedAt) else { return "Pausiert" }
-        let seconds = max(0, run.timeLimitMinutes * 60 - Int(date.timeIntervalSince(start)))
+        let seconds = max(0, run.timeLimitMinutes * 60 - Int(date.timeIntervalSince(start)) + run.pausedSeconds)
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }

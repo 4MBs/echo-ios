@@ -21,6 +21,9 @@ struct LearnAnalyticsView: View {
                 Section("Aktivität") {
                     LabeledContent("Letzte 7 Tage", value: "\(analytics.activity7Days) Antworten")
                     LabeledContent("Letzte 30 Tage", value: "\(analytics.activity30Days) Antworten")
+                    if let latest = analytics.responseTimeSeries.last(where: { $0.averageMs != nil })?.averageMs {
+                        LabeledContent("Ø Antwortzeit zuletzt", value: "\(latest / 1_000) Sek.")
+                    }
                 }
                 if !analytics.recallBySubject.isEmpty {
                     Section("Abrufquote nach Fach") {
