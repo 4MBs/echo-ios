@@ -27,7 +27,8 @@ struct RecordingSubjectPicker: View {
                 }
             }
             .font(.caption.weight(.semibold))
-            .frame(width: 112, minHeight: 58)
+            .frame(width: 112)
+            .frame(minHeight: 58)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .disabled(model.recordingSubjectSelection.catalogue.isEmpty)
