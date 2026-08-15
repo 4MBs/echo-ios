@@ -211,6 +211,24 @@ extension BackendAPI {
     struct LearnEvaluationResult: Sendable {
         let evaluation: LearnEvaluation
         let card: LearnCard
+        let remediation: LearnRemediation?
+    }
+
+    struct LearnRemediation: Codable, Sendable {
+        let diagnosis: String
+        let explanation: String
+        let hint: String
+        let controlQuestion: String
+        let expectedAnswer: String
+        let promptVariant: String
+        let source: LearnSource?
+
+        enum CodingKeys: String, CodingKey {
+            case diagnosis, explanation, hint, source
+            case controlQuestion = "control_question"
+            case expectedAnswer = "expected_answer"
+            case promptVariant = "prompt_variant"
+        }
     }
 
     func learnOverview() async throws -> LearnOverview {
@@ -284,6 +302,7 @@ extension BackendAPI {
         struct Response: Decodable {
             let evaluation: LearnEvaluation
             let card: LearnCard
+            let remediation: LearnRemediation?
         }
         var body: [String: Any] = [
             "card_id": cardId, "answer": answer, "attempt_uuid": UUID().uuidString
@@ -291,7 +310,33 @@ extension BackendAPI {
         if let confidence { body["confidence"] = confidence }
         let data = try await request("/learn/evaluate", method: "POST", jsonBody: body)
         let response = try JSONDecoder().decode(Response.self, from: data)
-        return LearnEvaluationResult(evaluation: response.evaluation, card: response.card)
+        return LearnEvaluationResult(
+            evaluation: response.evaluation,
+            card: response.card,
+            remediation: response.remediation
+        )
+    }
+
+    func evaluateRemediation(
+        cardId: String,
+        remediation: LearnRemediation,
+        answer: String
+    ) async throws -> LearnEvaluationResult {
+        struct Response: Decodable {
+            let evaluation: LearnEvaluation
+            let card: LearnCard
+        }
+        let body: [String: Any] = [
+            "card_id": cardId,
+            "question": remediation.controlQuestion,
+            "expected_answer": remediation.expectedAnswer,
+            "prompt_variant": remediation.promptVariant,
+            "answer": answer,
+            "attempt_uuid": UUID().uuidString
+        ]
+        let data = try await request("/learn/remediation/evaluate", method: "POST", jsonBody: body)
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        return LearnEvaluationResult(evaluation: response.evaluation, card: response.card, remediation: nil)
     }
 }
 

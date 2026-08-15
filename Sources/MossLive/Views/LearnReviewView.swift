@@ -5,6 +5,7 @@ struct LearnReviewView: View {
     @State private var session: LearnReviewSession
     @State private var answer = ""
     @State private var evaluation: BackendAPI.LearnEvaluation?
+    @State private var remediation: BackendAPI.LearnRemediation?
     @State private var isEvaluating = false
     @State private var errorMessage: String?
     @FocusState private var answerFocused: Bool
@@ -48,7 +49,11 @@ struct LearnReviewView: View {
                     .font(.title2.bold())
                     .accessibilityAddTraits(.isHeader)
 
-                if let evaluation {
+                if let remediation {
+                    LearnRemediationView(api: api, card: card, remediation: remediation) {
+                        advance()
+                    }
+                } else if let evaluation {
                     feedback(evaluation, card: card)
                 } else {
                     TextEditor(text: $answer)
@@ -102,11 +107,7 @@ struct LearnReviewView: View {
                 .buttonStyle(.bordered)
             }
             Button(session.completedCount + 1 == session.cards.count ? "Abschließen" : "Nächste Frage") {
-                session.advance()
-                answer = ""
-                self.evaluation = nil
-                errorMessage = nil
-                answerFocused = true
+                advance()
             }
             .buttonStyle(.borderedProminent)
         }
@@ -118,12 +119,22 @@ struct LearnReviewView: View {
         do {
             let result = try await api.evaluateLearnAnswer(cardId: card.id, answer: answer)
             evaluation = result.evaluation
+            remediation = result.remediation
         } catch is CancellationError {
             return
         } catch {
             errorMessage = error.localizedDescription
         }
         isEvaluating = false
+    }
+
+    private func advance() {
+        session.advance()
+        answer = ""
+        evaluation = nil
+        remediation = nil
+        errorMessage = nil
+        answerFocused = true
     }
 }
 
