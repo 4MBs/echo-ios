@@ -34,5 +34,11 @@ final class LearnUITests: EchoUITestCase {
         XCTAssertTrue(app.staticTexts["Noch keine Lernkonzepte"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Stunden auswählen"].exists)
         shot("learn-empty")
+        tap(app.buttons["Stunden auswählen"])
+        let aiLesson = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Ursache und Wirkung'"))
+            .firstMatch
+        XCTAssertTrue(aiLesson.waitForExistence(timeout: 5))
+        XCTAssertTrue(aiLesson.label.contains("Mathematik"), "The AI title must retain its subject")
     }
 }

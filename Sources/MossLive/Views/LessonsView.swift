@@ -274,7 +274,10 @@ extension LessonsView.FolderSort {
 extension BackendAPI.LessonInfo {
     /// Free-text match over everything a lesson is named by.
     func matches(_ query: String) -> Bool {
-        (title ?? "").localizedCaseInsensitiveContains(query)
+        displayTitle.localizedCaseInsensitiveContains(query)
+            || (topic ?? "").localizedCaseInsensitiveContains(query)
+            || (summaryExcerpt ?? "").localizedCaseInsensitiveContains(query)
+            || (title ?? "").localizedCaseInsensitiveContains(query)
             || (subject ?? "").localizedCaseInsensitiveContains(query)
             || (teacher ?? "").localizedCaseInsensitiveContains(query)
             || (room ?? "").localizedCaseInsensitiveContains(query)

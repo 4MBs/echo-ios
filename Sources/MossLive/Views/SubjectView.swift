@@ -324,8 +324,8 @@ private struct RowPressStyle: ButtonStyle {
 /// server asked for a topic has none, and falls back to the opening sentence
 /// of its summary — prose in a heading's place, which is exactly what
 /// `scripts/backfill_topics.py` exists to fix. A lesson with no summary at all
-/// heads itself with its date, spelled out, and its meta line carries the time
-/// of day rather than repeating that date.
+/// falls back to its timetable label or subject; only a completely unnamed
+/// lesson uses its date and moves the date out of the metadata line.
 private struct SubjectLessonRow: View {
     let info: BackendAPI.LessonInfo
 
@@ -335,19 +335,16 @@ private struct SubjectLessonRow: View {
     private struct Lines {
         let headline: String
         let detail: String?
-        /// The heading is the date, because there was nothing else to head it
-        /// with — which is what moves the date out of the meta line.
+        /// The heading is the date because there was no topic, timetable label,
+        /// or subject, which is what moves the date out of the meta line.
         let dated: Bool
     }
 
     private var lines: Lines {
-        if let topic = info.topic?.trimmingCharacters(in: .whitespaces), !topic.isEmpty {
-            return Lines(headline: topic, detail: info.summaryExcerpt, dated: false)
-        }
-        if let derived = lessonTopic(from: info.summaryExcerpt) {
-            return Lines(headline: derived.headline, detail: derived.detail, dated: false)
-        }
-        return Lines(headline: dateHeadline, detail: nil, dated: true)
+        let detail = info.topic?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? info.summaryExcerpt
+            : lessonTopic(from: info.summaryExcerpt)?.detail
+        return Lines(headline: info.displayTitle, detail: detail, dated: info.usesDateDisplayTitle)
     }
 
     var body: some View {
@@ -380,6 +377,10 @@ private struct SubjectLessonRow: View {
     /// own page says them.
     private func meta(datedHeadline: Bool) -> some View {
         HStack(spacing: 7) {
+            if let subject = info.displaySubject {
+                Text(subject)
+                Text("·")
+            }
             Text(datedHeadline ? timeText : dateText)
             Text("·")
             Text(lessonDurationText(info.durationSeconds))
@@ -425,130 +426,6 @@ private struct SubjectLessonRow: View {
     private var timeText: String {
         info.startedAt.formatted(date: .omitted, time: .shortened)
     }
-
-    /// "Dienstag, 12. Oktober" — a heading, for a lesson that has nothing else
-    /// to be headed by yet.
-    private var dateHeadline: String {
-        info.startedAt.formatted(.dateTime.weekday(.wide).day().month(.wide))
-    }
-}
-
-// MARK: - Reading a summary as a heading
-
-/// A lesson's summary, read as a heading and the line under it.
-struct LessonTopic {
-    /// The opening sentence, without its full stop.
-    let headline: String
-    /// What followed it inside the excerpt, if the excerpt reached that far.
-    let detail: String?
-}
-
-/// A heading is at least this many characters. Below it a break is far more
-/// likely to be a label ("Thema:") or an abbreviation nobody listed than the
-/// end of a sentence.
-private let headlineMinimum = 24
-
-/// How far into the excerpt a sentence end is still worth looking for. Past
-/// this the first sentence is a paragraph, and the row is better off heading
-/// itself with the opening of it.
-///
-/// This is deliberately larger than what a heading is allowed to *be*: the text
-/// after the break is what fills the row's third line, so giving up the search
-/// early would cost the line as well as shorten the heading.
-private let sentenceSearchLimit = 96
-
-/// And how long a heading may actually be.
-///
-/// It is set on one line, so this is a width budget, not a taste: at
-/// `.title3` bold, fifty-odd characters is about what a column of the board
-/// holds on an iPad in portrait, and the scale factor covers an iPhone. A
-/// topic written by the summarizer — three to six words — comes in well under
-/// it and this never bites; it exists for the derived fallback, which is a
-/// sentence and will otherwise run to the search limit and be cut mid-word by
-/// the truncation instead of on a word here.
-private let headlineLimit = 52
-
-/// Full stops that do not end a sentence. Single letters cover the spaced
-/// abbreviations German writes ("z. B.", "u. a.", "d. h.") without needing an
-/// entry for every combination of them.
-private let abbreviationsEndingInAStop: Set<String> = [
-    "a", "b", "d", "h", "o", "s", "u", "z",
-    "abb", "bspw", "bsp", "bzgl", "bzw", "ca", "dh", "dr", "evtl", "etc", "ggf",
-    "ggfs", "inkl", "jh", "max", "mind", "nr", "prof", "sog", "usw", "vgl", "vs",
-    "zb", "zzgl",
-]
-
-/// Split the opening of a summary into something that can head a row and
-/// something that can sit under it.
-///
-/// The server sends the first 200 characters of the summary, flattened onto one
-/// line. Its first sentence is what the lesson was about — the prompt asks for
-/// an overview paragraph before anything else — so that sentence becomes the
-/// heading and whatever the excerpt still holds becomes the line beneath it.
-///
-/// Returns nil when there is no summary at all, which is the row's signal to
-/// head itself with its date instead.
-func lessonTopic(from excerpt: String?) -> LessonTopic? {
-    let flat = (excerpt ?? "")
-        .split(whereSeparator: \.isWhitespace)
-        .joined(separator: " ")
-    guard !flat.isEmpty else { return nil }
-
-    let characters = Array(flat)
-    var wordStart = 0
-    for (index, character) in characters.enumerated() {
-        if character == " " {
-            wordStart = index + 1
-            continue
-        }
-        guard character == "." || character == "!" || character == "?" || character == ":" else { continue }
-        // A mark with nothing after it ends the excerpt, not a sentence inside
-        // it — including the "…" the server cuts a long summary with.
-        guard index + 1 < characters.count, characters[index + 1] == " " else { continue }
-        guard index >= headlineMinimum else { continue }
-        // Past the ceiling there is no point looking further: this sentence is
-        // already too long to head a row, and the next one is longer still.
-        guard index <= sentenceSearchLimit else { break }
-        if character == ".", endsAnAbbreviation(String(characters[wordStart ..< index])) { continue }
-        let rest = String(characters[(index + 1)...]).trimmingCharacters(in: .whitespaces)
-        return LessonTopic(
-            headline: shortened(String(characters[0 ..< index]), to: headlineLimit),
-            detail: rest.isEmpty ? nil : rest
-        )
-    }
-    // One long sentence, or no sentence end in reach: the opening of it heads
-    // the row on its own, and there is nothing left to put underneath.
-    return LessonTopic(headline: withoutTrailingStop(shortened(flat, to: headlineLimit)), detail: nil)
-}
-
-/// A heading does not end in a full stop. Only a stop and a colon are dropped:
-/// the "…" the server cuts a long summary with is a statement about the
-/// summary, not punctuation, and a question mark is part of what was said.
-private func withoutTrailingStop(_ text: String) -> String {
-    text.hasSuffix(".") || text.hasSuffix(":") ? String(text.dropLast()) : text
-}
-
-/// Whether the word in front of a full stop is the reason for it.
-private func endsAnAbbreviation(_ word: String) -> Bool {
-    let letters = word.trimmingCharacters(in: CharacterSet.letters.union(.decimalDigits).inverted)
-    // A stop with no word in front of it is part of an ellipsis or a stray
-    // mark, never the end of a sentence.
-    if letters.isEmpty { return true }
-    // "Der 1. Weltkrieg", "am 3. Oktober" — an ordinal, not a sentence.
-    if letters.allSatisfy(\.isNumber) { return true }
-    return abbreviationsEndingInAStop.contains(letters.lowercased())
-}
-
-/// Cut to length on a word boundary, so the tail is never half a word. The
-/// same bargain the server makes with the excerpt itself.
-private func shortened(_ text: String, to limit: Int) -> String {
-    guard text.count > limit else { return text }
-    let head = String(text.prefix(limit))
-    let trailing = CharacterSet(charactersIn: " ,;:.-\u{2013}")
-    if let space = head.lastIndex(of: " "), head.distance(from: head.startIndex, to: space) > limit / 2 {
-        return String(head[head.startIndex ..< space]).trimmingCharacters(in: trailing) + "…"
-    }
-    return head.trimmingCharacters(in: trailing) + "…"
 }
 
 // MARK: - Numbers the screen prints
