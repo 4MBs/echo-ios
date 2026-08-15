@@ -31,6 +31,21 @@ docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/realm/swiftlint:0.57.1 swiftlin
 brew install xcodegen && xcodegen generate && open MossLive.xcodeproj
 ```
 
+## Simulator workflows
+
+Two manual-dispatch workflows drive a simulator on a macOS runner:
+
+- **Exhaustive iOS Simulator UI Tests** (`ui-tests.yml`) runs the XCUITest suite
+  against the app's deterministic mock backend (`-UITesting`), on an iPad Pro 13"
+  by default. It uploads the test log, screen recordings and per-test
+  screenshots, which is what actually explains a failure.
+- **Documentation Screenshots** (`screenshots.yml`) boots one simulator, launches
+  the app in each mock state, photographs it, and shuts the simulator down again.
+  The images in `docs/screenshots/` come from there rather than from a phone.
+
+Both are `workflow_dispatch` only — simulator minutes are expensive and neither
+gates a push.
+
 ## Codemagic
 
 [`scripts/ci/codemagic.sh`](../scripts/ci/codemagic.sh) drives a macOS build on

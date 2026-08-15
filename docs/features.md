@@ -1,5 +1,8 @@
 # What Echo does
 
+Echo has six tabs: **Aufnahme**, **Stunden**, **Lernen**, **Bibliothek**,
+**Chat** and **Einstellungen**, the last pinned to the foot of the sidebar.
+
 ## Live transcription
 
 Audio is captured with AVAudioEngine, encoded as Opus, and streamed over a
@@ -24,15 +27,27 @@ library.
 
 ### Dead zones don't cost you the lesson
 
-If the network drops mid-lesson, recording continues and the backlog — up to
-roughly 100 minutes of audio — is replayed when the connection returns. Nothing
-said during an outage is lost.
+If the network drops mid-lesson, recording continues. Unsent audio is written to
+a length-prefixed file on disk rather than held in memory, so an outage cannot
+grow the app's RAM use however long it lasts. When the connection returns the
+whole backlog is replayed at roughly eight times real time — fast enough to
+catch up, slow enough that the server's transcriber never has to skip audio.
+
+The one case where audio is dropped is a resume the server refuses: after an
+outage long enough for its session grace to expire, the backlog belongs to a
+sequence space that no longer exists, and the app reports how many buffered
+packets it discarded.
 
 ## It knows your timetable
 
 Connect WebUntis and recordings name themselves: subject, teacher, room. Record
 straight through a double period and the recording is cut into one lesson per
 period afterwards, so the archive matches the timetable rather than the tape.
+
+The subject is a choice, not a verdict: the recording screen has a subject
+picker seeded from the timetable, and a manual pick stays authoritative until
+that recording ends. A lesson recorded in the wrong room, or during a
+substitution the timetable never heard about, still lands in the right folder.
 
 ## The lesson archive
 
@@ -45,12 +60,18 @@ free period — and is the one folder the timetable cannot supply.
 
 Open a folder and the subject's recordings are there, headed by the two figures
 a subject adds up to — how long it has been recorded for in total, and how much
-of that was this week. Every row leads with **what the lesson was about**: three
-or four words, written by the AI as the first line of the summary, on one line
-and never two. Under it the date and how long it ran, then the opening of the
-summary — so the list reads for what was taught rather than for when. On a wide
-window the list is cut in half and set in two columns, still read top to bottom,
-newest first. A long press on a row deletes the lesson.
+of that was this week. Every row leads with **what the lesson was about**: a
+short AI-written topic, on one line and never two. Under it the subject, the
+date and how long it ran, then the opening of the summary — so the list reads
+for what was taught rather than for when. On a wide window the list is cut in
+half and set in two columns, still read top to bottom, newest first. A long
+press on a row deletes the lesson.
+
+The topic comes from the server as its own field. When it is missing — an old
+server, an old summary, a recording too short to summarise — the app falls back
+in order: the first sentence of the summary, then the timetable title, then the
+subject, and only if all of those are empty does a lesson show up under its
+date. Nothing has to be renamed by hand.
 
 A lesson is three cards: what it was about, the recording, and what was said.
 The summary writes itself when the recording ends — the archive is a dozen
@@ -89,6 +110,29 @@ destination lesson, choose **Unterrichtsnotizen**, then tap the queued document
 under **Aus dem Teilen-Menü**. The extension never guesses which lesson a file
 belongs to and does not upload anything before that explicit choice.
 
+## Lernen
+
+A lesson that was recorded, transcribed and summarised is most of the way to
+being revisable, so Echo takes the last step. **Lernen** turns lessons into
+flashcards and schedules them.
+
+Cards are generated per lesson, on request, from that lesson's transcript. They
+come in several shapes — multiple choice, true/false, cloze, free text and oral
+— and each keeps a link back to where it came from: the lesson, the concept, and
+the millisecond offset in the transcript, so a card that is not obvious can be
+traced to the moment it was taught.
+
+The tab opens on what is due today, an estimate in minutes, and overall mastery,
+with the same figures broken down per subject. A day's plan can be asked for by
+the time available rather than by the card count — thirty minutes of revision
+returns blocks per subject, each with a reason for being there.
+
+Answers are checked by the server, not by self-assessment: a free-text answer
+comes back categorised, with feedback and the expected answer. Every review
+updates the card's box, stability, repetition and lapse counts, and its next due
+date. Cards can be deleted individually when a generated one is not worth
+keeping.
+
 ## Chat and the answer note
 
 The chat answers free-form questions about the running recording or any past
@@ -102,6 +146,31 @@ deliberately anonymous-looking, which matters more than it should.
 
 The context picker under the conversation decides what a question is answered
 from: nothing, the running recording, or one particular lesson.
+
+Questions can be typed, dictated or brought in from a file. Dictation uses
+Apple's speech recognition directly and the captured audio never reaches Echo's
+server. Attachments — PDFs, plain text, Markdown, CSV, HTML, JSON, and photos
+taken with the camera or picked from the library — are read **on the iPad**:
+text is extracted locally, images go through Apple Vision, and only the
+resulting text is sent on. Attachments are capped at 12 MB and the extracted
+text at 36 000 characters. A sent message can be edited and asked again.
+
+## Einstellungen
+
+Beyond the server address, port and token, the settings that matter during a
+lesson:
+
+- **App-Wechsel.** A three-finger tap leaves Echo for one chosen app — Goodnotes,
+  Notability, or any URL scheme you type — and the recording keeps running. Notes
+  are written where notes are written; the transcript does not stop for it.
+- **Which AI answers.** The provider (ChatGPT or Gemini), the model, its
+  reasoning effort and service tier are switched from inside the app and applied
+  to the running server, so the choice survives without editing anything on the
+  machine at home.
+- **Audio.** Opus at 16, 24 or 32 kbit/s; 24 is the recommendation and costs
+  about 11 MiB per hour. The record button's colour is yours to pick, and
+  **Aufnahmediagnose** shows what the microphone and the connection are actually
+  doing when a recording looks wrong.
 
 ## Bibliothek
 
@@ -144,3 +213,7 @@ the panel and lets the student draw a rectangle directly on the PDF with a finge
 or Apple Pencil. Echo sends only the page number and normalized rectangle
 coordinates, not a screenshot. That marked region gets its own thread and remains
 outlined while the answer is compared with the book.
+
+A drawn rectangle is not final. The whole region can be dragged and every corner
+has a handle — small to look at, generous to hit — so a selection that caught
+half a diagram is corrected rather than redrawn.
