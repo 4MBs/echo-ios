@@ -51,6 +51,8 @@ final class AppModel {
     private(set) var serverTranscriptLagSeconds: Double?
     private(set) var sessionId: String?
     private(set) var recordingStartedAt: Date?
+    private(set) var recordingSubjectSelection = RecordingSubjectSelection()
+    private(set) var isSavingRecordingSubject = false
     var bannerMessage: String?
 
     /// Which place of the app the sidebar is on. Held here rather than in the
@@ -81,6 +83,7 @@ final class AppModel {
     private var autoStopTask: Task<Void, Never>?
     private var wantsRecording = false
     private var lastNotificationSyncDay = Date.distantPast
+    private static let lastRecordingSubjectKey = "last-recording-subject"
 
     init() {
         settings = AppSettings()
@@ -153,6 +156,7 @@ final class AppModel {
         timetablePoll = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.timetable.refresh()
+                self?.applyCurrentTimetableSubjectIfIdle()
                 self?.scheduleAutoStopIfNeeded()
                 await self?.resyncNotificationsIfDayChanged()
                 try? await Task.sleep(for: .seconds(60))
@@ -160,6 +164,7 @@ final class AppModel {
         }
         Task { [weak self] in await self?.syncTimetableNotifications() }
         Task { [weak self] in await self?.recoverInterruptedRecordings() }
+        Task { [weak self] in await self?.refreshRecordingSubjects() }
     }
 
     // MARK: - Timetable (tiers 2 + 4)
@@ -183,7 +188,59 @@ final class AppModel {
 
     func refreshTimetable() async {
         await timetable.refresh()
+        applyCurrentTimetableSubjectIfIdle()
         scheduleAutoStopIfNeeded()
+    }
+
+    func refreshRecordingSubjects() async {
+        var subjects = OfflineCache.load(
+            [BackendAPI.SubjectInfo].self,
+            key: OfflineCache.Key.timetableSubjects
+        ) ?? []
+        do {
+            let fresh = try await api.timetableSubjects()
+            subjects = fresh
+            OfflineCache.save(fresh, as: OfflineCache.Key.timetableSubjects)
+        } catch {
+            if subjects.isEmpty { bannerMessage = error.localizedDescription }
+        }
+        recordingSubjectSelection.refresh(
+            catalogue: subjects,
+            current: timetable.current,
+            lastSelectedID: UserDefaults.standard.string(forKey: Self.lastRecordingSubjectKey)
+        )
+    }
+
+    private func applyCurrentTimetableSubjectIfIdle() {
+        guard !wantsRecording else { return }
+        recordingSubjectSelection.refresh(
+            catalogue: recordingSubjectSelection.catalogue,
+            current: timetable.current,
+            lastSelectedID: UserDefaults.standard.string(forKey: Self.lastRecordingSubjectKey)
+        )
+    }
+
+    func chooseRecordingSubject(_ subject: BackendAPI.SubjectInfo) {
+        recordingSubjectSelection.choose(subject)
+        UserDefaults.standard.set(subject.id, forKey: Self.lastRecordingSubjectKey)
+        guard wantsRecording, let sessionId else { return }
+        Task { await persistRecordingSubject(subject, sessionId: sessionId) }
+    }
+
+    private func persistRecordingSubject(_ subject: BackendAPI.SubjectInfo, sessionId: String) async {
+        if UITestRuntime.isEnabled {
+            recordingSubjectSelection.confirm(subject)
+            return
+        }
+        isSavingRecordingSubject = true
+        defer { isSavingRecordingSubject = false }
+        do {
+            _ = try await api.updateLessonSubject(sessionId: sessionId, subject: subject.name)
+            recordingSubjectSelection.confirm(subject)
+        } catch {
+            recordingSubjectSelection.rollBack()
+            bannerMessage = "Das Fach konnte nicht gespeichert werden: \(error.localizedDescription)"
+        }
     }
 
     /// The backend client for the configured server.
@@ -215,6 +272,10 @@ final class AppModel {
             return
         }
         bannerMessage = nil
+        guard recordingSubjectSelection.selected != nil else {
+            phase = .error("Bitte zuerst ein Fach auswählen.")
+            return
+        }
         guard settings.isConfigured, let url = settings.websocketURL else {
             phase = .error("Zuerst Serveradresse und Token in den Einstellungen setzen.")
             return
@@ -232,6 +293,7 @@ final class AppModel {
             return
         }
         wantsRecording = true
+        sessionId = nil
         segments = []
         partial = []
         micLevels = []
@@ -275,6 +337,8 @@ final class AppModel {
         }
         phase = .disconnected
         isTranscribing = false
+        recordingSubjectSelection.resetManualOverride()
+        applyCurrentTimetableSubjectIfIdle()
     }
 
     // MARK: - Event handling
@@ -286,6 +350,9 @@ final class AppModel {
         case .helloAck(let ack):
             sessionId = ack.sessionId
             audio.attachServerSession(ack.sessionId)
+            if let subject = recordingSubjectSelection.selected {
+                Task { await persistRecordingSubject(subject, sessionId: ack.sessionId) }
+            }
             if !ack.resumed {
                 audio.resetSequence()
                 segments = []

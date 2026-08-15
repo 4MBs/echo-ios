@@ -180,6 +180,10 @@ extension BackendAPI {
         ).cards
     }
 
+    func deleteLearnCard(id: String) async throws {
+        _ = try await request("/learn/cards/\(id)", method: "DELETE")
+    }
+
     func generateLearnCards(sessionId: String) async throws -> [LearnCard] {
         struct Response: Decodable { let cards: [LearnCard] }
         let data = try await request(
