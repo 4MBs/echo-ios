@@ -25,7 +25,7 @@ struct LearnExamListView: View {
                     } else {
                         Text("Noch nicht genug Abrufdaten für eine Bereitschaft").font(.caption).foregroundStyle(.secondary)
                     }
-                    Button("Probeprüfung starten") { Task { await start(exam) } }
+                    Button(exam.activeRunId == nil ? "Probeprüfung starten" : "Probeprüfung fortsetzen") { Task { await start(exam) } }
                         .buttonStyle(.borderedProminent).disabled(exam.cardCount == 0)
                 }
                 .swipeActions {
@@ -45,12 +45,19 @@ struct LearnExamListView: View {
                 if let index = exams.firstIndex(where: { $0.id == updated.id }) { exams[index] = updated }
             }
         }
-        .fullScreenCover(item: $run) { value in LearnExamRunView(api: api, initialRun: value) }
+        .fullScreenCover(item: $run, onDismiss: { Task { await load() } }) { value in
+            LearnExamRunView(api: api, initialRun: value)
+        }
         .task { await load() }
     }
 
     private func load() async { do { exams = try await api.learnExams() } catch { errorMessage = error.localizedDescription } }
-    private func start(_ exam: BackendAPI.LearnExam) async { do { run = try await api.startLearnExam(id: exam.id) } catch { errorMessage = error.localizedDescription } }
+    private func start(_ exam: BackendAPI.LearnExam) async {
+        do {
+            if let runId = exam.activeRunId { run = try await api.learnExamRun(id: runId) }
+            else { run = try await api.startLearnExam(id: exam.id) }
+        } catch { errorMessage = error.localizedDescription }
+    }
     private func delete(_ exam: BackendAPI.LearnExam) async { do { try await api.deleteLearnExam(id: exam.id); exams.removeAll { $0.id == exam.id } } catch { errorMessage = error.localizedDescription } }
 }
 

@@ -252,6 +252,7 @@ extension BackendAPI {
         let readiness: Double?
         let readinessStatus: String?
         let daysRemaining: Int
+        let activeRunId: String?
 
         enum CodingKeys: String, CodingKey {
             case id, name, subject, readiness
@@ -261,6 +262,7 @@ extension BackendAPI {
             case sessionIds = "session_ids"
             case cardCount = "card_count"
             case daysRemaining = "days_remaining"
+            case activeRunId = "active_run_id"
         }
     }
 
@@ -431,6 +433,12 @@ extension BackendAPI {
     func startLearnExam(id: String) async throws -> LearnExamRun {
         struct Response: Decodable { let run: LearnExamRun }
         let data = try await request("/learn/exams/\(id)/runs", method: "POST")
+        return try JSONDecoder().decode(Response.self, from: data).run
+    }
+
+    func learnExamRun(id: String) async throws -> LearnExamRun {
+        struct Response: Decodable { let run: LearnExamRun }
+        let data = try await request("/learn/exam-runs/\(id)")
         return try JSONDecoder().decode(Response.self, from: data).run
     }
 

@@ -37,8 +37,9 @@ struct LearnExamRunView: View {
                         ProgressView(value: Double(index), total: Double(max(1, run.questions.count)))
                         Text(question.question).font(.title2.bold())
                         LearnAnswerSpecView(spec: question.answerSpec, answer: $answer)
+                            .disabled(run.status == "paused")
                         Button(index + 1 == run.questions.count ? "Prüfung abgeben" : "Antwort speichern und weiter") { Task { await next(question) } }
-                            .buttonStyle(.borderedProminent).disabled(submitting)
+                            .buttonStyle(.borderedProminent).disabled(submitting || run.status == "paused")
                     } else {
                         ContentUnavailableView("Keine Aufgaben", systemImage: "doc.text")
                     }

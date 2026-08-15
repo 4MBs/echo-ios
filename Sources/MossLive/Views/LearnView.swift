@@ -332,6 +332,9 @@ private struct LearnConceptLibraryView: View {
                     Button("Neu formulieren", systemImage: "arrow.clockwise") {
                         Task { await regenerate(card) }
                     }
+                    Button(card.learningState == "suspended" ? "Aktivieren" : "Pausieren", systemImage: card.learningState == "suspended" ? "play" : "pause") {
+                        Task { await toggleSuspended(card) }
+                    }
                     Button("Konzept löschen", systemImage: "trash", role: .destructive) {
                         pendingDelete = card
                     }
@@ -408,5 +411,14 @@ private struct LearnConceptLibraryView: View {
     private func replace(_ updated: BackendAPI.LearnCard) {
         if let index = cards.firstIndex(where: { $0.id == updated.id }) { cards[index] = updated }
         OfflineCache.save(cards, as: OfflineCache.Key.learnCards)
+    }
+
+    private func toggleSuspended(_ card: BackendAPI.LearnCard) async {
+        do {
+            replace(try await api.updateLearnCard(
+                id: card.id,
+                changes: ["learning_state": card.learningState == "suspended" ? "review" : "suspended"]
+            ))
+        } catch { errorMessage = error.localizedDescription }
     }
 }
