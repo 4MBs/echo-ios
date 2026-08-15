@@ -56,13 +56,8 @@ struct LearnReviewView: View {
                 } else if let evaluation {
                     feedback(evaluation, card: card)
                 } else {
-                    TextEditor(text: $answer)
+                    LearnAnswerSpecView(spec: card.answerSpec, answer: $answer)
                         .focused($answerFocused)
-                        .frame(minHeight: 150)
-                        .padding(10)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
-                        .accessibilityLabel("Deine Antwort")
-                        .accessibilityIdentifier("learn.answer")
                     Button {
                         Task { await evaluate(card) }
                     } label: {

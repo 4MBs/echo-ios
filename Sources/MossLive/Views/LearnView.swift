@@ -51,12 +51,23 @@ struct LearnView: View {
                         Text("ca. \(overview.estimatedMinutes) Min.")
                             .foregroundStyle(.secondary)
                     }
-                    ProgressView(value: overview.mastery)
+                    ProgressView(value: overview.memoryStrength ?? overview.mastery)
                         .tint(Theme.accent)
                         .accessibilityHidden(true)
-                    Text("Gesamtbeherrschung \(percent(overview.mastery))")
+                    Text("Erinnerungsstärke \(percent(overview.memoryStrength ?? overview.mastery))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    HStack {
+                        Label("\(overview.stateCounts?["learning"] ?? 0) im Lernen", systemImage: "brain")
+                        Spacer()
+                        if let readiness = overview.readiness {
+                            Text("Prüfungsbereit \(percent(readiness))")
+                        } else {
+                            Text("Noch nicht genug Daten")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     if let plan, !plan.cards.isEmpty {
                         NavigationLink {
                             LearnReviewView(api: api, cards: plan.cards)
@@ -94,6 +105,11 @@ struct LearnView: View {
             }
 
             Section {
+                NavigationLink {
+                    LearnExamListView(api: api, lessons: lessons)
+                } label: {
+                    Label("Prüfungen", systemImage: "doc.text.magnifyingglass")
+                }
                 NavigationLink {
                     LearnAnalyticsView(api: api)
                 } label: {
@@ -275,6 +291,8 @@ private struct LearnConceptLibraryView: View {
     @State private var query = ""
     @State private var pendingDelete: BackendAPI.LearnCard?
     @State private var errorMessage: String?
+    @State private var editingCard: BackendAPI.LearnCard?
+    @State private var regenerating: Set<String> = []
 
     init(
         cards: [BackendAPI.LearnCard],
@@ -302,6 +320,10 @@ private struct LearnConceptLibraryView: View {
                     Button("Konzept löschen", role: .destructive) { pendingDelete = card }
                 }
                 .contextMenu {
+                    Button("Bearbeiten", systemImage: "pencil") { editingCard = card }
+                    Button("Neu formulieren", systemImage: "arrow.clockwise") {
+                        Task { await regenerate(card) }
+                    }
                     Button("Konzept löschen", systemImage: "trash", role: .destructive) {
                         pendingDelete = card
                     }
@@ -309,6 +331,9 @@ private struct LearnConceptLibraryView: View {
                 .accessibilityIdentifier("learn-concept-\(card.id)")
         }
         .navigationTitle("Gelernte Konzepte")
+        .sheet(item: $editingCard) { card in
+            LearnCardEditorView(api: api, card: card) { updated in replace(updated) }
+        }
         .searchable(text: $query, prompt: "Konzept oder Fach")
         .confirmationDialog(
             "Konzept endgültig löschen?",
@@ -360,5 +385,20 @@ private struct LearnConceptLibraryView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func regenerate(_ card: BackendAPI.LearnCard) async {
+        regenerating.insert(card.id)
+        do {
+            replace(try await api.regenerateLearnCard(
+                id: card.id, concept: card.displayConcept, question: card.question
+            ))
+        } catch { errorMessage = error.localizedDescription }
+        regenerating.remove(card.id)
+    }
+
+    private func replace(_ updated: BackendAPI.LearnCard) {
+        if let index = cards.firstIndex(where: { $0.id == updated.id }) { cards[index] = updated }
+        OfflineCache.save(cards, as: OfflineCache.Key.learnCards)
     }
 }

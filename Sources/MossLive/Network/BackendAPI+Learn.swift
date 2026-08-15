@@ -63,6 +63,7 @@ extension BackendAPI {
         let successfulRecalls: Int?
         let promptVariant: String?
         let subjectMode: String?
+        let answerSpec: LearnAnswerSpec?
         let sources: [LearnSource]
 
         enum CodingKeys: String, CodingKey {
@@ -82,10 +83,34 @@ extension BackendAPI {
             case successfulRecalls = "successful_recalls"
             case promptVariant = "prompt_variant"
             case subjectMode = "subject_mode"
+            case answerSpec = "answer_spec"
         }
 
         var displayConcept: String { concept ?? question }
         var primarySource: LearnSource? { sources.first }
+    }
+
+    struct LearnAnswerSpec: Codable, Hashable, Sendable {
+        struct Field: Codable, Hashable, Identifiable, Sendable {
+            let id: String
+            let label: String?
+            let expected: String?
+        }
+
+        let type: String
+        let fields: [Field]?
+        let options: [String]?
+        let correctIndex: Int?
+        let expected: Double?
+        let unit: String?
+        let tolerance: Double?
+        let blanks: [Field]?
+        let steps: [String]?
+
+        enum CodingKeys: String, CodingKey {
+            case type, fields, options, expected, unit, tolerance, blanks, steps
+            case correctIndex = "correct_index"
+        }
     }
 
     struct LearnCardDraft: Codable, Hashable, Identifiable, Sendable {
@@ -107,6 +132,7 @@ extension BackendAPI {
         var sourceRevision: Int
         var promptVariant: String
         var subjectMode: String
+        var answerSpec: LearnAnswerSpec?
         var sources: [LearnSource]
 
         enum CodingKeys: String, CodingKey {
@@ -120,6 +146,7 @@ extension BackendAPI {
             case sourceRevision = "source_revision"
             case promptVariant = "prompt_variant"
             case subjectMode = "subject_mode"
+            case answerSpec = "answer_spec"
         }
     }
 
@@ -235,6 +262,41 @@ extension BackendAPI {
         }
     }
 
+    struct LearnExamRun: Codable, Identifiable, Sendable {
+        struct Question: Codable, Identifiable, Sendable {
+            let id: String
+            let question: String
+            let concept: String?
+            let subject: String?
+            let kind: LearnCard.Kind
+            let options: [String]
+            let difficulty: Int
+            let points: Int
+            let answerSpec: LearnAnswerSpec?
+
+            enum CodingKeys: String, CodingKey {
+                case id, question, concept, subject, kind, options, difficulty, points
+                case answerSpec = "answer_spec"
+            }
+        }
+
+        let id: String
+        let examId: String
+        let status: String
+        let questions: [Question]
+        let answers: [String: String]?
+        let startedAt: String
+        let score: Double?
+        let maxPoints: Double
+
+        enum CodingKeys: String, CodingKey {
+            case id, status, questions, answers, score
+            case examId = "exam_id"
+            case startedAt = "started_at"
+            case maxPoints = "max_points"
+        }
+    }
+
     struct LearnAnalytics: Codable, Sendable {
         let due: Int
         let overdue: Int
@@ -302,6 +364,38 @@ extension BackendAPI {
         return try await JSONDecoder().decode(Response.self, from: request("/learn/exams")).exams
     }
 
+    func createLearnExam(name: String, subject: String, date: String, sessionIds: [String]) async throws -> LearnExam {
+        struct Response: Decodable { let exam: LearnExam }
+        let data = try await request("/learn/exams", method: "POST", jsonBody: [
+            "name": name, "subject": subject, "exam_date": date,
+            "session_ids": sessionIds, "daily_minutes": 30
+        ])
+        return try JSONDecoder().decode(Response.self, from: data).exam
+    }
+
+    func deleteLearnExam(id: String) async throws {
+        _ = try await request("/learn/exams/\(id)", method: "DELETE")
+    }
+
+    func startLearnExam(id: String) async throws -> LearnExamRun {
+        struct Response: Decodable { let run: LearnExamRun }
+        let data = try await request("/learn/exams/\(id)/runs", method: "POST")
+        return try JSONDecoder().decode(Response.self, from: data).run
+    }
+
+    func saveLearnExamAnswer(runId: String, cardId: String, answer: String) async throws {
+        _ = try await request(
+            "/learn/exam-runs/\(runId)/answers/\(cardId)", method: "PATCH",
+            jsonBody: ["answer": answer]
+        )
+    }
+
+    func submitLearnExam(runId: String) async throws -> LearnExamRun {
+        struct Response: Decodable { let run: LearnExamRun }
+        let data = try await request("/learn/exam-runs/\(runId)/submit", method: "POST")
+        return try JSONDecoder().decode(Response.self, from: data).run
+    }
+
     func learnAnalytics() async throws -> LearnAnalytics {
         try await JSONDecoder().decode(LearnAnalytics.self, from: request("/learn/analytics"))
     }
@@ -345,6 +439,21 @@ extension BackendAPI {
         let encoded = try JSONEncoder().encode(draft)
         let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
         let data = try await request("/learn/cards/\(id)", method: "PATCH", jsonBody: object)
+        return try JSONDecoder().decode(Response.self, from: data).card
+    }
+
+    func updateLearnCard(id: String, changes: [String: Any]) async throws -> LearnCard {
+        struct Response: Decodable { let card: LearnCard }
+        let data = try await request("/learn/cards/\(id)", method: "PATCH", jsonBody: changes)
+        return try JSONDecoder().decode(Response.self, from: data).card
+    }
+
+    func regenerateLearnCard(id: String, concept: String, question: String) async throws -> LearnCard {
+        struct Response: Decodable { let card: LearnCard }
+        let data = try await request(
+            "/learn/cards/\(id)/regenerate", method: "POST",
+            jsonBody: ["concept": concept, "question": question]
+        )
         return try JSONDecoder().decode(Response.self, from: data).card
     }
 
