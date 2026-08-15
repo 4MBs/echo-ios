@@ -18,8 +18,7 @@ class EchoUITestCase: XCTestCase {
     func launch(
         tab: String = "aufnahme",
         scenario: String = "populated",
-        contentSize: String = "UICTContentSizeCategoryL",
-        animations: Bool = false
+        contentSize: String = "UICTContentSizeCategoryL"
     ) -> XCUIApplication {
         if app.state == .runningForeground
             || app.state == .runningBackground
@@ -35,9 +34,6 @@ class EchoUITestCase: XCTestCase {
             "-AppleLocale", "de_DE",
             "-UIPreferredContentSizeCategoryName", contentSize,
         ]
-        // The suite settles instantly by default; a test about a transition
-        // asks for the animations back.
-        if animations { app.launchArguments.append("-UITestAnimations") }
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         return app

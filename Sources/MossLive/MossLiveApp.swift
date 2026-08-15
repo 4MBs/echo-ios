@@ -18,22 +18,6 @@ struct MossLiveApp: App {
         WindowGroup {
             MainTabView()
                 .environment(model)
-                .uiTestMotionOverride()
-        }
-    }
-}
-
-private extension View {
-    /// Under test the app also honours reduce motion, so SwiftUI settles
-    /// immediately instead of making XCTest wait out a transition after every
-    /// tap. A test that is about an animation asks for them back with
-    /// `-UITestAnimations`. Production is untouched.
-    @ViewBuilder
-    func uiTestMotionOverride() -> some View {
-        if UITestRuntime.prefersReducedMotion {
-            environment(\.accessibilityReduceMotion, true)
-        } else {
-            self
         }
     }
 }

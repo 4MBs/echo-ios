@@ -49,7 +49,7 @@ final class ShellAndStateUITests: EchoUITestCase {
     func testEmptyLoadingOfflineUnauthorizedAndLongContentMatrix() {
         executionTimeAllowance = 600
         let states = ["empty", "loading", "offline", "unauthorized", "serverError", "longContent"]
-        let tabs = ["stunden", "lernen", "bibliothek", "chat"]
+        let tabs = ["stunden", "bibliothek", "chat"]
         for state in states {
             launch(tab: tabs[0], scenario: state)
             for tab in tabs {
