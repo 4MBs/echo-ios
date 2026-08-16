@@ -118,11 +118,19 @@ final class SettingsUITests: EchoUITestCase {
 
         tap(app.buttons["Anbieter"])
         tap(app.buttons["Gemini"])
-        let modelDisappeared = XCTNSPredicateExpectation(
+        // Gemini has its own models and efforts, and no speed to sell.
+        let speedDisappeared = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
-            object: app.buttons["Modell"]
+            object: app.buttons["Geschwindigkeit"]
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [modelDisappeared], timeout: 3), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [speedDisappeared], timeout: 3), .completed)
+        tap(app.buttons["Modell"])
+        tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Gemini 3.1 Pro'")).firstMatch)
+        back()
+        XCTAssertTrue(app.navigationBars["KI"].waitForExistence(timeout: 3))
+        tap(app.buttons["Denkaufwand"])
+        tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Hoch'")).firstMatch)
+        back()
         shot("settings-ai-gemini")
 
         tap(app.buttons["Anbieter"])

@@ -1,8 +1,13 @@
 import SwiftUI
 
-/// ChatGPT-style model control for a composer: the current Codex model and
+/// ChatGPT-style model control for a composer: the current model and
 /// intelligence level stay compact until tapped, then expand into native,
 /// nested menus with a checkmark on each active choice.
+///
+/// Both providers are picked from here. Gemini used to say only that it was
+/// enabled in Settings, which left the one provider whose model can matter most
+/// during a lesson — Flash answers in about two seconds, Pro does not —
+/// unswitchable from where the question is asked.
 struct AIModelMenu: View {
     @Environment(AppModel.self) private var model
 
@@ -39,7 +44,8 @@ struct AIModelMenu: View {
                         }
                     }
                 } else {
-                    Text("Gemini ist in den Einstellungen aktiviert.")
+                    geminiModelSubmenu(settings)
+                    geminiEffortSection(settings)
                 }
             } else if configuration.isLoading {
                 Text("Modelle werden geladen …")
@@ -105,6 +111,62 @@ struct AIModelMenu: View {
         .menuOrder(.fixed)
     }
 
+    /// Gemini's models, listed the same way ChatGPT's are — the provider is a
+    /// setting, not a reason for the composer to lose its model picker.
+    private func geminiModelSubmenu(_ settings: BackendAPI.AnswerSettings) -> some View {
+        let selected = configuration.geminiFamily(for: settings)
+        return Menu {
+            ForEach(configuration.geminiModelChoices(for: settings)) { choice in
+                Button {
+                    configuration.selectGeminiModel(choice.id, api: api)
+                } label: {
+                    if choice.id == selected {
+                        Label(Self.geminiLabel(choice), systemImage: "checkmark")
+                    } else {
+                        Text(Self.geminiLabel(choice))
+                    }
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Modell")
+                Text(configuration.geminiLabel(for: selected, in: settings))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .menuOrder(.fixed)
+    }
+
+    /// Strongest first, as the ChatGPT list above is. A Gemini model that was
+    /// listed at only one effort gets no section at all — one row that cannot
+    /// be changed is chrome.
+    @ViewBuilder
+    private func geminiEffortSection(_ settings: BackendAPI.AnswerSettings) -> some View {
+        let efforts = configuration.geminiEffortChoices(for: settings).reversed()
+        if efforts.count > 1 {
+            Divider()
+
+            Section("Intelligenz") {
+                ForEach(Array(efforts), id: \.self) { effort in
+                    Button {
+                        configuration.selectGeminiEffort(effort, api: api)
+                    } label: {
+                        if effort == configuration.geminiEffort(for: settings) {
+                            Label(GeminiModelIdentifier.effortLabel(effort), systemImage: "checkmark")
+                        } else {
+                            Text(GeminiModelIdentifier.effortLabel(effort))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func geminiLabel(_ choice: BackendAPI.ModelChoice) -> String {
+        choice.label.isEmpty ? choice.id : choice.label
+    }
+
     private func speedSubmenu(_ settings: BackendAPI.AnswerSettings) -> some View {
         Menu {
             ForEach(configuration.serviceTierChoices(for: settings)) { choice in
@@ -150,7 +212,17 @@ struct AIModelMenu: View {
 
     private var compactSelectionLabel: String {
         guard let settings = configuration.settings else { return "Modell" }
-        guard settings.provider == "chatgpt" else { return "Gemini" }
+        guard settings.provider == "chatgpt" else {
+            // "3.6 Flash Leicht" — the generation and the effort, with the
+            // provider's name dropped exactly as "GPT-" is below. Which
+            // provider is answering is a settings decision, and the chip is
+            // there to say which model.
+            let family = configuration.geminiFamily(for: settings)
+            let name = configuration.geminiLabel(for: family, in: settings)
+                .replacingOccurrences(of: "Gemini ", with: "")
+            let effort = configuration.geminiEffort(for: settings)
+            return effort.isEmpty ? name : "\(name) \(GeminiModelIdentifier.effortLabel(effort))"
+        }
         let modelName = Self.modelLabel(for: settings)
             .replacingOccurrences(of: "GPT-", with: "")
         let effort = configuration.reasoningEffort(for: settings)

@@ -86,7 +86,6 @@ final class AppModel {
     private var recordingSubjectErrorWasDismissed = false
     private var wantsRecording = false
     private var lastNotificationSyncDay = Date.distantPast
-    private static let lastRecordingSubjectKey = "last-recording-subject"
 
     init() {
         settings = AppSettings()
@@ -209,38 +208,34 @@ final class AppModel {
         }
         recordingSubjectSelection.refresh(
             catalogue: subjects,
-            current: timetable.lessonForRecording(),
-            lastSelectedID: UserDefaults.standard.string(forKey: Self.lastRecordingSubjectKey)
+            current: timetable.lessonForRecording()
         )
     }
 
-    /// Name the recording from WebUntis. This is the normal path: a subject is
-    /// never something the student has to supply, only something they may
-    /// correct. A recording started before the plan arrived is labelled as soon
-    /// as it does, and the label is then left alone for the rest of it.
+    /// Show which lesson the recording belongs to, from WebUntis. This is the
+    /// normal path: a subject is never something the student has to supply,
+    /// only something they may correct.
+    ///
+    /// Nothing is sent to the server here. A subject the app sends is a manual
+    /// override, and an override is exactly what the server must not receive
+    /// for a recording nobody corrected: it stops the timetable from labelling
+    /// the finished recording — including cutting a double period into its two
+    /// lessons — and replaces all of that with one name the app happened to be
+    /// showing while the tape ran.
     private func applyAutomaticRecordingSubject() {
         if wantsRecording, recordingSubjectSelection.selected != nil { return }
-        let before = recordingSubjectSelection.selected
         recordingSubjectSelection.refresh(
             catalogue: recordingSubjectSelection.catalogue,
-            current: timetable.lessonForRecording(),
-            lastSelectedID: UserDefaults.standard.string(forKey: Self.lastRecordingSubjectKey)
+            current: timetable.lessonForRecording()
         )
-        guard wantsRecording,
-              let sessionId,
-              let subject = recordingSubjectSelection.selected,
-              subject != before
-        else { return }
-        persistRecordingSubject(subject, sessionId: sessionId)
     }
 
     func chooseRecordingSubject(_ subject: BackendAPI.SubjectInfo) {
         recordingSubjectSelection.choose(subject)
-        UserDefaults.standard.set(subject.id, forKey: Self.lastRecordingSubjectKey)
         recordingSubjectError = nil
         recordingSubjectErrorWasDismissed = false
         guard wantsRecording, let sessionId else { return }
-        persistRecordingSubject(subject, sessionId: sessionId)
+        persistRecordingSubject(.chosen(subject), sessionId: sessionId)
     }
 
     func dismissRecordingSubjectError() {
@@ -248,30 +243,40 @@ final class AppModel {
         recordingSubjectErrorWasDismissed = true
     }
 
-    /// Hand the subject back to the timetable after a manual correction. The
-    /// remembered last choice goes with it, so "Automatisch" means the plan and
-    /// nothing else.
+    /// Hand the subject back to the timetable after a manual correction.
+    ///
+    /// The correction has to be taken back on the server as well: it is stored
+    /// there as an override, and the override is what stops the timetable from
+    /// naming the recording when it ends. Without this, "Automatisch" would
+    /// change what the app shows and nothing else.
     func useAutomaticRecordingSubject() {
-        UserDefaults.standard.removeObject(forKey: Self.lastRecordingSubjectKey)
+        let wasCorrected = recordingSubjectSelection.isManual || recordingSubjectSelection.confirmed != nil
         recordingSubjectSelection.resetManualOverride()
-        let before = recordingSubjectSelection.selected
         recordingSubjectSelection.refresh(
             catalogue: recordingSubjectSelection.catalogue,
             current: timetable.lessonForRecording()
         )
         recordingSubjectError = nil
         recordingSubjectErrorWasDismissed = false
-        guard let sessionId,
-              let subject = recordingSubjectSelection.selected,
-              subject != before
-        else { return }
-        persistRecordingSubject(subject, sessionId: sessionId)
+        guard wasCorrected, let sessionId else { return }
+        persistRecordingSubject(.automatic, sessionId: sessionId)
     }
 
-    private func persistRecordingSubject(_ subject: BackendAPI.SubjectInfo, sessionId: String) {
+    /// What the student asked for, once it has to reach the server: a subject
+    /// of their own, or the timetable's again.
+    enum RecordingSubjectChange: Equatable {
+        case chosen(BackendAPI.SubjectInfo)
+        case automatic
+    }
+
+    /// Keep trying until it lands. A correction made in a classroom is worth
+    /// more than one attempt over a link that comes and goes, and it is only
+    /// ever the student's own choice that travels — never a name the app
+    /// merely displayed.
+    private func persistRecordingSubject(_ change: RecordingSubjectChange, sessionId: String) {
         recordingSubjectPersistenceTask?.cancel()
         if UITestRuntime.isEnabled {
-            recordingSubjectSelection.confirm(subject)
+            if case .chosen(let subject) = change { recordingSubjectSelection.confirm(subject) }
             return
         }
         recordingSubjectPersistenceTask = Task { [weak self] in
@@ -282,14 +287,17 @@ final class AppModel {
             while !Task.isCancelled,
                   wantsRecording,
                   self.sessionId == sessionId,
-                  recordingSubjectSelection.selected == subject {
+                  isStillWanted(change) {
                 do {
-                    _ = try await api.updateLessonSubject(
-                        sessionId: sessionId,
-                        subject: subject.name
-                    )
-                    guard !Task.isCancelled else { return }
-                    recordingSubjectSelection.confirm(subject)
+                    switch change {
+                    case .chosen(let subject):
+                        _ = try await api.updateLessonSubject(sessionId: sessionId, subject: subject.name)
+                        guard !Task.isCancelled else { return }
+                        recordingSubjectSelection.confirm(subject)
+                    case .automatic:
+                        try await api.clearLessonSubject(sessionId: sessionId)
+                        guard !Task.isCancelled else { return }
+                    }
                     recordingSubjectError = nil
                     recordingSubjectErrorWasDismissed = false
                     return
@@ -307,6 +315,17 @@ final class AppModel {
                     }
                 }
             }
+        }
+    }
+
+    /// Whether a write that is still being retried is still what the student
+    /// wants, or whether they have picked something else in the meantime.
+    private func isStillWanted(_ change: RecordingSubjectChange) -> Bool {
+        switch change {
+        case .chosen(let subject):
+            recordingSubjectSelection.isManual && recordingSubjectSelection.selected == subject
+        case .automatic:
+            !recordingSubjectSelection.isManual
         }
     }
 
@@ -423,8 +442,11 @@ final class AppModel {
         case .helloAck(let ack):
             sessionId = ack.sessionId
             audio.attachServerSession(ack.sessionId)
-            if let subject = recordingSubjectSelection.selected {
-                persistRecordingSubject(subject, sessionId: ack.sessionId)
+            // Only a subject the student picked before the session existed.
+            // An automatic one is the timetable's to apply, and the server
+            // reads the same timetable when the recording ends.
+            if recordingSubjectSelection.isManual, let subject = recordingSubjectSelection.selected {
+                persistRecordingSubject(.chosen(subject), sessionId: ack.sessionId)
             }
             if !ack.resumed {
                 audio.resetSequence()

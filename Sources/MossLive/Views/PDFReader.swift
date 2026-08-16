@@ -1,6 +1,7 @@
 import Combine
 import PDFKit
 import SwiftUI
+import UIKit
 
 struct PDFReader: View {
     @Environment(AppModel.self) private var model
@@ -438,6 +439,15 @@ struct PDFReader: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .glassEffect(.regular.interactive(), in: Capsule())
+        // The capsule is one button and behaves like one. Only the field
+        // itself used to take the tap — 36 points of it, with the total, the
+        // slash and the padding around them doing nothing — so the control
+        // looked like a button that answered on one side.
+        .contentShape(Capsule())
+        // Simultaneous, so a tap that does land on the field still reaches it:
+        // moving the caret inside a number already being typed is the field's
+        // own gesture, and this must not swallow it.
+        .simultaneousGesture(TapGesture().onEnded { pageFieldFocused = true })
         .onChange(of: typedPage) { _, text in
             guard pageFieldFocused else { return }
             let digits = ReaderPageEntry.sanitized(text)
@@ -470,7 +480,23 @@ struct PDFReader: View {
     }
 
     private func endPageEntry() {
+        guard pageFieldFocused else {
+            synchronizePageEntry()
+            return
+        }
         pageFieldFocused = false
+        // And end it in UIKit as well. Clearing the focus state is a request
+        // SwiftUI honours on its next update, and a tap that arrives from a
+        // window gesture recognizer — which is how a tap on the book itself
+        // gets here — is outside that update: the caret and the number pad
+        // then stayed until something else redrew the reader, which is what
+        // made ending the entry take a second tap.
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
         synchronizePageEntry()
     }
 
