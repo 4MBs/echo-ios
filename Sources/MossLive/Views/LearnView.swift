@@ -287,7 +287,13 @@ private struct LearnLessonPickerView: View {
         errorMessage = nil
         do {
             let drafts = try await api.generateLearnDrafts(sessionId: lesson.id)
-            preview = DraftPreview(lesson: lesson, drafts: drafts)
+            if drafts.isEmpty {
+                // An honest answer, not an empty editor: the model read the
+                // lesson and found nothing worth a card (silence, logistics).
+                errorMessage = "In dieser Stunde wurde kein abfragbarer Stoff gefunden."
+            } else {
+                preview = DraftPreview(lesson: lesson, drafts: drafts)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

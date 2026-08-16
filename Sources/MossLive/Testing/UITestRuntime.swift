@@ -245,7 +245,32 @@ enum UITestRuntime {
                 "card": reviewed,
             ])
         }
-        if path == "/learn/generate" { return try json(["ok": true, "cards": learnCardsObject, "cached": false]) }
+        if path == "/learn/generate" {
+            // The app asks for a preview first and saves the kept drafts back;
+            // the fake speaks both halves of that contract.
+            let preview = (body?["preview"] as? Bool) ?? false
+            if preview { return try json(["ok": true, "drafts": learnDraftsObject, "cached": false]) }
+            return try json(["ok": true, "cards": learnCardsObject, "cached": false])
+        }
+        if method == "POST", path == "/learn/cards/batch" {
+            return try json(["ok": true, "cards": learnCardsObject])
+        }
+        if method == "POST", path == "/learn/drafts/regenerate" {
+            var draft = (body?["draft"] as? [String: Any]) ?? learnDraftsObject[0]
+            draft["question"] = "Neu formuliert: \(draft["concept"] ?? "Konzept")?"
+            return try json(["draft": draft])
+        }
+        if method == "PATCH", path.hasPrefix("/learn/cards/") {
+            let id = String(path.dropFirst("/learn/cards/".count))
+            if let index = learnCardsObject.firstIndex(where: { ($0["id"] as? String) == id }) {
+                var card = learnCardsObject[index]
+                for (key, value) in body ?? [:] {
+                    card[key] = value
+                }
+                return try json(["ok": true, "card": card])
+            }
+            return try json(["ok": false, "error": "unknown card"])
+        }
         if path == "/answer" {
             return try json(["ok": true, "text": "Die Testantwort fasst die letzten Sekunden zusammen."])
         }
@@ -506,6 +531,34 @@ private extension UITestRuntime {
         ["due_total": 2, "card_total": 2, "estimated_minutes": 2, "mastery": 0.42,
          "subjects": [["subject": "Biologie", "due": 2, "total": 2, "mastery": 0.42]],
          "sessions_with_cards": ["lesson-2"]]
+    }
+
+    /// The same cards as the app's draft editor sees them: the question
+    /// without the schedule, plus the always-present editor fields.
+    static var learnDraftsObject: [[String: Any]] {
+        learnCardsObject.map { card in
+            [
+                "id": card["id"] ?? "",
+                "session_id": card["session_id"] ?? "",
+                "subject": card["subject"] ?? NSNull(),
+                "lesson_title": card["lesson_title"] ?? NSNull(),
+                "question": card["question"] ?? "",
+                "options": card["options"] ?? [],
+                "answer": card["answer"] ?? 0,
+                "expected_answer": card["expected_answer"] ?? NSNull(),
+                "explanation": card["explanation"] ?? "",
+                "concept": card["concept"] ?? "Konzept",
+                "difficulty": card["difficulty"] ?? 2,
+                "kind": card["kind"] ?? "free_text",
+                "source_label": NSNull(),
+                "source_start_ms": card["source_start_ms"] ?? 0,
+                "source_end_ms": NSNull(),
+                "source_revision": 0,
+                "prompt_variant": "standard",
+                "subject_mode": "school",
+                "sources": []
+            ]
+        }
     }
 
     static var learnPlanObject: [String: Any] {
