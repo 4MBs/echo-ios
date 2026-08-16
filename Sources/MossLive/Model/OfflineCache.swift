@@ -25,6 +25,7 @@ enum OfflineCache {
         static let timetableSubjects = "timetable-subjects"
         static let learnOverview = "learn-overview"
         static let learnCards = "learn-cards"
+        static let learnActivity = "learn-activity"
 
         static func lesson(_ id: String) -> String { "lesson-\(id)" }
         static func waveform(_ id: String) -> String { "waveform-\(id)" }

@@ -6,12 +6,30 @@ struct LearnView: View {
     @State private var plan: BackendAPI.LearnPlan?
     @State private var cards: [BackendAPI.LearnCard] = []
     @State private var lessons: [BackendAPI.LessonInfo] = []
+    @State private var activity: BackendAPI.LearnActivity?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
     private var api: BackendAPI { model.api }
     private var practiceCards: [BackendAPI.LearnCard] {
         cards.filter { $0.learningState != "suspended" }
+    }
+
+    /// The matrix shows the subjects the dashboard lists, so the two must be
+    /// built together: rows only exist once both the overview (subject order)
+    /// and the activity (the days) are in.
+    private var matrixRows: [LearnMatrixRow]? {
+        guard let overview, let activity else { return nil }
+        return LearnMatrixModel.rows(
+            activity: activity,
+            subjectOrder: overview.subjects.map(\.subject),
+            calendar: .current
+        )
+    }
+
+    private var matrixColumns: [Date]? {
+        guard let activity else { return nil }
+        return LearnMatrixModel.columnDates(activity: activity, calendar: .current)
     }
 
     var body: some View {
@@ -46,72 +64,45 @@ struct LearnView: View {
     private func home(_ overview: BackendAPI.LearnOverview) -> some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("\(overview.dueTotal) fällig · \(min(10, overview.newTotal ?? 0)) neu")
-                            .font(.title.bold())
-                        Spacer()
-                        Text("ca. \(overview.estimatedMinutes) Min.")
-                            .foregroundStyle(.secondary)
-                    }
-                    ProgressView(value: overview.memoryStrength ?? overview.mastery)
-                        .tint(Theme.accent)
-                        .accessibilityHidden(true)
-                    Text("Erinnerungsstärke \(percent(overview.memoryStrength ?? overview.mastery))")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Label("\(overview.stateCounts?["learning"] ?? 0) im Lernen", systemImage: "brain")
-                        Spacer()
-                        if let readiness = overview.readiness {
-                            Text("Prüfungsbereit \(percent(readiness))")
-                        } else {
-                            Text("Noch nicht genug Daten")
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    if let plan, !plan.cards.isEmpty {
-                        NavigationLink {
-                            LearnReviewView(api: api, cards: plan.cards, onChanged: reload)
-                        } label: {
-                            Label("Wiederholung starten", systemImage: "play.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("learn.start")
-                    } else {
-                        Text("Für heute ist nichts mehr fällig.")
-                            .foregroundStyle(.secondary)
-                    }
-                    if !practiceCards.isEmpty {
-                        NavigationLink {
-                            LearnReviewView(api: api, cards: practiceCards, mode: "practice", onChanged: reload)
-                        } label: {
-                            Label("Optional weiter üben", systemImage: "rectangle.stack")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-                .padding(.vertical, 8)
+                heroCard(overview)
             }
 
             Section("Fächer und Themen") {
                 ForEach(overview.subjects) { subject in
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack {
-                            Text(subject.displayName).font(.headline)
-                            Spacer()
-                            Text(percent(subject.mastery)).foregroundStyle(.secondary)
+                    HStack(spacing: Theme.Space.group) {
+                        let style = subjectStyle(for: subject.subject)
+                        ProgressRing(progress: subject.mastery, lineWidth: 4, tint: style.color)
+                            .frame(width: 34, height: 34)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(subject.displayName).font(.headline)
+                                Spacer()
+                                Text(percent(subject.mastery))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("\(subject.due) fällig · \(subject.newCount ?? 0) neu · \(subject.total) Konzepte")
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
                         }
-                        ProgressView(value: subject.mastery)
-                            .tint(Theme.accent)
-                            .accessibilityHidden(true)
-                        Text("\(subject.due) fällig · \(subject.newCount ?? 0) neu · \(subject.total) Konzepte")
-                            .font(.caption)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            Section("Aktivität · 30 Tage") {
+                if let matrixRows, let matrixColumns {
+                    LearnActivityMatrixView(rows: matrixRows, columns: matrixColumns)
+                        .padding(.vertical, 6)
+                        .accessibilityIdentifier("learn.matrix")
+                } else {
+                    HStack {
+                        ProgressView()
+                        Text("Aktivität wird geladen …")
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 4)
                 }
             }
 
@@ -153,6 +144,76 @@ struct LearnView: View {
         }
     }
 
+    /// The dashboard's headline: what is due today, how well it sticks, and
+    /// the one button that starts the day's repetition.
+    private func heroCard(_ overview: BackendAPI.LearnOverview) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(overview.dueTotal) fällig · \(min(10, overview.newTotal ?? 0)) neu")
+                    .font(.title.bold())
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.default, value: overview.dueTotal)
+                Spacer()
+                Text("ca. \(overview.estimatedMinutes) Min.")
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: Theme.Space.group) {
+                ProgressRing(
+                    progress: overview.memoryStrength ?? overview.mastery,
+                    lineWidth: 6
+                )
+                .frame(width: 54, height: 54)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Erinnerungsstärke")
+                        .font(.subheadline.weight(.medium))
+                    Text(percent(overview.memoryStrength ?? overview.mastery))
+                        .font(.title3.bold().monospacedDigit())
+                        .contentTransition(.numericText())
+                    HStack(spacing: Theme.Space.stack) {
+                        Label("\(overview.stateCounts?["learning"] ?? 0) im Lernen", systemImage: "brain")
+                        if let readiness = overview.readiness {
+                            Text("·")
+                            Text("Prüfungsbereit \(percent(readiness))")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            if overview.readiness == nil {
+                Text("Noch nicht genug Daten für Prüfungsbereitschaft.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let plan, !plan.cards.isEmpty {
+                NavigationLink {
+                    LearnReviewView(api: api, cards: plan.cards, onChanged: reload)
+                } label: {
+                    Label("Wiederholung starten", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("learn.start")
+            } else {
+                Text("Für heute ist nichts mehr fällig.")
+                    .foregroundStyle(.secondary)
+            }
+            if !practiceCards.isEmpty {
+                NavigationLink {
+                    LearnReviewView(api: api, cards: practiceCards, mode: "practice", onChanged: reload)
+                } label: {
+                    Label("Optional weiter üben", systemImage: "rectangle.stack")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
     private func load() async {
         isLoading = true
         errorMessage = nil
@@ -164,18 +225,25 @@ struct LearnView: View {
            let stored = OfflineCache.load([BackendAPI.LearnCard].self, key: OfflineCache.Key.learnCards) {
             cards = stored
         }
+        if activity == nil,
+           let stored = OfflineCache.load(BackendAPI.LearnActivity.self, key: OfflineCache.Key.learnActivity) {
+            activity = stored
+        }
         do {
             async let freshOverview = api.learnOverview()
             async let freshPlan = api.learnPlan()
             async let freshCards = api.learnCards()
             async let freshLessons = api.listLessons()
-            let values = try await (freshOverview, freshPlan, freshCards, freshLessons)
+            async let freshActivity = api.learnActivity()
+            let values = try await (freshOverview, freshPlan, freshCards, freshLessons, freshActivity)
             overview = values.0
             plan = values.1
             cards = values.2
             lessons = values.3.filter { $0.segmentCount > 0 }
+            activity = values.4
             OfflineCache.save(values.0, as: OfflineCache.Key.learnOverview)
             OfflineCache.save(values.2, as: OfflineCache.Key.learnCards)
+            OfflineCache.save(values.4, as: OfflineCache.Key.learnActivity)
         } catch is CancellationError {
             return
         } catch {

@@ -15,6 +15,34 @@ enum Theme {
     enum Space {
         /// Inside a raised surface.
         static let inset: CGFloat = 16
+        /// Between sibling elements inside a card (icon and label, chip rows).
+        static let stack: CGFloat = 8
+        /// Between a card's own children and neighbouring cards.
+        static let group: CGFloat = 12
+        /// Between sections of a screen.
+        static let section: CGFloat = 20
+    }
+
+    /// Corner radii, named after where they live rather than after points, so
+    /// a component keeps its family when the value is revisited.
+    enum Radius {
+        /// Small chips and matrix cells.
+        static let chip: CGFloat = 6
+        /// The default card. Matches `RoundedRectangle`'s continuous feel the
+        /// system uses for grouped content, just a little rounder.
+        static let card: CGFloat = 16
+        /// Hero surfaces that span a screen's width.
+        static let hero: CGFloat = 22
+    }
+
+    /// Motion the screens agree on. Deliberately small and unhurried: the app
+    /// answers a tap by settling, never by bouncing — springs that overshoot
+    /// read as playful exactly once and as noise every time after.
+    enum Motion {
+        /// A control acknowledging a press.
+        static let tap = Animation.smooth(duration: 0.22)
+        /// Content changing place or value on the same screen.
+        static let settle = Animation.smooth(duration: 0.35)
     }
 }
 

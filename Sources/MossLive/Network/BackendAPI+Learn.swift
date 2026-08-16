@@ -216,6 +216,41 @@ extension BackendAPI {
         }
     }
 
+    /// The `/learn/activity` answer: per subject, the days that saw reviews.
+    struct LearnActivity: Codable, Sendable {
+        struct Day: Codable, Sendable {
+            let date: String
+            let reviews: Int
+            let correct: Double
+
+            var parsedDate: Date? { Self.isoDate.date(from: date) }
+
+            private static let isoDate: ISO8601DateFormatter = {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withFullDate]
+                return formatter
+            }()
+        }
+
+        struct Subject: Codable, Sendable {
+            let subject: String?
+            let days: [Day]
+        }
+
+        let start: String
+        let today: String
+        let days: Int
+        let subjects: [Subject]
+
+        var parsedStartDate: Date? { Self.isoDate.date(from: start) }
+
+        private static let isoDate: ISO8601DateFormatter = {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withFullDate]
+            return formatter
+        }()
+    }
+
     struct LearnPlan: Codable, Sendable {
         struct Block: Codable, Hashable, Identifiable, Sendable {
             let subject: String
@@ -417,6 +452,18 @@ extension BackendAPI {
 
     func learnOverview() async throws -> LearnOverview {
         try await JSONDecoder().decode(LearnOverview.self, from: request("/learn/overview"))
+    }
+
+    /// Review activity per subject per local day, for the dashboard's matrix.
+    /// The server groups days in its own zone; the phone trusts the dates it
+    /// sends rather than re-deriving them, so a review never lands on two
+    /// different days on the two ends of the wire.
+    func learnActivity(days: Int = 30) async throws -> LearnActivity {
+        let query = [URLQueryItem(name: "days", value: String(days))]
+        return try await JSONDecoder().decode(
+            LearnActivity.self,
+            from: request("/learn/activity", query: query)
+        )
     }
 
     func learnPlan(minutes: Int = 30) async throws -> LearnPlan {

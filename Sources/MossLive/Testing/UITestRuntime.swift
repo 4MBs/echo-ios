@@ -227,6 +227,7 @@ enum UITestRuntime {
         if path == "/timetable/week" { return try json(["days": [timetableDayObject]]) }
         if path == "/answer/settings" { return try json(answerSettingsObject) }
         if path == "/learn/overview" { return try json(learnOverviewObject) }
+        if path == "/learn/activity" { return try json(learnActivityObject) }
         if path == "/learn/plan" { return try json(learnPlanObject) }
         if path == "/learn/cards" { return try json(["cards": learnCardsObject]) }
         if path == "/learn/evaluate" {
@@ -506,6 +507,32 @@ private extension UITestRuntime {
         ["due_total": 2, "card_total": 2, "estimated_minutes": 2, "mastery": 0.42,
          "subjects": [["subject": "Biologie", "due": 2, "total": 2, "mastery": 0.42]],
          "sessions_with_cards": ["lesson-2"]]
+    }
+
+    /// A plausible 30-day Biologie history for the dashboard matrix: activity
+    /// on scattered days, none elsewhere — enough to draw quiet and filled
+    /// cells side by side.
+    static var learnActivityObject: [String: Any] {
+        let today = Calendar.current.startOfDay(for: .now)
+        var days: [[String: Any]] = []
+        for offset in [0, 1, 2, 4, 7, 9, 14, 21] {
+            guard let day = Calendar.current.date(byAdding: .day, value: -offset, to: today) else { continue }
+            days.append([
+                "date": day.formatted(.iso8601.year().month().day().dateSeparator(.dash)),
+                "reviews": 2 + (offset % 4),
+                "correct": 0.6 + Double(offset % 3) * 0.15
+            ])
+        }
+        return ["start": learnActivityStart(days: 30), "today":
+            today.formatted(.iso8601.year().month().day().dateSeparator(.dash)),
+            "days": 30,
+            "subjects": [["subject": "Biologie", "days": days]]]
+    }
+
+    private static func learnActivityStart(days: Int) -> String {
+        let today = Calendar.current.startOfDay(for: .now)
+        let start = Calendar.current.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        return start.formatted(.iso8601.year().month().day().dateSeparator(.dash))
     }
 
     static var learnPlanObject: [String: Any] {
