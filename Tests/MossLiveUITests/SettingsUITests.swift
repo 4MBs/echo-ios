@@ -146,6 +146,27 @@ final class SettingsUITests: EchoUITestCase {
         tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Hoch'")).firstMatch)
         shot("settings-ai-chatgpt-combination")
 
+        // The effort picker above leaves the KI page or its own subpage
+        // depending on whether the row popped itself; start from the KI page.
+        if !app.navigationBars["KI"].waitForExistence(timeout: 2) { back() }
+        tap(app.buttons["Anbieter"])
+        tap(app.buttons["Claude"])
+        // Opus 5 has a fast mode; Sonnet 5 does not, so the row it is picked in
+        // has to go away with it rather than sit there unchangeable.
+        XCTAssertTrue(app.buttons["Geschwindigkeit"].waitForExistence(timeout: 3))
+        tap(app.buttons["Modell"])
+        tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Sonnet 5'")).firstMatch)
+        back()
+        XCTAssertTrue(app.navigationBars["KI"].waitForExistence(timeout: 3))
+        let claudeSpeedDisappeared = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["Geschwindigkeit"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [claudeSpeedDisappeared], timeout: 3), .completed)
+        tap(app.buttons["Denkaufwand"])
+        tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Sehr hoch'")).firstMatch)
+        shot("settings-ai-claude")
+
         let increment = app.buttons["Kontextfenster"].buttons["Increment"]
         if increment.exists { increment.tap(); increment.tap() }
         shot("settings-ai-context-adjusted")

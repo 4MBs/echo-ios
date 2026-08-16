@@ -31,11 +31,11 @@ struct AISettingsView: View {
 }
 
 /// Which AI backend the server uses, and which of its models. The model and
-/// how hard it thinks are picked here for either provider — ChatGPT adds a
-/// speed — and the choice is stored on the server (like the WebUntis login)
-/// and applies immediately, no restart needed. Both model lists, including
-/// which efforts each model supports, come from the server, which asks the
-/// provider's own CLI: new models appear without an app update.
+/// how hard it thinks are picked here for any provider — ChatGPT and Claude
+/// add a speed — and the choice is stored on the server (like the WebUntis
+/// login) and applies immediately, no restart needed. Every model list,
+/// including which efforts each model supports, comes from the server, which
+/// asks the provider's own CLI: new models appear without an app update.
 struct AIModelSection: View {
     @Environment(AppModel.self) private var model
 
@@ -47,47 +47,18 @@ struct AIModelSection: View {
                 Picker("Anbieter", selection: providerBinding) {
                     Text("Gemini").tag("gemini")
                     Text("ChatGPT").tag("chatgpt")
+                    // Only offered by a server that knows the provider — an
+                    // older one would refuse the switch with an error the
+                    // student can do nothing about.
+                    if settings.supportsClaude {
+                        Text("Claude").tag("claude")
+                    }
                 }
                 .pickerStyle(.navigationLink)
-                if settings.provider == "chatgpt" {
-                    Picker("Modell", selection: modelBinding) {
-                        ForEach(modelChoices) { choice in
-                            Text(displayName(for: choice)).tag(choice.id)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    Picker("Geschwindigkeit", selection: serviceTierBinding) {
-                        ForEach(serviceTierChoices) { choice in
-                            Text(speedLabel(choice)).tag(choice.id)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    // only the efforts the selected model actually supports
-                    Picker("Denkaufwand", selection: effortBinding) {
-                        ForEach(effortChoices, id: \.self) { effort in
-                            Text(Self.effortLabel(effort)).tag(effort)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                } else {
-                    // The same two choices for Gemini, taken from the same
-                    // string: Antigravity carries the effort inside the model's
-                    // own name, so "Gemini 3.6 Flash" + "Leicht" is what the
-                    // server stores as `gemini-3.6-flash-low`.
-                    Picker("Modell", selection: geminiModelBinding) {
-                        ForEach(geminiModelChoices) { choice in
-                            Text(geminiDisplayName(for: choice)).tag(choice.id)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    if !geminiEffortChoices.isEmpty {
-                        Picker("Denkaufwand", selection: geminiEffortBinding) {
-                            ForEach(geminiEffortChoices, id: \.self) { effort in
-                                Text(GeminiModelIdentifier.effortLabel(effort)).tag(effort)
-                            }
-                        }
-                        .pickerStyle(.navigationLink)
-                    }
+                switch settings.provider {
+                case "chatgpt": chatgptPickers
+                case "claude": claudePickers
+                default: geminiPickers
                 }
                 if let errorMessage {
                     Text(errorMessage).font(.footnote).foregroundStyle(.red)
@@ -111,6 +82,138 @@ struct AIModelSection: View {
             host: model.settings.serverHost,
             port: model.settings.serverPort,
             token: model.settings.authToken
+        )
+    }
+
+    @ViewBuilder
+    private var chatgptPickers: some View {
+        Picker("Modell", selection: modelBinding) {
+            ForEach(modelChoices) { choice in
+                Text(displayName(for: choice)).tag(choice.id)
+            }
+        }
+        .pickerStyle(.navigationLink)
+        Picker("Geschwindigkeit", selection: serviceTierBinding) {
+            ForEach(serviceTierChoices) { choice in
+                Text(speedLabel(choice)).tag(choice.id)
+            }
+        }
+        .pickerStyle(.navigationLink)
+        // only the efforts the selected model actually supports
+        Picker("Denkaufwand", selection: effortBinding) {
+            ForEach(effortChoices, id: \.self) { effort in
+                Text(Self.effortLabel(effort)).tag(effort)
+            }
+        }
+        .pickerStyle(.navigationLink)
+    }
+
+    /// Claude reads like ChatGPT above — a model, a speed and an effort, each
+    /// its own value. A model that offers no fast mode (or no effort at all,
+    /// as Haiku) gets no row for it: one choice that cannot be changed is
+    /// chrome.
+    @ViewBuilder
+    private var claudePickers: some View {
+        Picker("Modell", selection: claudeModelBinding) {
+            ForEach(claudeModelChoices) { choice in
+                Text(claudeDisplayName(for: choice)).tag(choice.id)
+            }
+        }
+        .pickerStyle(.navigationLink)
+        if !claudeServiceTierChoices.isEmpty {
+            Picker("Geschwindigkeit", selection: claudeServiceTierBinding) {
+                ForEach(claudeServiceTierChoices) { choice in
+                    Text(speedLabel(choice)).tag(choice.id)
+                }
+            }
+            .pickerStyle(.navigationLink)
+        }
+        if !claudeEffortChoices.isEmpty {
+            Picker("Denkaufwand", selection: claudeEffortBinding) {
+                ForEach(claudeEffortChoices, id: \.self) { effort in
+                    Text(Self.effortLabel(effort)).tag(effort)
+                }
+            }
+            .pickerStyle(.navigationLink)
+        }
+    }
+
+    /// The same two choices for Gemini, taken from the same string: Antigravity
+    /// carries the effort inside the model's own name, so "Gemini 3.6 Flash" +
+    /// "Leicht" is what the server stores as `gemini-3.6-flash-low`.
+    @ViewBuilder
+    private var geminiPickers: some View {
+        Picker("Modell", selection: geminiModelBinding) {
+            ForEach(geminiModelChoices) { choice in
+                Text(geminiDisplayName(for: choice)).tag(choice.id)
+            }
+        }
+        .pickerStyle(.navigationLink)
+        if !geminiEffortChoices.isEmpty {
+            Picker("Denkaufwand", selection: geminiEffortBinding) {
+                ForEach(geminiEffortChoices, id: \.self) { effort in
+                    Text(GeminiModelIdentifier.effortLabel(effort)).tag(effort)
+                }
+            }
+            .pickerStyle(.navigationLink)
+        }
+    }
+
+    // MARK: - Claude
+
+    private var claudeModelChoices: [BackendAPI.ModelChoice] {
+        guard let settings else { return [] }
+        return configuration.claudeModelChoices(for: settings)
+    }
+
+    private var claudeEffortChoices: [String] {
+        guard let settings else { return [] }
+        return configuration.claudeEffortChoices(for: settings)
+    }
+
+    private var claudeServiceTierChoices: [BackendAPI.ServiceTierChoice] {
+        guard let settings else { return [] }
+        return configuration.claudeServiceTierChoices(for: settings)
+    }
+
+    private func claudeDisplayName(for choice: BackendAPI.ModelChoice) -> String {
+        if choice.id.isEmpty { return "Standard (empfohlen)" }
+        return choice.label.isEmpty ? choice.id : choice.label
+    }
+
+    private var claudeModelBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let settings = configuration.settings else { return "" }
+                return configuration.claudeModel(for: settings)
+            },
+            set: { value in
+                configuration.selectClaudeModel(value, api: api)
+            }
+        )
+    }
+
+    private var claudeEffortBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let settings = configuration.settings else { return "" }
+                return configuration.claudeEffort(for: settings)
+            },
+            set: { value in
+                configuration.selectClaudeEffort(value, api: api)
+            }
+        )
+    }
+
+    private var claudeServiceTierBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let settings = configuration.settings else { return "default" }
+                return configuration.claudeServiceTier(for: settings)
+            },
+            set: { value in
+                configuration.selectClaudeServiceTier(value, api: api)
+            }
         )
     }
 
@@ -218,11 +321,11 @@ struct AIModelSection: View {
         guard let settings else {
             return "Wird vom Server geladen."
         }
-        if settings.provider == "chatgpt" {
-            return "Gilt für Antworten, Zusammenfassungen und Chat — sofort."
+        if settings.provider == "gemini" {
+            return "Gilt für Antworten, Zusammenfassungen und Chat — sofort. "
+                + "Bilder beantwortet weiterhin ChatGPT, weil Gemini keine annehmen kann."
         }
-        return "Gilt für Antworten, Zusammenfassungen und Chat — sofort. "
-            + "Bilder beantwortet weiterhin ChatGPT, weil Gemini keine annehmen kann."
+        return "Gilt für Antworten, Zusammenfassungen und Chat — sofort."
     }
 
     private func displayName(for choice: BackendAPI.ModelChoice) -> String {

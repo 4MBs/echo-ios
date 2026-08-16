@@ -4,7 +4,7 @@
 flowchart LR
     A["Echo on the iPad<br/>SwiftUI · AVAudioEngine · Opus"]
     B["Your machine<br/>FastAPI · Qwen3-ASR"]
-    C["ChatGPT (Codex CLI)<br/>or Gemini (Antigravity CLI)"]
+    C["ChatGPT (Codex CLI)<br/>Claude (Claude Code CLI)<br/>or Gemini (Antigravity CLI)"]
     D["WebUntis"]
     A -- "WebSocket over Tailscale<br/>audio up · transcript down" --> B
     A -- "REST: lessons and books" --> B

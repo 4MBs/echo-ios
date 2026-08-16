@@ -586,6 +586,20 @@ private extension UITestRuntime {
             ["id": "gemini-3.1-pro", "label": "Gemini 3.1 Pro",
              "efforts": ["low", "high"], "default_effort": "low"],
         ],
+        "claude_model": "claude-opus-5", "claude_effort": "low", "claude_service_tier": "default",
+        "claude_efforts": ["low", "medium", "high", "xhigh", "max"],
+        "claude_models": [
+            ["id": "", "label": "", "efforts": ["low", "medium", "high", "xhigh", "max"],
+             "default_effort": "low", "service_tiers": []],
+            ["id": "claude-opus-5", "label": "Claude Opus 5",
+             "efforts": ["low", "medium", "high", "xhigh", "max"], "default_effort": "low",
+             "service_tiers": [["id": "fast", "label": "Fast", "description": "Erhöhter Verbrauch"]]],
+            ["id": "claude-sonnet-5", "label": "Claude Sonnet 5",
+             "efforts": ["low", "medium", "high", "xhigh", "max"], "default_effort": "low",
+             "service_tiers": []],
+            ["id": "claude-haiku-4-5", "label": "Claude Haiku 4.5",
+             "efforts": [], "default_effort": "", "service_tiers": []],
+        ],
     ]
     static var notesObject: [[String: Any]] {
         allNotes.filter { !deletedNoteIDs.contains($0["id"] as? String ?? "") }
