@@ -4,10 +4,15 @@ import SwiftUI
 /// intelligence level stay compact until tapped, then expand into native,
 /// nested menus with a checkmark on each active choice.
 ///
-/// Both providers are picked from here. Gemini used to say only that it was
+/// Every provider is picked from here. Gemini used to say only that it was
 /// enabled in Settings, which left the one provider whose model can matter most
 /// during a lesson — Flash answers in about two seconds, Pro does not —
 /// unswitchable from where the question is asked.
+///
+/// The three providers differ in what they offer, not in how it is shown, so
+/// the submenus below are written once and handed each provider's own choices:
+/// a third near-identical copy of "a menu of models with a checkmark" is how a
+/// file like this stops being readable.
 struct AIModelMenu: View {
     @Environment(AppModel.self) private var model
 
@@ -24,28 +29,10 @@ struct AIModelMenu: View {
     var body: some View {
         Menu {
             if let settings = configuration.settings {
-                if settings.provider == "chatgpt" {
-                    modelSubmenu(settings)
-                    speedSubmenu(settings)
-
-                    Divider()
-
-                    Section("Intelligenz") {
-                        ForEach(sortedEfforts(for: settings), id: \.self) { effort in
-                            Button {
-                                configuration.selectReasoningEffort(effort, api: api)
-                            } label: {
-                                if effort == configuration.reasoningEffort(for: settings) {
-                                    Label(Self.intelligenceLabel(effort), systemImage: "checkmark")
-                                } else {
-                                    Text(Self.intelligenceLabel(effort))
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    geminiModelSubmenu(settings)
-                    geminiEffortSection(settings)
+                switch settings.provider {
+                case "chatgpt": chatgptMenu(settings)
+                case "claude": claudeMenu(settings)
+                default: geminiMenu(settings)
                 }
             } else if configuration.isLoading {
                 Text("Modelle werden geladen …")
@@ -87,93 +74,120 @@ struct AIModelMenu: View {
         .task { await configuration.load(api: api) }
     }
 
-    private func modelSubmenu(_ settings: BackendAPI.AnswerSettings) -> some View {
-        Menu {
-            ForEach(configuration.modelChoices(for: settings)) { choice in
-                Button {
-                    configuration.selectModel(choice.id, api: api)
-                } label: {
-                    if choice.id == settings.chatgptModel {
-                        Label(Self.menuModelLabel(choice), systemImage: "checkmark")
-                    } else {
-                        Text(Self.menuModelLabel(choice))
-                    }
-                }
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Modell")
-                Text(Self.menuModelLabel(for: settings))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .menuOrder(.fixed)
+    // MARK: - One menu per provider
+
+    @ViewBuilder
+    private func chatgptMenu(_ settings: BackendAPI.AnswerSettings) -> some View {
+        modelSubmenu(
+            choices: configuration.modelChoices(for: settings),
+            selected: settings.chatgptModel,
+            selectedLabel: Self.menuModelLabel(for: settings),
+            label: { Self.menuModelLabel($0) },
+            select: { configuration.selectModel($0, api: api) }
+        )
+        // Codex advertises a speed on every model, so this row is always here
+        // even when "Standard" is the only thing in it.
+        speedSubmenu(
+            choices: configuration.serviceTierChoices(for: settings),
+            selected: configuration.serviceTier(for: settings),
+            select: { configuration.selectServiceTier($0, api: api) }
+        )
+        effortSection(
+            Self.sortedByStrength(configuration.effortChoices(for: settings)),
+            selected: configuration.reasoningEffort(for: settings),
+            label: { Self.intelligenceLabel($0) },
+            select: { configuration.selectReasoningEffort($0, api: api) }
+        )
     }
 
-    /// Gemini's models, listed the same way ChatGPT's are — the provider is a
-    /// setting, not a reason for the composer to lose its model picker.
-    private func geminiModelSubmenu(_ settings: BackendAPI.AnswerSettings) -> some View {
-        let selected = configuration.geminiFamily(for: settings)
-        return Menu {
-            ForEach(configuration.geminiModelChoices(for: settings)) { choice in
+    @ViewBuilder
+    private func claudeMenu(_ settings: BackendAPI.AnswerSettings) -> some View {
+        modelSubmenu(
+            choices: configuration.claudeModelChoices(for: settings),
+            selected: configuration.claudeModel(for: settings),
+            selectedLabel: configuration.claudeLabel(
+                for: configuration.claudeModel(for: settings),
+                in: settings
+            ),
+            label: { Self.claudeLabel($0) },
+            select: { configuration.selectClaudeModel($0, api: api) }
+        )
+        // Fast mode exists on some Claude models only, and Haiku takes no
+        // effort at all: a row with one unchangeable choice is chrome.
+        let tiers = configuration.claudeServiceTierChoices(for: settings)
+        if tiers.count > 1 {
+            speedSubmenu(
+                choices: tiers,
+                selected: configuration.claudeServiceTier(for: settings),
+                select: { configuration.selectClaudeServiceTier($0, api: api) }
+            )
+        }
+        effortSection(
+            Self.sortedByStrength(configuration.claudeEffortChoices(for: settings)),
+            selected: configuration.claudeEffort(for: settings),
+            label: { Self.intelligenceLabel($0) },
+            select: { configuration.selectClaudeEffort($0, api: api) }
+        )
+    }
+
+    /// Antigravity has no speed, and carries the effort inside the model's own
+    /// name — the store puts the two halves back together.
+    @ViewBuilder
+    private func geminiMenu(_ settings: BackendAPI.AnswerSettings) -> some View {
+        let family = configuration.geminiFamily(for: settings)
+        modelSubmenu(
+            choices: configuration.geminiModelChoices(for: settings),
+            selected: family,
+            selectedLabel: configuration.geminiLabel(for: family, in: settings),
+            label: { Self.geminiLabel($0) },
+            select: { configuration.selectGeminiModel($0, api: api) }
+        )
+        effortSection(
+            Array(configuration.geminiEffortChoices(for: settings).reversed()),
+            selected: configuration.geminiEffort(for: settings),
+            label: { GeminiModelIdentifier.effortLabel($0) },
+            select: { configuration.selectGeminiEffort($0, api: api) }
+        )
+    }
+
+    // MARK: - The pieces every provider is shown through
+
+    private func modelSubmenu(
+        choices: [BackendAPI.ModelChoice],
+        selected: String,
+        selectedLabel: String,
+        label: @escaping (BackendAPI.ModelChoice) -> String,
+        select: @escaping (String) -> Void
+    ) -> some View {
+        Menu {
+            ForEach(choices) { choice in
                 Button {
-                    configuration.selectGeminiModel(choice.id, api: api)
+                    select(choice.id)
                 } label: {
                     if choice.id == selected {
-                        Label(Self.geminiLabel(choice), systemImage: "checkmark")
+                        Label(label(choice), systemImage: "checkmark")
                     } else {
-                        Text(Self.geminiLabel(choice))
+                        Text(label(choice))
                     }
                 }
             }
         } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Modell")
-                Text(configuration.geminiLabel(for: selected, in: settings))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            submenuLabel("Modell", selectedLabel)
         }
         .menuOrder(.fixed)
     }
 
-    /// Strongest first, as the ChatGPT list above is. A Gemini model that was
-    /// listed at only one effort gets no section at all — one row that cannot
-    /// be changed is chrome.
-    @ViewBuilder
-    private func geminiEffortSection(_ settings: BackendAPI.AnswerSettings) -> some View {
-        let efforts = configuration.geminiEffortChoices(for: settings).reversed()
-        if efforts.count > 1 {
-            Divider()
-
-            Section("Intelligenz") {
-                ForEach(Array(efforts), id: \.self) { effort in
-                    Button {
-                        configuration.selectGeminiEffort(effort, api: api)
-                    } label: {
-                        if effort == configuration.geminiEffort(for: settings) {
-                            Label(GeminiModelIdentifier.effortLabel(effort), systemImage: "checkmark")
-                        } else {
-                            Text(GeminiModelIdentifier.effortLabel(effort))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private static func geminiLabel(_ choice: BackendAPI.ModelChoice) -> String {
-        choice.label.isEmpty ? choice.id : choice.label
-    }
-
-    private func speedSubmenu(_ settings: BackendAPI.AnswerSettings) -> some View {
+    private func speedSubmenu(
+        choices: [BackendAPI.ServiceTierChoice],
+        selected: String,
+        select: @escaping (String) -> Void
+    ) -> some View {
         Menu {
-            ForEach(configuration.serviceTierChoices(for: settings)) { choice in
+            ForEach(choices) { choice in
                 Button {
-                    configuration.selectServiceTier(choice.id, api: api)
+                    select(choice.id)
                 } label: {
-                    if choice.id == configuration.serviceTier(for: settings) {
+                    if choice.id == selected {
                         Label {
                             speedChoiceLabel(choice)
                         } icon: {
@@ -185,14 +199,47 @@ struct AIModelMenu: View {
                 }
             }
         } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Geschwindigkeit")
-                Text(selectedSpeedLabel(for: settings))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            let advertised = choices.first { $0.id == selected }?.label ?? ""
+            submenuLabel("Geschwindigkeit", Self.speedLabel(selected, fallback: advertised))
         }
         .menuOrder(.fixed)
+    }
+
+    /// Strongest first. A provider whose selected model offers a single level
+    /// gets no section at all — one row that cannot be changed is chrome.
+    @ViewBuilder
+    private func effortSection(
+        _ efforts: [String],
+        selected: String,
+        label: @escaping (String) -> String,
+        select: @escaping (String) -> Void
+    ) -> some View {
+        if efforts.count > 1 {
+            Divider()
+
+            Section("Intelligenz") {
+                ForEach(efforts, id: \.self) { effort in
+                    Button {
+                        select(effort)
+                    } label: {
+                        if effort == selected {
+                            Label(label(effort), systemImage: "checkmark")
+                        } else {
+                            Text(label(effort))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func submenuLabel(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func speedChoiceLabel(_ choice: BackendAPI.ServiceTierChoice) -> some View {
@@ -204,34 +251,39 @@ struct AIModelMenu: View {
         }
     }
 
-    private func selectedSpeedLabel(for settings: BackendAPI.AnswerSettings) -> String {
-        let selected = configuration.serviceTier(for: settings)
-        let advertised = configuration.serviceTierChoices(for: settings).first { $0.id == selected }
-        return Self.speedLabel(selected, fallback: advertised?.label ?? "")
-    }
+    // MARK: - The chip
 
+    /// The generation and the effort, with the provider's own name dropped —
+    /// "3.6 Flash Leicht", "5.6 Luna Hoch", "Opus 5 Leicht". Which provider is
+    /// answering is a settings decision; the chip is there to say which model.
     private var compactSelectionLabel: String {
         guard let settings = configuration.settings else { return "Modell" }
-        guard settings.provider == "chatgpt" else {
-            // "3.6 Flash Leicht" — the generation and the effort, with the
-            // provider's name dropped exactly as "GPT-" is below. Which
-            // provider is answering is a settings decision, and the chip is
-            // there to say which model.
+        switch settings.provider {
+        case "chatgpt":
+            let name = Self.modelLabel(for: settings).replacingOccurrences(of: "GPT-", with: "")
+            return "\(name) \(Self.intelligenceLabel(configuration.reasoningEffort(for: settings)))"
+        case "claude":
+            let name = configuration
+                .claudeLabel(for: configuration.claudeModel(for: settings), in: settings)
+                .replacingOccurrences(of: "Claude ", with: "")
+            let effort = configuration.claudeEffort(for: settings)
+            return effort.isEmpty ? name : "\(name) \(Self.intelligenceLabel(effort))"
+        default:
             let family = configuration.geminiFamily(for: settings)
             let name = configuration.geminiLabel(for: family, in: settings)
                 .replacingOccurrences(of: "Gemini ", with: "")
             let effort = configuration.geminiEffort(for: settings)
             return effort.isEmpty ? name : "\(name) \(GeminiModelIdentifier.effortLabel(effort))"
         }
-        let modelName = Self.modelLabel(for: settings)
-            .replacingOccurrences(of: "GPT-", with: "")
-        let effort = configuration.reasoningEffort(for: settings)
-        return "\(modelName) \(Self.intelligenceLabel(effort))"
     }
 
     private var speedIsSelected: Bool {
         guard let settings = configuration.settings else { return false }
-        return configuration.serviceTier(for: settings) != "default"
+        switch settings.provider {
+        case "chatgpt": return configuration.serviceTier(for: settings) != "default"
+        case "claude": return configuration.claudeServiceTier(for: settings) != "default"
+        default: return false
+        }
     }
 
     private func compactLabel(_ text: String, showsSpeed: Bool) -> some View {
@@ -260,10 +312,13 @@ struct AIModelMenu: View {
         )
     }
 
-    /// ChatGPT presents intelligence from strongest to lightest. Its picker
-    /// exposes the five visible levels from the recording, without a Standard
-    /// row or Codex's advanced Minimal/Ultra aliases.
-    private func sortedEfforts(for settings: BackendAPI.AnswerSettings) -> [String] {
+    // MARK: - Naming
+
+    /// ChatGPT presents intelligence from strongest to lightest, and so does
+    /// Claude — the same five levels, so both lists read the same way. Only the
+    /// levels named below are offered: no Standard row, and none of Codex's
+    /// advanced Minimal/Ultra aliases.
+    private static func sortedByStrength(_ efforts: [String]) -> [String] {
         let rank = [
             "max": 5,
             "xhigh": 4,
@@ -271,9 +326,18 @@ struct AIModelMenu: View {
             "medium": 2,
             "low": 1,
         ]
-        return configuration.effortChoices(for: settings).filter { rank[$0] != nil }.sorted {
+        return efforts.filter { rank[$0] != nil }.sorted {
             rank[$0, default: 0] > rank[$1, default: 0]
         }
+    }
+
+    private static func geminiLabel(_ choice: BackendAPI.ModelChoice) -> String {
+        choice.label.isEmpty ? choice.id : choice.label
+    }
+
+    private static func claudeLabel(_ choice: BackendAPI.ModelChoice) -> String {
+        if choice.id.isEmpty { return "Standard" }
+        return choice.label.isEmpty ? choice.id : choice.label
     }
 
     private static func modelLabel(for settings: BackendAPI.AnswerSettings) -> String {

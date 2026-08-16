@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// One live copy of the server's AI configuration shared by Settings and both
-/// chat composers. Changing a Codex model in one place is therefore reflected
+/// chat composers. Changing a model in one place is therefore reflected
 /// everywhere else without waiting for another server fetch.
 @MainActor
 @Observable
@@ -25,7 +25,10 @@ final class AIConfigurationStore {
                 model: updated.chatgptModel,
                 reasoningEffort: updated.chatgptReasoningEffort,
                 serviceTier: tier,
-                geminiModel: updated.geminiModel ?? ""
+                geminiModel: updated.geminiModel ?? "",
+                claudeModel: updated.claudeModel,
+                claudeEffort: updated.claudeEffort,
+                claudeServiceTier: updated.claudeServiceTier.flatMap { $0.isEmpty ? nil : $0 }
             )
         }
     ) {
@@ -164,6 +167,112 @@ final class AIConfigurationStore {
         in settings: BackendAPI.AnswerSettings
     ) -> BackendAPI.ModelChoice? {
         (settings.geminiModels ?? []).first { $0.id == family }
+    }
+
+    // MARK: - Claude
+
+    // Claude's knobs are shaped like ChatGPT's — a model, an effort and a
+    // speed, each stored on its own — so everything below mirrors those.
+
+    func selectClaudeModel(_ modelID: String, api: BackendAPI) {
+        guard var updated = settings, (updated.claudeModel ?? "") != modelID else { return }
+        updated.claudeModel = modelID
+
+        // Switching model lands on that model's own default effort, the way
+        // ChatGPT's picker does: Haiku takes no effort at all, and carrying a
+        // stale "max" onto it would only be silently dropped by the server.
+        let choice = claudeChoice(modelID, in: updated)
+        let supported = choice?.efforts ?? []
+        if supported.isEmpty {
+            updated.claudeEffort = ""
+        } else if !supported.contains(claudeEffort(for: updated)) {
+            var fallback = supported.first ?? ""
+            if let advertised = choice?.defaultEffort, !advertised.isEmpty { fallback = advertised }
+            updated.claudeEffort = fallback
+        }
+
+        let tiers = choice?.serviceTiers ?? []
+        if claudeServiceTier(for: updated) != "default",
+           !tiers.contains(where: { $0.id == claudeServiceTier(for: updated) }) {
+            updated.claudeServiceTier = "default"
+        }
+        persist(updated, api: api)
+    }
+
+    func selectClaudeEffort(_ effort: String, api: BackendAPI) {
+        guard var updated = settings, claudeEffort(for: updated) != effort else { return }
+        updated.claudeEffort = effort
+        persist(updated, api: api)
+    }
+
+    func selectClaudeServiceTier(_ serviceTier: String, api: BackendAPI) {
+        guard var updated = settings, claudeServiceTier(for: updated) != serviceTier else { return }
+        updated.claudeServiceTier = serviceTier
+        persist(updated, api: api)
+    }
+
+    /// The models to choose from, plus the one that is selected if the server's
+    /// list has never heard of it (a model named in the config file).
+    func claudeModelChoices(for settings: BackendAPI.AnswerSettings) -> [BackendAPI.ModelChoice] {
+        var choices = settings.claudeModels ?? []
+        let selected = claudeModel(for: settings)
+        if !choices.contains(where: { $0.id == selected }) {
+            choices.append(
+                .init(id: selected, label: "", efforts: [], defaultEffort: nil, serviceTiers: nil)
+            )
+        }
+        return choices
+    }
+
+    /// The efforts the selected model was listed at. Empty for a model that has
+    /// none, which is a model with no effort picker rather than an empty one.
+    func claudeEffortChoices(for settings: BackendAPI.AnswerSettings) -> [String] {
+        let supported = claudeChoice(claudeModel(for: settings), in: settings)?.efforts ?? []
+        guard !supported.isEmpty else { return [] }
+        var choices = supported
+        let selected = claudeEffort(for: settings)
+        if !selected.isEmpty, !choices.contains(selected) { choices.append(selected) }
+        return choices
+    }
+
+    func claudeServiceTierChoices(for settings: BackendAPI.AnswerSettings) -> [BackendAPI.ServiceTierChoice] {
+        let advertised = claudeChoice(claudeModel(for: settings), in: settings)?.serviceTiers ?? []
+        guard !advertised.isEmpty else { return [] }
+        let standard = BackendAPI.ServiceTierChoice(
+            id: "default",
+            label: "Standard",
+            description: "Standardnutzung"
+        )
+        return [standard] + advertised.filter { $0.id != standard.id }
+    }
+
+    func claudeModel(for settings: BackendAPI.AnswerSettings) -> String {
+        settings.claudeModel ?? ""
+    }
+
+    func claudeEffort(for settings: BackendAPI.AnswerSettings) -> String {
+        if let effort = settings.claudeEffort, !effort.isEmpty { return effort }
+        return claudeChoice(claudeModel(for: settings), in: settings)?.defaultEffort ?? ""
+    }
+
+    func claudeServiceTier(for settings: BackendAPI.AnswerSettings) -> String {
+        let tier = settings.claudeServiceTier ?? "default"
+        return tier.isEmpty ? "default" : tier
+    }
+
+    /// What a model is called: the server's name for it, the identifier when
+    /// the list carries none, and "Standard" for the CLI's own default.
+    func claudeLabel(for modelID: String, in settings: BackendAPI.AnswerSettings) -> String {
+        if modelID.isEmpty { return "Standard" }
+        let label = claudeChoice(modelID, in: settings)?.label ?? ""
+        return label.isEmpty ? modelID : label
+    }
+
+    private func claudeChoice(
+        _ modelID: String,
+        in settings: BackendAPI.AnswerSettings
+    ) -> BackendAPI.ModelChoice? {
+        (settings.claudeModels ?? []).first { $0.id == modelID }
     }
 
     // MARK: - ChatGPT

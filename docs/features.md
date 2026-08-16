@@ -180,10 +180,10 @@ lesson:
 - **App-Wechsel.** A three-finger tap leaves Echo for one chosen app — Goodnotes,
   Notability, or any URL scheme you type — and the recording keeps running. Notes
   are written where notes are written; the transcript does not stop for it.
-- **Which AI answers.** The provider (ChatGPT or Gemini), the model, its
+- **Which AI answers.** The provider (ChatGPT, Claude or Gemini), the model, its
   reasoning effort and service tier are switched from inside the app and applied
   to the running server, so the choice survives without editing anything on the
-  machine at home.
+  machine at home. Claude only appears when the server is new enough to have it.
 - **Audio.** Opus at 16, 24 or 32 kbit/s; 24 is the recommendation and costs
   about 11 MiB per hour. The record button's colour is yours to pick, and
   **Aufnahmediagnose** shows what the microphone and the connection are actually

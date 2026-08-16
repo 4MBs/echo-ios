@@ -128,6 +128,106 @@ final class AIConfigurationTests: XCTestCase {
         )
     }
 
+    // MARK: - Claude
+
+    /// A server from before Claude was a provider sends none of its keys. The
+    /// settings must still decode, and the app must not offer a provider that
+    /// server would refuse.
+    @MainActor
+    func testAServerWithoutClaudeStillDecodesAndDoesNotOfferIt() throws {
+        let settings = try makeSettings()
+        XCTAssertNil(settings.claudeModels)
+        XCTAssertFalse(settings.supportsClaude)
+    }
+
+    @MainActor
+    func testClaudeSettingsDecodeAndReportTheSelectedModel() throws {
+        let store = try AIConfigurationStore(settings: makeClaudeSettings()) { _, _ in }
+        let settings = try XCTUnwrap(store.settings)
+
+        XCTAssertTrue(settings.supportsClaude)
+        XCTAssertEqual(store.claudeModel(for: settings), "claude-opus-5")
+        XCTAssertEqual(store.claudeEffort(for: settings), "low")
+        XCTAssertEqual(store.claudeServiceTier(for: settings), "default")
+        XCTAssertEqual(store.claudeLabel(for: "claude-opus-5", in: settings), "Claude Opus 5")
+        // "" is the CLI's own default model, not a missing one
+        XCTAssertEqual(store.claudeLabel(for: "", in: settings), "Standard")
+    }
+
+    @MainActor
+    func testSelectingClaudeModelPersistsIt() async throws {
+        let recorder = SettingsRecorder()
+        let store = try AIConfigurationStore(settings: makeClaudeSettings()) { updated, _ in
+            await recorder.record(updated.claudeModel)
+        }
+
+        store.selectClaudeModel("claude-sonnet-5", api: api)
+
+        XCTAssertEqual(store.settings?.claudeModel, "claude-sonnet-5")
+        let persisted = await eventualValue(recorder)
+        XCTAssertEqual(persisted, "claude-sonnet-5")
+    }
+
+    /// Haiku takes no effort and has no fast mode. Carrying "max" and "fast"
+    /// onto it would send the server two values it only drops again, and leave
+    /// the pickers showing a choice that is not in effect.
+    @MainActor
+    func testSwitchingToAModelWithoutEffortOrSpeedClearsBoth() throws {
+        let store = try AIConfigurationStore(settings: makeClaudeSettings()) { _, _ in }
+
+        store.selectClaudeEffort("max", api: api)
+        store.selectClaudeServiceTier("fast", api: api)
+        store.selectClaudeModel("claude-haiku-4-5", api: api)
+
+        let settings = try XCTUnwrap(store.settings)
+        XCTAssertEqual(store.claudeEffort(for: settings), "")
+        XCTAssertEqual(store.claudeServiceTier(for: settings), "default")
+        XCTAssertTrue(store.claudeEffortChoices(for: settings).isEmpty)
+        XCTAssertTrue(store.claudeServiceTierChoices(for: settings).isEmpty)
+    }
+
+    /// Sonnet offers the same efforts as Opus, so switching model must not
+    /// quietly change how hard it thinks — only fast mode, which it lacks.
+    @MainActor
+    func testSwitchingClaudeModelKeepsASupportedEffort() throws {
+        let store = try AIConfigurationStore(settings: makeClaudeSettings()) { _, _ in }
+
+        store.selectClaudeEffort("high", api: api)
+        store.selectClaudeServiceTier("fast", api: api)
+        store.selectClaudeModel("claude-sonnet-5", api: api)
+
+        let settings = try XCTUnwrap(store.settings)
+        XCTAssertEqual(store.claudeEffort(for: settings), "high")
+        XCTAssertEqual(store.claudeServiceTier(for: settings), "default")
+    }
+
+    /// The speed picker exists only where there is more than one speed.
+    @MainActor
+    func testClaudeSpeedChoicesAreOnlyOfferedWhereFastModeExists() throws {
+        let store = try AIConfigurationStore(settings: makeClaudeSettings()) { _, _ in }
+        let settings = try XCTUnwrap(store.settings)
+
+        XCTAssertEqual(store.claudeServiceTierChoices(for: settings).map(\.id), ["default", "fast"])
+
+        store.selectClaudeModel("claude-sonnet-5", api: api)
+        let switched = try XCTUnwrap(store.settings)
+        XCTAssertTrue(store.claudeServiceTierChoices(for: switched).isEmpty)
+    }
+
+    /// A model named in the server's config file that its list has never heard
+    /// of still has to be the one the picker shows as selected.
+    @MainActor
+    func testAnUnlistedClaudeModelIsStillOffered() throws {
+        let store = try AIConfigurationStore(
+            settings: makeClaudeSettings(model: "claude-from-the-future")
+        ) { _, _ in }
+        let settings = try XCTUnwrap(store.settings)
+
+        XCTAssertTrue(
+            store.claudeModelChoices(for: settings).contains { $0.id == "claude-from-the-future" }
+        )
+    }
+
     private var api: BackendAPI {
         BackendAPI(host: "unused.invalid", port: 1, token: "test")
     }
@@ -163,6 +263,62 @@ final class AIConfigurationTests: XCTestCase {
                   "label": "Gemini 3.1 Pro",
                   "efforts": ["low", "high"],
                   "default_effort": "low"
+                }
+              ]
+            }
+            """#.replacingOccurrences(of: "MODEL", with: model).utf8
+        )
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(BackendAPI.AnswerSettings.self, from: data)
+    }
+
+    private func makeClaudeSettings(model: String = "claude-opus-5") throws -> BackendAPI.AnswerSettings {
+        let data = Data(
+            #"""
+            {
+              "provider": "claude",
+              "chatgpt_model": "",
+              "chatgpt_reasoning_effort": "low",
+              "chatgpt_service_tier": "default",
+              "chatgpt_models": [],
+              "reasoning_efforts": ["low"],
+              "claude_model": "MODEL",
+              "claude_effort": "low",
+              "claude_service_tier": "default",
+              "claude_efforts": ["low", "medium", "high", "xhigh", "max"],
+              "claude_models": [
+                {
+                  "id": "",
+                  "label": "",
+                  "efforts": ["low", "medium", "high", "xhigh", "max"],
+                  "default_effort": "low",
+                  "service_tiers": []
+                },
+                {
+                  "id": "claude-opus-5",
+                  "label": "Claude Opus 5",
+                  "efforts": ["low", "medium", "high", "xhigh", "max"],
+                  "default_effort": "low",
+                  "service_tiers": [{
+                    "id": "fast",
+                    "label": "Fast",
+                    "description": "Erhöhter Verbrauch"
+                  }]
+                },
+                {
+                  "id": "claude-sonnet-5",
+                  "label": "Claude Sonnet 5",
+                  "efforts": ["low", "medium", "high", "xhigh", "max"],
+                  "default_effort": "low",
+                  "service_tiers": []
+                },
+                {
+                  "id": "claude-haiku-4-5",
+                  "label": "Claude Haiku 4.5",
+                  "efforts": [],
+                  "default_effort": "",
+                  "service_tiers": []
                 }
               ]
             }
