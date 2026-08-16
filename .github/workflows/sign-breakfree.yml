@@ -1,0 +1,63 @@
+name: sign-breakfree-shortcut
+on:
+  push:
+    branches: [tmp-sign-breakfree-cp3]
+    paths:
+      - '.github/workflows/sign-breakfree.yml'
+
+jobs:
+  sign:
+    runs-on: macos-latest
+    steps:
+      - name: Download official BreakFree v2.6
+        run: |
+          curl -fL 'https://github.com/FrizzleM/BreakFree/releases/download/v2.6/BreakFree.shortcut' -o BreakFree.shortcut
+          shasum -a 256 BreakFree.shortcut
+
+      - name: Extract signed Shortcut
+        run: |
+          mkdir -p extracted
+          aea decrypt -i BreakFree.shortcut -o BreakFree.aar
+          aa extract -i BreakFree.aar -d extracted
+          find extracted -maxdepth 2 -type f -print
+
+      - name: Patch Checkpoint 3
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+          p = Path('extracted/Shortcut.wflow')
+          with p.open('rb') as f:
+              obj = plistlib.load(f)
+          actions = obj['WFWorkflowActions']
+          assert len(actions) == 433, len(actions)
+          assert actions[299]['WFWorkflowActionIdentifier'] == 'is.workflow.actions.openurl'
+          assert actions[300]['WFWorkflowActionIdentifier'] == 'is.workflow.actions.alert'
+          actions[299] = {
+              'WFWorkflowActionIdentifier': 'is.workflow.actions.alert',
+              'WFWorkflowActionParameters': {
+                  'WFAlertActionTitle': 'Checkpoint 3 — manual patch',
+                  'WFAlertActionMessage': 'PATCHED CHECKPOINT 3 — manual continuation\\n\\n1. Before starting this checkpoint, set BreakFreeDNS to Standard.\\n2. Open Feather and finish its intro.\\n3. Feather → Settings → Add Certificate. Import the certificate that worked in Checkpoint 2 and its matching provisioning profile; use the password information supplied with your own certificate package.\\n4. On iOS 18 or newer: Feather → Settings → Server Options → enable Online Install Method. Feather may restart.\\n5. In iOS Settings → Shortcuts, enable Private Sharing. In Advanced, enable the sharing option needed by the source importer.\\n6. Source importing is optional for signing. Once Feather shows the certificate under Signing, the core setup is complete.\\n\\nThis patched checkpoint intentionally does not jump between Settings/Feather and Shortcuts, because the original Wait to Return sequence can fail to resume.',
+                  'WFAlertActionCancelButtonShown': False,
+              },
+          }
+          actions[300] = {
+              'WFWorkflowActionIdentifier': 'is.workflow.actions.exit',
+              'WFWorkflowActionParameters': {},
+          }
+          with open('BreakFree_v2.6_CP3_manual_patch_UNSIGNED.shortcut', 'wb') as f:
+              plistlib.dump(obj, f, fmt=plistlib.FMT_BINARY, sort_keys=False)
+          PY
+
+      - name: Sign for anyone
+        run: |
+          shortcuts sign --mode anyone --input BreakFree_v2.6_CP3_manual_patch_UNSIGNED.shortcut --output BreakFree_v2.6_CP3_fixed.shortcut
+          test -s BreakFree_v2.6_CP3_fixed.shortcut
+          shasum -a 256 BreakFree_v2.6_CP3_fixed.shortcut
+
+      - name: Upload signed Shortcut
+        uses: actions/upload-artifact@v4
+        with:
+          name: BreakFree-v2.6-CP3-fixed
+          path: BreakFree_v2.6_CP3_fixed.shortcut
+          if-no-files-found: error
