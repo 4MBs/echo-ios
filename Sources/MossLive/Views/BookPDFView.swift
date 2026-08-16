@@ -291,6 +291,20 @@ final class BookPDFView: PDFView {
         )
     }
 
+    /// Whether the page is sitting at its natural fit rather than at a zoom the
+    /// student chose.
+    ///
+    /// Relative, not absolute. PDFKit nudges `scaleFactor` by small amounts of
+    /// its own, and `applyScaleLimits` itself leaves a difference of up to
+    /// 0.001 in place while still recording the new resting scale — so at a fit
+    /// around 0.5, where an absolute 0.001 is two parts in a thousand, a page
+    /// plainly at rest could read as "zoomed". That took the resize animation
+    /// down its frozen path, where the page holds its size for the whole
+    /// animation and then snaps to the new one in a single frame.
+    private var isAtRestingScale: Bool {
+        restingScale == 0 || abs(scaleFactor - restingScale) <= max(0.001, restingScale * 0.005)
+    }
+
     func applyScaleLimits() {
         guard document != nil, bounds.width > 40, bounds.height > 40 else { return }
         let sizeToFit = scaleFactorForSizeToFit
@@ -309,7 +323,7 @@ final class BookPDFView: PDFView {
         // Follow the new fit when the reader is sitting at the old one (rotation,
         // layout switch, a differently sized page) rather than stranding the page
         // at a scale that no longer belongs to it.
-        let restingAtFit = restingScale == 0 || abs(scaleFactor - restingScale) < 0.001
+        let restingAtFit = isAtRestingScale
         if abs(minScaleFactor - fit) > 0.0005 {
             minScaleFactor = fit
         }
@@ -626,10 +640,10 @@ final class BookPDFView: PDFView {
         if !holdsPDFLayout,
            bounds.width > 0,
            bounds.height > 0,
-           let snapshot = snapshotView(afterScreenUpdates: false) {
+           let snapshot = resizeOverlay() ?? snapshotView(afterScreenUpdates: false) {
             resizeSnapshotBaseBounds = bounds
             resizeSnapshotContentFrame = visiblePageFrame ?? bounds
-            resizeSnapshotFollowsFit = restingScale == 0 || abs(scaleFactor - restingScale) < 0.001
+            resizeSnapshotFollowsFit = isAtRestingScale
             hiddenDuringResize = subviews.filter { !$0.isHidden }
             hiddenDuringResize.forEach { $0.isHidden = true }
             snapshot.bounds = CGRect(origin: .zero, size: bounds.size)
@@ -649,6 +663,68 @@ final class BookPDFView: PDFView {
         }
         resizeCompletion = completion
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: completion)
+    }
+
+    /// The pages as pictures, from the same cache the reader shows after a page
+    /// turn — the layer the resize animation moves, in place of a snapshot of
+    /// the screen.
+    ///
+    /// A `snapshotView` holds exactly as many pixels as the screen was showing,
+    /// so the moment the animation magnifies it the page goes soft, stays soft
+    /// for the whole animation, and sharpens again when the live PDF returns.
+    /// That is the whole of "the resolution gets worse and then comes back",
+    /// and closing the assistant — which hands the page back a third of the
+    /// width — is where it shows worst. These images are rendered against the
+    /// view's longest side, so a page displayed at half that already carries
+    /// more detail than the screen can use and has room to grow into.
+    ///
+    /// Nil when the pages are not rendered yet, or when a region is marked on
+    /// the page: those controls are part of a screen snapshot but not of this,
+    /// and they must not blink out for the length of the animation.
+    private func resizeOverlay() -> UIView? {
+        guard displayedRegion == nil,
+              selectionOverlay == nil,
+              let document,
+              let cache = pageCache
+        else { return nil }
+
+        let dimension = renderPixelDimension
+        let pageFrames = visiblePages.compactMap { page -> (Int, CGRect)? in
+            let index = document.index(for: page)
+            let frame = convert(page.bounds(for: .cropBox), from: page).standardized
+            return frame.isEmpty ? nil : (index, frame)
+        }
+        guard !pageFrames.isEmpty else { return nil }
+
+        let images = pageFrames.map { cache.image(pageIndex: $0.0, maxPixelDimension: dimension) }
+        guard images.allSatisfy({ $0 != nil }) else {
+            // Nothing to show yet, so this resize uses the screen snapshot.
+            // Render them anyway: the next one is far more likely to be sharp.
+            cache.prepare(
+                pageIndices: Set(visiblePages.map { document.index(for: $0) }),
+                maxPixelDimension: dimension
+            )
+            return nil
+        }
+
+        let canvas = UIView(frame: bounds)
+        canvas.isUserInteractionEnabled = false
+        canvas.accessibilityElementsHidden = true
+        // A screen snapshot is a picture of the viewport, so a page zoomed past
+        // its edges is already cut off in it. Whole pages are being drawn here
+        // instead, and without this a zoomed one would spill outside the reader.
+        canvas.clipsToBounds = true
+        for (offset, entry) in pageFrames.enumerated() {
+            guard let image = images[offset] else { continue }
+            let imageView = UIImageView(image: image)
+            imageView.frame = entry.1
+            imageView.contentMode = .scaleToFill
+            imageView.clipsToBounds = true
+            imageView.layer.minificationFilter = .trilinear
+            imageView.layer.magnificationFilter = .linear
+            canvas.addSubview(imageView)
+        }
+        return canvas
     }
 
     private var visiblePageFrame: CGRect? {
@@ -678,9 +754,14 @@ final class BookPDFView: PDFView {
             let currentFit = snapshotFit(in: bounds.size)
             scale = originalFit > 0 ? currentFit / originalFit : 1
         } else {
-            // Preserve a deliberately zoomed page instead of snapping it back
-            // to the minimum fit merely because a panel was opened.
-            scale = 1
+            // A zoomed page keeps its size while the container shrinks — the
+            // viewport just shows less of it — but it cannot stay smaller than
+            // the fit, and `applyScaleLimits` grows it back the moment the fit
+            // overtakes it. Holding this at 1 through a container that is
+            // *growing* meant the animation showed a page that never grew and
+            // then jumped to full size in the frame the live layout returned:
+            // the reader visibly springing back rather than opening.
+            scale = max(1, snapshotFit(in: bounds.size))
         }
 
         let baseCenter = CGPoint(
@@ -702,15 +783,41 @@ final class BookPDFView: PDFView {
         }
     }
 
+    /// The scale the captured page will come to rest at inside `size`, worked
+    /// out exactly the way `applyScaleLimits` works it out: fit the page to the
+    /// whole bounds first, then take the margin out as a ratio *of those
+    /// bounds*.
+    ///
+    /// Insetting the bounds first and fitting to what is left, which is what
+    /// this did, is not the same sum whenever one axis decides the fit and the
+    /// other decides the margin. The animation therefore aimed a few per cent
+    /// away from the layout it was about to hand over to, and the correction
+    /// landed in one frame at the very end — the reader's last-moment jump.
     private func snapshotFit(in size: CGSize) -> CGFloat {
         guard resizeSnapshotContentFrame.width > 0,
               resizeSnapshotContentFrame.height > 0,
               size.width > 2 * margin,
               size.height > 2 * margin
         else { return 1 }
-        return min(
-            (size.width - 2 * margin) / resizeSnapshotContentFrame.width,
-            (size.height - 2 * margin) / resizeSnapshotContentFrame.height
+        // The reader draws page breaks, so what PDFKit has to fit is the spread
+        // plus those margins, not the spread alone.
+        let padding = pageBreakPadding
+        let sizeToFit = min(
+            max(size.width - padding.width, 1) / resizeSnapshotContentFrame.width,
+            max(size.height - padding.height, 1) / resizeSnapshotContentFrame.height
+        )
+        let inset = min(
+            (size.width - 2 * margin) / size.width,
+            (size.height - 2 * margin) / size.height
+        )
+        return sizeToFit * inset
+    }
+
+    private var pageBreakPadding: CGSize {
+        guard displaysPageBreaks else { return .zero }
+        return CGSize(
+            width: pageBreakMargins.left + pageBreakMargins.right,
+            height: pageBreakMargins.top + pageBreakMargins.bottom
         )
     }
 
@@ -751,6 +858,11 @@ final class BookPDFView: PDFView {
                 alignResizeSnapshot(to: visiblePageFrame)
                 discardResizeSnapshot()
                 finishResizeHandoff()
+                // Hand over to the same sharp pages a page turn ends on, rather
+                // than to PDFKit's own tiles for the new size. Otherwise the
+                // page changes sharpness once more a moment after it has
+                // stopped moving, which reads as one more glitch.
+                installFinalQualityOverlay()
             } else {
                 snapshot.removeFromSuperview()
             }
