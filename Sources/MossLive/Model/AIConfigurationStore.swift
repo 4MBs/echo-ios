@@ -24,7 +24,8 @@ final class AIConfigurationStore {
                 provider: updated.provider,
                 model: updated.chatgptModel,
                 reasoningEffort: updated.chatgptReasoningEffort,
-                serviceTier: tier
+                serviceTier: tier,
+                geminiModel: updated.geminiModel ?? ""
             )
         }
     ) {
@@ -89,6 +90,83 @@ final class AIConfigurationStore {
         updated.chatgptServiceTier = serviceTier
         persist(updated, api: api)
     }
+
+    // MARK: - Gemini
+
+    /// Gemini's models are its own list, and the effort is part of the model's
+    /// identifier rather than a setting beside it — so both pickers read from
+    /// the same string and write it back together.
+    func selectGeminiModel(_ family: String, api: BackendAPI) {
+        guard let current = settings else { return }
+        let choice = geminiChoice(family, in: current)
+        let effort = geminiEffort(for: current)
+        // Keep the effort the student had if the new model was listed at it;
+        // Antigravity offers the same three nearly everywhere, so switching
+        // model should not quietly change how hard it thinks.
+        let supported = choice?.efforts ?? []
+        let kept = supported.contains(effort)
+            ? effort
+            : (choice?.defaultEffort ?? supported.first ?? "")
+        applyGeminiModel(GeminiModelIdentifier.join(family: family, effort: kept), api: api)
+    }
+
+    func selectGeminiEffort(_ effort: String, api: BackendAPI) {
+        guard let current = settings else { return }
+        applyGeminiModel(
+            GeminiModelIdentifier.join(family: geminiFamily(for: current), effort: effort),
+            api: api
+        )
+    }
+
+    private func applyGeminiModel(_ identifier: String, api: BackendAPI) {
+        guard var updated = settings, !identifier.isEmpty, updated.geminiModel != identifier else { return }
+        updated.geminiModel = identifier
+        persist(updated, api: api)
+    }
+
+    /// The families to choose from, plus the one that is selected if the
+    /// server's list has never heard of it (a model named in the config file).
+    func geminiModelChoices(for settings: BackendAPI.AnswerSettings) -> [BackendAPI.ModelChoice] {
+        var choices = settings.geminiModels ?? []
+        let family = geminiFamily(for: settings)
+        if !family.isEmpty, !choices.contains(where: { $0.id == family }) {
+            choices.append(
+                .init(id: family, label: "", efforts: [], defaultEffort: nil, serviceTiers: nil)
+            )
+        }
+        return choices
+    }
+
+    /// The efforts the selected family was listed at. Empty for a model that
+    /// has none, which is a model with no effort picker rather than one with an
+    /// empty picker.
+    func geminiEffortChoices(for settings: BackendAPI.AnswerSettings) -> [String] {
+        geminiChoice(geminiFamily(for: settings), in: settings)?.efforts ?? []
+    }
+
+    func geminiFamily(for settings: BackendAPI.AnswerSettings) -> String {
+        GeminiModelIdentifier.split(settings.geminiModel ?? "").family
+    }
+
+    func geminiEffort(for settings: BackendAPI.AnswerSettings) -> String {
+        GeminiModelIdentifier.split(settings.geminiModel ?? "").effort
+    }
+
+    /// What a family is called: the server's name for it, or the identifier
+    /// when the list does not carry one.
+    func geminiLabel(for family: String, in settings: BackendAPI.AnswerSettings) -> String {
+        let label = geminiChoice(family, in: settings)?.label ?? ""
+        return label.isEmpty ? family : label
+    }
+
+    private func geminiChoice(
+        _ family: String,
+        in settings: BackendAPI.AnswerSettings
+    ) -> BackendAPI.ModelChoice? {
+        (settings.geminiModels ?? []).first { $0.id == family }
+    }
+
+    // MARK: - ChatGPT
 
     func modelChoices(for settings: BackendAPI.AnswerSettings) -> [BackendAPI.ModelChoice] {
         var choices = settings.chatgptModels

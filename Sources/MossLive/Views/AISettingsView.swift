@@ -30,11 +30,12 @@ struct AISettingsView: View {
     }
 }
 
-/// Which AI backend the server uses. With ChatGPT, the model and the
-/// reasoning effort and speed are picked here; the choice is stored on the
-/// server (like the WebUntis login) and applies immediately, no restart needed. The model
-/// list — including which reasoning efforts each model supports — comes from
-/// the server, so new models appear without an app update.
+/// Which AI backend the server uses, and which of its models. The model and
+/// how hard it thinks are picked here for either provider — ChatGPT adds a
+/// speed — and the choice is stored on the server (like the WebUntis login)
+/// and applies immediately, no restart needed. Both model lists, including
+/// which efforts each model supports, come from the server, which asks the
+/// provider's own CLI: new models appear without an app update.
 struct AIModelSection: View {
     @Environment(AppModel.self) private var model
 
@@ -68,6 +69,25 @@ struct AIModelSection: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
+                } else {
+                    // The same two choices for Gemini, taken from the same
+                    // string: Antigravity carries the effort inside the model's
+                    // own name, so "Gemini 3.6 Flash" + "Leicht" is what the
+                    // server stores as `gemini-3.6-flash-low`.
+                    Picker("Modell", selection: geminiModelBinding) {
+                        ForEach(geminiModelChoices) { choice in
+                            Text(geminiDisplayName(for: choice)).tag(choice.id)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    if !geminiEffortChoices.isEmpty {
+                        Picker("Denkaufwand", selection: geminiEffortBinding) {
+                            ForEach(geminiEffortChoices, id: \.self) { effort in
+                                Text(GeminiModelIdentifier.effortLabel(effort)).tag(effort)
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+                    }
                 }
                 if let errorMessage {
                     Text(errorMessage).font(.footnote).foregroundStyle(.red)
@@ -139,6 +159,44 @@ struct AIModelSection: View {
         )
     }
 
+    private var geminiModelChoices: [BackendAPI.ModelChoice] {
+        guard let settings else { return [] }
+        return configuration.geminiModelChoices(for: settings)
+    }
+
+    private var geminiEffortChoices: [String] {
+        guard let settings else { return [] }
+        return configuration.geminiEffortChoices(for: settings)
+    }
+
+    private func geminiDisplayName(for choice: BackendAPI.ModelChoice) -> String {
+        choice.label.isEmpty ? choice.id : choice.label
+    }
+
+    private var geminiModelBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let settings = configuration.settings else { return "" }
+                return configuration.geminiFamily(for: settings)
+            },
+            set: { value in
+                configuration.selectGeminiModel(value, api: api)
+            }
+        )
+    }
+
+    private var geminiEffortBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let settings = configuration.settings else { return "" }
+                return configuration.geminiEffort(for: settings)
+            },
+            set: { value in
+                configuration.selectGeminiEffort(value, api: api)
+            }
+        )
+    }
+
     private var serviceTierChoices: [BackendAPI.ServiceTierChoice] {
         guard let settings else { return [] }
         return configuration.serviceTierChoices(for: settings)
@@ -163,7 +221,8 @@ struct AIModelSection: View {
         if settings.provider == "chatgpt" {
             return "Gilt für Antworten, Zusammenfassungen und Chat — sofort."
         }
-        return "Gemini wird für Antworten, Zusammenfassungen und Chat verwendet — sofort."
+        return "Gilt für Antworten, Zusammenfassungen und Chat — sofort. "
+            + "Bilder beantwortet weiterhin ChatGPT, weil Gemini keine annehmen kann."
     }
 
     private func displayName(for choice: BackendAPI.ModelChoice) -> String {

@@ -22,6 +22,12 @@ import SwiftUI
 /// And a `List` is gone, which takes swipe-to-delete and the edit button with
 /// it: deleting a lesson is a long press on its row now, and it asks first,
 /// because it takes the transcript and the recording with it.
+///
+/// What the edit button did comes back as "Auswählen". A folder that filled up
+/// with recordings that do not belong in it — a run of tests, or a subject the
+/// timetable named wrong — took one long press, one dialog and one round trip
+/// per row to clear out. Picking several out at once and deleting or refiling
+/// them together is one dialog for the lot.
 struct SubjectView: View {
     let api: BackendAPI
     let folder: SubjectFolder
@@ -33,7 +39,15 @@ struct SubjectView: View {
     /// The row whose context menu asked for a deletion, held until it is
     /// confirmed. Also what the dialog is presented from.
     @State private var pendingDelete: BackendAPI.LessonInfo?
-    @State private var pendingSubjectChange: BackendAPI.LessonInfo?
+    /// Which lessons the subject sheet is about to relabel — one from its
+    /// context menu, or everything currently picked out.
+    @State private var pendingSubjectChange: SubjectChange?
+    /// Picking several lessons out at once, to delete or refile them together.
+    @State private var isSelecting = false
+    @State private var selection: Set<String> = []
+    @State private var pendingBulkDelete = false
+    /// A run of server calls is in flight; the bar says so and stays put.
+    @State private var isWorking = false
     @ScaledMetric(relativeTo: .largeTitle) private var emptyIconSize: CGFloat = 52
 
     /// Where a second column stops crowding the rows. A row is a heading, a
@@ -80,8 +94,48 @@ struct SubjectView: View {
         // subject's name, so a glass capsule repeating it sits between the
         // header and the top of the screen saying nothing — the same reason the
         // lesson page has no title either. The bar stays for the back button.
-        .navigationTitle("")
+        // While lessons are being picked out it does say how many, because that
+        // is the one thing about this screen that is then worth a line.
+        .navigationTitle(isSelecting ? selectionTitle : "")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !lessons.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isSelecting ? "Fertig" : "Auswählen") {
+                        withAnimation(.snappy) {
+                            if isSelecting { endSelection() } else { isSelecting = true }
+                        }
+                    }
+                    .disabled(isWorking)
+                    .accessibilityIdentifier("subject-board-select")
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isSelecting { selectionBar }
+        }
+        .sheet(item: $pendingSubjectChange) { change in
+            SubjectChangeSheet(
+                title: "Fach ändern",
+                footnote: change.footnote,
+                catalogue: catalogue,
+                current: change.ids.count == 1 ? folder.name : nil
+            ) { subject in
+                Task { await changeSubject(of: change.ids, to: subject) }
+            }
+        }
+        .confirmationDialog(
+            "\(lessonCountText(selection.count)) löschen?",
+            isPresented: $pendingBulkDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Löschen", role: .destructive) {
+                Task { await deleteSelected() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Transkripte und Aufnahmen werden vom Server gelöscht.")
+        }
         .confirmationDialog(
             "Stunde löschen?",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -97,22 +151,6 @@ struct SubjectView: View {
                 "\(lesson.startedAt.formatted(date: .long, time: .shortened)) — "
                     + "Transkript und Aufnahme werden vom Server gelöscht."
             )
-        }
-        .confirmationDialog(
-            "Fach ändern",
-            isPresented: Binding(
-                get: { pendingSubjectChange != nil },
-                set: { if !$0 { pendingSubjectChange = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingSubjectChange
-        ) { lesson in
-            ForEach(catalogue) { subject in
-                Button(subject.name) { Task { await changeSubject(of: lesson, to: subject) } }
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: { _ in
-            Text("Das Fach wird für die gesamte Aufnahme geändert.")
         }
         .alert(
             "Änderung fehlgeschlagen",
@@ -153,12 +191,100 @@ struct SubjectView: View {
                 SubjectLessonCard(
                     api: api,
                     lessons: column,
-                    onChangeSubject: { pendingSubjectChange = $0 },
+                    picking: isSelecting ? SubjectRowPicking(picked: selection, toggle: toggle) : nil,
+                    onChangeSubject: { pendingSubjectChange = .one($0) },
                     onDelete: { pendingDelete = $0 }
                 )
                 .frame(maxWidth: .infinity)
             }
         }
+    }
+
+    // MARK: - Picking several at once
+
+    /// What is about to be relabelled. One lesson from its own context menu, or
+    /// the whole selection — the sheet is the same either way, only the line
+    /// under it changes.
+    struct SubjectChange: Identifiable {
+        let ids: [String]
+        let footnote: String
+
+        var id: String { ids.joined(separator: "+") }
+
+        static func one(_ lesson: BackendAPI.LessonInfo) -> SubjectChange {
+            SubjectChange(ids: [lesson.id], footnote: "Das Fach wird für die gesamte Aufnahme geändert.")
+        }
+
+        static func many(_ ids: [String]) -> SubjectChange {
+            SubjectChange(
+                ids: ids,
+                footnote: ids.count == 1
+                    ? "Das Fach wird für die gesamte Aufnahme geändert."
+                    : "Das Fach wird für alle \(ids.count) ausgewählten Stunden geändert."
+            )
+        }
+    }
+
+    private var selectionTitle: String {
+        selection.isEmpty ? "Stunden auswählen" : "\(lessonCountText(selection.count)) ausgewählt"
+    }
+
+    private var everythingIsPicked: Bool {
+        !lessons.isEmpty && selection.count == lessons.count
+    }
+
+    private func toggle(_ lesson: BackendAPI.LessonInfo) {
+        if selection.contains(lesson.id) {
+            selection.remove(lesson.id)
+        } else {
+            selection.insert(lesson.id)
+        }
+    }
+
+    private func endSelection() {
+        isSelecting = false
+        selection = []
+    }
+
+    /// The bar the selection is acted on from. A bar rather than a toolbar
+    /// menu: what can be done to a selection should be visible while making
+    /// one, and both of these are one tap from anywhere on the board.
+    private var selectionBar: some View {
+        HStack(spacing: 14) {
+            Button(everythingIsPicked ? "Auswahl aufheben" : "Alle auswählen") {
+                selection = everythingIsPicked ? [] : Set(lessons.map(\.id))
+            }
+            .accessibilityIdentifier("subject-board-select-all")
+
+            Spacer(minLength: 8)
+
+            if isWorking {
+                ProgressView().controlSize(.small)
+            }
+
+            Button("Fach ändern") {
+                pendingSubjectChange = .many(orderedSelection)
+            }
+            .disabled(selection.isEmpty || isWorking)
+
+            Button("Löschen", role: .destructive) {
+                pendingBulkDelete = true
+            }
+            .disabled(selection.isEmpty || isWorking)
+            .accessibilityIdentifier("subject-board-delete-selected")
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    /// The selection in the order it is read on screen, so a run of server
+    /// calls works down the board rather than through a hash order.
+    private var orderedSelection: [String] {
+        ordered.map(\.id).filter(selection.contains)
     }
 
     private var empty: some View {
@@ -227,17 +353,66 @@ struct SubjectView: View {
         }
     }
 
-    private func changeSubject(
-        of lesson: BackendAPI.LessonInfo,
-        to subject: BackendAPI.SubjectInfo
-    ) async {
-        do {
-            _ = try await api.updateLessonSubject(sessionId: lesson.id, subject: subject.name)
-            lessons.removeAll { $0.id == lesson.id }
-            await onChanged()
-        } catch {
-            actionError = error.localizedDescription
+    /// Everything picked out, deleted in one go.
+    ///
+    /// The rows go first and together, as a single deletion does — twelve rows
+    /// disappearing one by one over a slow link is a progress bar made of
+    /// furniture. Whatever the server then refuses comes back, in the order it
+    /// was in, and the message says how many.
+    private func deleteSelected() async {
+        let targets = orderedSelection
+        guard !targets.isEmpty else { return }
+        let previous = lessons
+        let removed = Set(targets)
+        isWorking = true
+        lessons.removeAll { removed.contains($0.id) }
+
+        var failed: Set<String> = []
+        var lastError: String?
+        for id in targets {
+            do {
+                try await api.deleteLesson(id: id)
+                BackendAPI.purgeCachedAudio(id: id)
+            } catch {
+                failed.insert(id)
+                lastError = error.localizedDescription
+            }
         }
+        if !failed.isEmpty {
+            lessons = previous.filter { !removed.contains($0.id) || failed.contains($0.id) }
+            actionError = failed.count == 1
+                ? (lastError ?? "Eine Stunde konnte nicht gelöscht werden.")
+                : "\(failed.count) Stunden konnten nicht gelöscht werden: \(lastError ?? "")"
+        }
+        isWorking = false
+        endSelection()
+        await onChanged()
+    }
+
+    /// Refile lessons under another subject. They leave this folder as each one
+    /// lands, so the board shows how far it has got.
+    private func changeSubject(of ids: [String], to subject: BackendAPI.SubjectInfo) async {
+        guard !ids.isEmpty else { return }
+        isWorking = true
+        var lastError: String?
+        var failed = 0
+        for id in ids {
+            do {
+                _ = try await api.updateLessonSubject(sessionId: id, subject: subject.name)
+                lessons.removeAll { $0.id == id }
+            } catch {
+                failed += 1
+                lastError = error.localizedDescription
+            }
+        }
+        if failed > 0 {
+            actionError = failed == 1
+                ? (lastError ?? "Das Fach konnte nicht geändert werden.")
+                : "\(failed) Stunden behalten ihr Fach: \(lastError ?? "")"
+        }
+        isWorking = false
+        endSelection()
+        await onChanged()
     }
 }
 
@@ -304,6 +479,9 @@ private struct SubjectHoursHeader: View {
 private struct SubjectLessonCard: View {
     let api: BackendAPI
     let lessons: [BackendAPI.LessonInfo]
+    /// Non-nil while lessons are being picked out: the rows then answer with a
+    /// checkmark instead of opening.
+    let picking: SubjectRowPicking?
     let onChangeSubject: (BackendAPI.LessonInfo) -> Void
     let onDelete: (BackendAPI.LessonInfo) -> Void
 
@@ -312,24 +490,7 @@ private struct SubjectLessonCard: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(lessons.enumerated()), id: \.element.id) { index, lesson in
-                NavigationLink {
-                    LessonDetailView(api: api, info: lesson)
-                } label: {
-                    SubjectLessonRow(info: lesson)
-                }
-                .buttonStyle(RowPressStyle())
-                .contextMenu {
-                    Button {
-                        onChangeSubject(lesson)
-                    } label: {
-                        Label("Fach ändern", systemImage: "books.vertical")
-                    }
-                    Button(role: .destructive) {
-                        onDelete(lesson)
-                    } label: {
-                        Label("Stunde löschen", systemImage: "trash")
-                    }
-                }
+                row(lesson)
                 if index < lessons.count - 1 {
                     // Inset to the rows' own text margin, so the rule starts
                     // where the type does rather than at the card's edge.
@@ -342,6 +503,55 @@ private struct SubjectLessonCard: View {
         // under a pressed first row squares off the top of the card.
         .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
     }
+
+    @ViewBuilder
+    private func row(_ lesson: BackendAPI.LessonInfo) -> some View {
+        if let picking {
+            let isPicked = picking.picked.contains(lesson.id)
+            Button {
+                picking.toggle(lesson)
+            } label: {
+                HStack(spacing: 0) {
+                    Image(systemName: isPicked ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isPicked ? Theme.accent : Color.secondary)
+                        .padding(.leading, 24)
+                        .accessibilityHidden(true)
+                    SubjectLessonRow(info: lesson)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityAddTraits(isPicked ? [.isSelected] : [])
+        } else {
+            NavigationLink {
+                LessonDetailView(api: api, info: lesson)
+            } label: {
+                SubjectLessonRow(info: lesson)
+            }
+            .buttonStyle(RowPressStyle())
+            .contextMenu {
+                Button {
+                    onChangeSubject(lesson)
+                } label: {
+                    Label("Fach ändern", systemImage: "books.vertical")
+                }
+                Button(role: .destructive) {
+                    onDelete(lesson)
+                } label: {
+                    Label("Stunde löschen", systemImage: "trash")
+                }
+            }
+        }
+    }
+}
+
+/// The selection, as a row needs to see it: which lessons are picked, and how
+/// to pick one.
+struct SubjectRowPicking {
+    let picked: Set<String>
+    let toggle: (BackendAPI.LessonInfo) -> Void
 }
 
 /// A row that answers the finger without moving.
@@ -477,6 +687,13 @@ private struct SubjectLessonRow: View {
 }
 
 // MARK: - Numbers the screen prints
+
+/// How many lessons something is about to happen to: "1 Stunde", "12 Stunden".
+/// German counts the noun, so the number cannot simply be printed in front of a
+/// fixed word.
+func lessonCountText(_ count: Int) -> String {
+    "\(count) \(count == 1 ? "Stunde" : "Stunden")"
+}
 
 /// How long a lesson ran: "1 Std 24 Min", "52 Min", "40 s".
 func lessonDurationText(_ seconds: Double) -> String {

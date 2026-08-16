@@ -579,6 +579,13 @@ private extension UITestRuntime {
             ["id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "efforts": ["low", "high", "max"],
              "default_effort": "high", "service_tiers": []],
         ],
+        "gemini_model": "gemini-3.6-flash-low",
+        "gemini_models": [
+            ["id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash",
+             "efforts": ["low", "medium", "high"], "default_effort": "low"],
+            ["id": "gemini-3.1-pro", "label": "Gemini 3.1 Pro",
+             "efforts": ["low", "high"], "default_effort": "low"],
+        ],
     ]
     static var notesObject: [[String: Any]] {
         allNotes.filter { !deletedNoteIDs.contains($0["id"] as? String ?? "") }

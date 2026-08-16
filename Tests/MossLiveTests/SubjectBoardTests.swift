@@ -138,6 +138,13 @@ final class SubjectFiguresTests: XCTestCase {
         XCTAssertEqual(hoursLabel(0).value, "0")
         XCTAssertEqual(hoursLabel(0).unit, "Min")
     }
+
+    /// The count in front of a deletion the student is about to confirm.
+    func testACountIsCounted() {
+        XCTAssertEqual(lessonCountText(1), "1 Stunde")
+        XCTAssertEqual(lessonCountText(12), "12 Stunden")
+        XCTAssertEqual(lessonCountText(0), "0 Stunden")
+    }
 }
 
 /// The board is one list cut into columns that are read one after another. Cut

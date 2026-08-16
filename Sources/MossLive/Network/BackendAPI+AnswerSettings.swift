@@ -1,7 +1,8 @@
 import Foundation
 
-/// AI backend settings: which subscription the server uses, and the ChatGPT
-/// knobs (model, reasoning effort, service tier) the app may tune from Einstellungen.
+/// AI backend settings: which subscription the server uses, and the knobs the
+/// app may turn on it — ChatGPT's model, reasoning effort and service tier,
+/// Gemini's model and effort — from Einstellungen.
 extension BackendAPI {
     struct ServiceTierChoice: Decodable, Sendable, Hashable, Identifiable {
         let id: String
@@ -9,9 +10,12 @@ extension BackendAPI {
         let description: String
     }
 
-    /// One selectable ChatGPT model. `id` "" is the server default model; the
-    /// server reads reasoning and service-tier support from the codex CLI's
-    /// own model catalog, so the app never hardcodes model capabilities.
+    /// One selectable model. `id` "" is the server default model; the server
+    /// reads reasoning and service-tier support from the provider's own CLI
+    /// catalog, so the app never hardcodes model capabilities.
+    ///
+    /// Gemini uses the same shape, where `id` is a model family
+    /// (`gemini-3.6-flash`) and `efforts` are the identifiers it was listed at.
     struct ModelChoice: Decodable, Sendable, Hashable, Identifiable {
         let id: String
         let label: String
@@ -29,6 +33,11 @@ extension BackendAPI {
         var chatgptServiceTier: String? // "default" = standard usage
         let chatgptModels: [ModelChoice]
         let reasoningEfforts: [String]
+        /// The whole Antigravity identifier, effort included
+        /// (`gemini-3.6-flash-low`). Optional so a server from before the app
+        /// could pick one still decodes.
+        var geminiModel: String?
+        let geminiModels: [ModelChoice]?
     }
 
     func answerSettings() async throws -> AnswerSettings {
@@ -42,17 +51,18 @@ extension BackendAPI {
         provider: String,
         model: String,
         reasoningEffort: String,
-        serviceTier: String
+        serviceTier: String,
+        geminiModel: String
     ) async throws {
-        _ = try await request(
-            "/answer/settings",
-            method: "POST",
-            jsonBody: [
-                "provider": provider,
-                "chatgpt_model": model,
-                "chatgpt_reasoning_effort": reasoningEffort,
-                "chatgpt_service_tier": serviceTier,
-            ]
-        )
+        var body: [String: Any] = [
+            "provider": provider,
+            "chatgpt_model": model,
+            "chatgpt_reasoning_effort": reasoningEffort,
+            "chatgpt_service_tier": serviceTier,
+        ]
+        // Left out rather than sent empty: an empty model name is not one, and
+        // the server would rightly refuse the whole request over it.
+        if !geminiModel.isEmpty { body["gemini_model"] = geminiModel }
+        _ = try await request("/answer/settings", method: "POST", jsonBody: body)
     }
 }
