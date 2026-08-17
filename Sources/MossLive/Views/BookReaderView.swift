@@ -603,8 +603,9 @@ private struct InteractivePopGestureDisabler: UIViewRepresentable {
     func updateUIView(_ uiView: AttachingDisableView, context: Context) {}
 }
 
-private final class AttachingDisableView: UIView, UIGestureRecognizerDelegate {
+private final class AttachingDisableView: UIView {
     private weak var observedNavController: UINavigationController?
+    private let blocker = PopGestureBlocker()
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -617,7 +618,7 @@ private final class AttachingDisableView: UIView, UIGestureRecognizerDelegate {
         if let nav = findNavigationController() {
             observedNavController = nav
             nav.interactivePopGestureRecognizer?.isEnabled = false
-            nav.interactivePopGestureRecognizer?.delegate = self
+            nav.interactivePopGestureRecognizer?.delegate = blocker
         }
     }
 
@@ -634,7 +635,9 @@ private final class AttachingDisableView: UIView, UIGestureRecognizerDelegate {
         }
         return nil
     }
+}
 
+private final class PopGestureBlocker: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         false
     }
