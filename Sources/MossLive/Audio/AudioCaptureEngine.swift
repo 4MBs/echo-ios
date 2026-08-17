@@ -1,6 +1,9 @@
 import AVFoundation
 import Foundation
 import os
+#if canImport(UIKit)
+    import UIKit
+#endif
 
 /// Microphone capture -> 16 kHz mono Int16 -> Opus packets.
 ///
@@ -9,10 +12,10 @@ import os
 /// (called on the audio conversion queue — the consumer must be fast and
 /// non-blocking; WebSocketClient.sendAudioFrame is).
 ///
-/// Session config: `.videoChat` + AVAudioEngine voice processing applies
+/// Session config: `.spokenAudio` + AVAudioEngine voice processing applies
 /// Apple's device-tuned noise suppression and automatic gain control;
 /// `.playAndRecord` + background mode `audio` keeps capture alive when the
-/// app is backgrounded (within iOS limits).
+/// app is backgrounded or when the iPad lid is closed.
 final class AudioCaptureEngine {
     enum CaptureError: LocalizedError {
         case microphoneDenied
@@ -56,6 +59,9 @@ final class AudioCaptureEngine {
     private var signalAnalyzer = AudioSignalAnalyzer()
     private var diagnostics = AudioDiagnosticsSnapshot()
     private var interruptionStartedAt: Date?
+    #if canImport(UIKit)
+        private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    #endif
 
     /// Called for every encoded packet (already framed for the wire by the caller).
     var onPacket: (@Sendable (OpusStreamEncoder.Packet) -> Void)?
@@ -100,11 +106,14 @@ final class AudioCaptureEngine {
         }
 
         let session = AVAudioSession.sharedInstance()
-        // The session mode selects voice-appropriate routing and EQ. The actual
-        // noise suppression and AGC are enabled explicitly on the input node in
-        // installTapAndStart(); selecting a mode alone does not turn them on.
-        try session.setCategory(.playAndRecord, mode: .videoChat,
-                                options: [.allowBluetooth, .duckOthers])
+        // `.spokenAudio` keeps recording alive when the screen locks or the iPad
+        // Smart Folio cover closes. Noise suppression and AGC are enabled on the
+        // input node in installTapAndStart().
+        try session.setCategory(
+            .playAndRecord,
+            mode: .spokenAudio,
+            options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .duckOthers]
+        )
         try? session.setPreferredSampleRate(48000)
         try? session.setPreferredIOBufferDuration(0.02)
         do {
@@ -112,6 +121,14 @@ final class AudioCaptureEngine {
         } catch {
             throw Self.activationError(error)
         }
+        #if canImport(UIKit)
+            if backgroundTask == .invalid {
+                backgroundTask = UIApplication.shared
+                    .beginBackgroundTask(withName: "MossLive.AudioCapture") { [weak self] in
+                        self?.log.warning("background capture task assertion expired")
+                    }
+            }
+        #endif
         do {
             encoder = try OpusStreamEncoder(bitrate: bitrate)
             let recordingsRoot = try LocalRecordingStorage.defaultRoot()
@@ -175,12 +192,18 @@ final class AudioCaptureEngine {
     /// Return the shared session to ordinary media playback after recording.
     ///
     /// AVAudioSession keeps its category and mode after deactivation. Leaving
-    /// `.playAndRecord/.videoChat` behind made LessonAudioPlayer believe capture
+    /// `.playAndRecord` behind made LessonAudioPlayer believe capture
     /// still owned the session, so it skipped its `.playback` setup and played
     /// an already well-normalized recording through the quieter communication
     /// path. Voice processing must be disabled while the engine is stopped
     /// before changing to an output-only category.
     private func releaseAudioSession() {
+        #if canImport(UIKit)
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        #endif
         let input = engine.inputNode
         if input.isVoiceProcessingEnabled {
             try? input.setVoiceProcessingEnabled(false)
@@ -472,8 +495,11 @@ final class AudioCaptureEngine {
             // Must match start(): route changes and media-service resets can
             // rebuild the I/O unit, and installTapAndStart() then re-enables
             // voice processing before capture resumes.
-            try session.setCategory(.playAndRecord, mode: .videoChat,
-                                    options: [.allowBluetooth, .duckOthers])
+            try session.setCategory(
+                .playAndRecord,
+                mode: .spokenAudio,
+                options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .duckOthers]
+            )
             try session.setActive(true, options: [])
             try installTapAndStart()
             log.info("audio resumed")
@@ -504,7 +530,7 @@ final class AudioCaptureEngine {
     /// only while retrying, so a locked device recovers unattended.
     private func scheduleResumeRetries() {
         onInterruption?("Aufnahme unterbrochen (Anruf oder Siri), wird automatisch fortgesetzt…")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+        processingQueue.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, self.running, !self.engine.isRunning else { return }
             self.attemptResume(reason: "retry")
         }

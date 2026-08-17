@@ -94,6 +94,33 @@ struct MainTabView: View {
         .navigationSplitViewStyle(.balanced)
         .background(ThreeFingerSwitch(urlString: model.settings.quickSwitchURL))
         .onOpenURL { url in
+            if url.scheme == "echo" {
+                let action = (url.host ?? url.path).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if action == "record" || action == "start-recording" {
+                    Task { @MainActor in
+                        if !model.isRecording {
+                            await model.startRecording()
+                        }
+                    }
+                    return
+                } else if action == "stop-recording" || action == "stop" {
+                    Task { @MainActor in
+                        if model.isRecording {
+                            model.stopRecording()
+                        }
+                    }
+                    return
+                } else if action == "toggle-recording" || action == "toggle" {
+                    Task { @MainActor in
+                        if model.isRecording {
+                            model.stopRecording()
+                        } else {
+                            await model.startRecording()
+                        }
+                    }
+                    return
+                }
+            }
             noteImportCoordinator.receive(url, model: model)
         }
         .onAppear {
