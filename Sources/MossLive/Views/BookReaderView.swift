@@ -107,19 +107,48 @@ struct BookReaderView: View {
         reduceMotion ? nil : .smooth(duration: 0.42)
     }
 
+    private var isAIButtonVisible: Bool {
+        model.settings.showBookAIButton
+    }
+
     private var bookAIButton: some View {
-        Button {
+        ZStack {
+            Label("Seite fragen", systemImage: "sparkles")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.tint)
+                .opacity(isAIButtonVisible ? 1 : 0)
+                .scaleEffect(isAIButtonVisible ? 1 : 0.8)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            withAnimation(assistantAnimation) {
+                if isAIButtonVisible {
+                    askingBookAI = false
+                }
+                model.settings.showBookAIButton.toggle()
+            }
+        }
+        .onTapGesture(count: 1) {
+            guard isAIButtonVisible else { return }
             if !askingBookAI {
                 bookAIDetent = .medium
             }
             withAnimation(assistantAnimation) {
                 askingBookAI.toggle()
             }
-        } label: {
-            Label("Seite fragen", systemImage: "sparkles")
-                .labelStyle(.titleAndIcon)
         }
-        .accessibilityLabel(askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(
+            isAIButtonVisible
+                ? (askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
+                : "Seite fragen"
+        )
+        .accessibilityHint(
+            isAIButtonVisible
+                ? "Zweimal schnell tippen, um den KI-Button auszublenden"
+                : "Zweimal schnell tippen, um den KI-Button wieder einzublenden"
+        )
     }
 
     private var bookMenu: some View {

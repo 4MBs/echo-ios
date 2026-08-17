@@ -260,3 +260,25 @@ final class BookAnswerDecodingTests: XCTestCase {
         XCTAssertThrowsError(try answer(#"{"ok": false, "error": "unknown book"}"#))
     }
 }
+
+/// Settings and visibility toggles for the Book AI button.
+@MainActor
+final class BookAIButtonSettingsTests: XCTestCase {
+    func testBookAIButtonVisibleByDefaultAndPersistsToggle() {
+        let suiteName = "test.mosslive.bookai.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.showBookAIButton, "AI button should be visible by default")
+
+        settings.showBookAIButton = false
+        XCTAssertFalse(settings.showBookAIButton)
+
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertFalse(reloaded.showBookAIButton, "Toggled state should persist in UserDefaults")
+
+        reloaded.showBookAIButton = true
+        XCTAssertTrue(reloaded.showBookAIButton)
+    }
+}

@@ -85,6 +85,12 @@ final class AppSettings {
         didSet { defaults.set(showBookRenaming, forKey: "showBookRenaming") }
     }
 
+    /// Whether a book shows the "Seite fragen" (Book AI) button. Can be toggled
+    /// via double-tap on the button slot in the book reader or from settings.
+    var showBookAIButton: Bool {
+        didSet { defaults.set(showBookAIButton, forKey: "showBookAIButton") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -104,6 +110,7 @@ final class AppSettings {
         // on until switched off, unlike the other flags
         showPageNumberEditor = defaults.object(forKey: "showPageNumberEditor") as? Bool ?? true
         showBookRenaming = defaults.object(forKey: "showBookRenaming") as? Bool ?? true
+        showBookAIButton = defaults.object(forKey: "showBookAIButton") as? Bool ?? true
         recordButtonHue = defaults.double(forKey: "recordButtonHue") // 0 = the red it was designed in
         // migrate the old default: bare goodnotes:// lands in GoodNotes'
         // file-import handler and shows an "unsupported file type" alert;
@@ -120,6 +127,7 @@ final class AppSettings {
             autoStopAtLessonEnd = true
             showPageNumberEditor = true
             showBookRenaming = true
+            showBookAIButton = true
             // Shown in tests so the optional control stays covered; switching
             // it off is covered on its own.
             showRecordingSubjectPicker = true
