@@ -65,6 +65,7 @@ struct BookReaderView: View {
         }
         .navigationTitle(displayedTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .background(InteractivePopGestureDisabler())
         // The editor role keeps the back control compact from its first frame.
         // Without it, iPadOS briefly lays out the previous screen's title and
         // then collapses it to a chevron, which looks like a sideways jump.
@@ -411,15 +412,14 @@ struct PDFKitView: UIViewRepresentable {
             proxy?.step(recognizer.direction == .left ? 1 : -1)
         }
 
-        /// A backwards flick starting at the very left edge belongs to the
-        /// navigation controller, so going back to the library still works.
-        /// Everywhere else it turns the page.
+        /// The student turns pages across the entire spread. Exiting the book
+        /// back to the library is reserved exclusively for the navigation bar back button.
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let swipe = gestureRecognizer as? PageSwipeGestureRecognizer,
                   let view = swipe.view as? BookPDFView
             else { return true }
             guard !view.regionControlsContain(swipe.startPoint) else { return false }
-            return swipe.direction != .right || swipe.startPoint.x > Self.edgeStrip
+            return true
         }
 
         /// The PDF's own scroll view keeps its pan recognizer, and the flick has
@@ -448,9 +448,6 @@ struct PDFKitView: UIViewRepresentable {
             guard let readerView = mine.view, let otherView = other.view else { return false }
             return otherView.isDescendant(of: readerView)
         }
-
-        /// Width of the strip along the left edge reserved for the back swipe.
-        private static let edgeStrip: CGFloat = 40
 
         deinit {
             for observer in observers {
@@ -525,4 +522,27 @@ final class BookRegionSelectionOverlay: UIView {
 
 extension Double {
     var clamped01: Double { min(max(self, 0), 1) }
+}
+
+/// Disables the interactive pop gesture while the reader is active so touches
+/// across the book (page turning, box region selection) never accidentally pop
+/// back to the library shelf.
+private struct InteractivePopGestureDisabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        PopGestureDisablingViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+
+private final class PopGestureDisablingViewController: UIViewController {
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.interactivePopGestureRecognizer?.isEnabled = false
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+    }
 }
