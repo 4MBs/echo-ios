@@ -76,12 +76,21 @@ struct BookReaderView: View {
         // for iPadOS' back and collapsed-sidebar controls.
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                bookAIButton
+                if isAIButtonVisible {
+                    bookAIButton
+                }
                 if model.settings.showBookRenaming {
                     bookMenu
                 }
             }
         }
+        .background(
+            HiddenAIButtonTapRestorer(isHidden: !isAIButtonVisible) {
+                withAnimation(assistantAnimation) {
+                    model.settings.showBookAIButton = true
+                }
+            }
+        )
         .task(id: book.id) { await open() }
         .onChange(of: typedBookTitle) { _, title in
             let limited = String(title.prefix(bookTitleCharacterLimit))
@@ -115,28 +124,12 @@ struct BookReaderView: View {
         model.settings.showBookAIButton
     }
 
-    @ViewBuilder
     private var bookAIButton: some View {
-        if isAIButtonVisible {
-            Button(action: handleAIButtonTap) {
-                Label("Seite fragen", systemImage: "sparkles")
-                    .labelStyle(.titleAndIcon)
-            }
-            .accessibilityLabel(askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
-            .transition(.opacity.combined(with: .scale(scale: 0.85)))
-        } else {
-            Color.clear
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    withAnimation(assistantAnimation) {
-                        model.settings.showBookAIButton = true
-                    }
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Seite fragen")
-                .accessibilityHint("Zweimal schnell tippen, um den KI-Button wieder einzublenden")
+        Button(action: handleAIButtonTap) {
+            Label("Seite fragen", systemImage: "sparkles")
+                .labelStyle(.titleAndIcon)
         }
+        .accessibilityLabel(askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
     }
 
     private func handleAIButtonTap() {
@@ -640,5 +633,65 @@ private final class AttachingDisableView: UIView {
 private final class PopGestureBlocker: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         false
+    }
+}
+
+/// Listens for a double-tap in the top-trailing corner of the window when the
+/// AI button is hidden, bringing it back with zero toolbar platter remnants.
+private struct HiddenAIButtonTapRestorer: UIViewRepresentable {
+    let isHidden: Bool
+    let onRestore: () -> Void
+
+    func makeUIView(context: Context) -> RestoringView {
+        let view = RestoringView()
+        view.isUserInteractionEnabled = false
+        view.isHiddenState = isHidden
+        view.onRestore = onRestore
+        return view
+    }
+
+    func updateUIView(_ uiView: RestoringView, context: Context) {
+        uiView.isHiddenState = isHidden
+        uiView.onRestore = onRestore
+    }
+
+    final class RestoringView: UIView, UIGestureRecognizerDelegate {
+        var isHiddenState = false
+        var onRestore: () -> Void = {}
+        private weak var recognizer: UITapGestureRecognizer?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard let window, recognizer == nil else { return }
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            doubleTap.numberOfTouchesRequired = 1
+            doubleTap.delegate = self
+            doubleTap.cancelsTouchesInView = false
+            window.addGestureRecognizer(doubleTap)
+            recognizer = doubleTap
+        }
+
+        deinit {
+            if let recognizer {
+                recognizer.view?.removeGestureRecognizer(recognizer)
+            }
+        }
+
+        @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard isHiddenState, let window else { return }
+            let loc = gesture.location(in: window)
+            // Top-trailing area where the toolbar item sits
+            if loc.x >= window.bounds.width - 150 && loc.y <= 110 {
+                onRestore()
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
     }
 }
