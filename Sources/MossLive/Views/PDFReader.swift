@@ -84,14 +84,6 @@ struct PDFReader: View {
                 self.selectedRegion = nil
                 proxy.clearRegionSelection()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .readerContainerWillResize)) { _ in
-                guard !reduceMotion else { return }
-                proxy.prepareForAnimatedResize(duration: 0.45)
-            }
-            .onChange(of: askingBookAI) {
-                guard horizontalSizeClass != .compact, !reduceMotion else { return }
-                proxy.prepareForAnimatedResize(duration: 0.48)
-            }
             .onChange(of: pageFieldFocused) { _, focused in
                 if focused {
                     typedPage = ""

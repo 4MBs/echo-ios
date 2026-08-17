@@ -3,11 +3,6 @@ import Observation
 import os
 import SwiftUI
 
-extension Notification.Name {
-    /// Sent synchronously before the system split view starts changing width.
-    static let readerContainerWillResize = Notification.Name("MossLive.readerContainerWillResize")
-}
-
 /// Central state machine + orchestration: audio engine -> WebSocket -> UI.
 @MainActor
 @Observable

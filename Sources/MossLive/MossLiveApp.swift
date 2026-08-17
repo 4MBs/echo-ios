@@ -50,9 +50,6 @@ struct MainTabView: View {
             get: { model.columnVisibility },
             set: { visibility, transaction in
                 guard visibility != model.columnVisibility else { return }
-                // NotificationCenter publishes synchronously, so the open
-                // reader can snapshot its PDF before the first resize frame.
-                NotificationCenter.default.post(name: .readerContainerWillResize, object: nil)
 
                 // A custom binding does not automatically carry the system
                 // sidebar button's transaction across an observable model
