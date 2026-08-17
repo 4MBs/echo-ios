@@ -34,28 +34,6 @@ final class BookPDFView: PDFView {
         addGestureRecognizer(deselectionTap)
     }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window != nil {
-            disableInteractivePopGesture()
-        }
-    }
-
-    private func disableInteractivePopGesture() {
-        var responder: UIResponder? = self
-        while let next = responder?.next {
-            if let nav = next as? UINavigationController {
-                nav.interactivePopGestureRecognizer?.isEnabled = false
-                return
-            }
-            if let vc = next as? UIViewController, let nav = vc.navigationController {
-                nav.interactivePopGestureRecognizer?.isEnabled = false
-                return
-            }
-            responder = next
-        }
-    }
-
     override func layoutSubviews() {
         super.layoutSubviews()
         applyScaleLimits()
@@ -263,26 +241,14 @@ final class BookPDFView: PDFView {
         guard !recognizers.isEmpty else { return }
         let pageSwipes = gestureRecognizers?.compactMap { $0 as? PageSwipeGestureRecognizer } ?? []
         let scrollPan = descendantScrollView(in: self)?.panGestureRecognizer
-        let navPop = enclosingNavigationController?.interactivePopGestureRecognizer
 
         for recognizer in recognizers {
             deselectionTap.require(toFail: recognizer)
             scrollPan?.require(toFail: recognizer)
-            navPop?.require(toFail: recognizer)
             for swipe in pageSwipes {
                 swipe.require(toFail: recognizer)
             }
         }
-    }
-
-    private var enclosingNavigationController: UINavigationController? {
-        var responder: UIResponder? = self
-        while let next = responder?.next {
-            if let nav = next as? UINavigationController { return nav }
-            if let vc = next as? UIViewController, let nav = vc.navigationController { return nav }
-            responder = next
-        }
-        return nil
     }
 
     override func gestureRecognizer(

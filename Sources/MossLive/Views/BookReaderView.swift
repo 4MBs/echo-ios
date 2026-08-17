@@ -74,18 +74,29 @@ struct BookReaderView: View {
         // It now participates in the navigation push instead of popping into
         // place after the PDF loads, and the leading slot remains available
         // for iPadOS' back and collapsed-sidebar controls.
+        // An emptied group is not the same as no group at all. iPadOS keeps
+        // drawing the group's glass platter once its last control goes away —
+        // the grey capsule left behind where the assistant button used to be —
+        // and the button inside it stays alive underneath, so the double tap
+        // meant to bring the control back hit that leftover instead and hid it
+        // again. Emit no group at all when there is nothing to put in it.
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if isAIButtonVisible {
-                    bookAIButton
-                }
-                if model.settings.showBookRenaming {
-                    bookMenu
+            if isAIButtonVisible || model.settings.showBookRenaming {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if isAIButtonVisible {
+                        bookAIButton
+                    }
+                    if model.settings.showBookRenaming {
+                        bookMenu
+                    }
                 }
             }
         }
         .background(
-            HiddenAIButtonTapRestorer(isHidden: !isAIButtonVisible) {
+            HiddenAIButtonTapRestorer(
+                isHidden: !isAIButtonVisible,
+                buttonFrame: rememberedAIButtonFrame
+            ) {
                 withAnimation(assistantAnimation) {
                     model.settings.showBookAIButton = true
                 }
@@ -115,6 +126,7 @@ struct BookReaderView: View {
 
     @State private var lastAITapTime: Date = .distantPast
     @State private var singleAITapWorkItem: DispatchWorkItem?
+    @AppStorage("library.bookAIButtonFrame") private var storedAIButtonFrame = ""
 
     private var assistantAnimation: Animation? {
         reduceMotion ? nil : .smooth(duration: 0.42)
@@ -130,34 +142,67 @@ struct BookReaderView: View {
                 .labelStyle(.titleAndIcon)
         }
         .accessibilityLabel(askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
+        // Remember the spot the control occupies so the double tap that brings
+        // it back can look for exactly that spot. `onGeometryChange` measures
+        // without wrapping the button in anything, which leaves the toolbar's
+        // native styling untouched.
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .global)
+        } action: { frame in
+            rememberAIButtonFrame(frame)
+        }
     }
+
+    /// A second tap has to land inside this window to read as a double tap.
+    private static let aiDoubleTapWindow: TimeInterval = 0.3
 
     private func handleAIButtonTap() {
         let now = Date()
-        if now.timeIntervalSince(lastAITapTime) < 0.35 {
+        guard now.timeIntervalSince(lastAITapTime) >= Self.aiDoubleTapWindow else {
             singleAITapWorkItem?.cancel()
             singleAITapWorkItem = nil
             lastAITapTime = .distantPast
             withAnimation(assistantAnimation) {
-                if askingBookAI {
-                    askingBookAI = false
-                }
+                askingBookAI = false
                 model.settings.showBookAIButton = false
             }
-        } else {
-            lastAITapTime = now
-            let item = DispatchWorkItem {
-                guard isAIButtonVisible else { return }
-                if !askingBookAI {
-                    bookAIDetent = .medium
-                }
-                withAnimation(assistantAnimation) {
-                    askingBookAI.toggle()
-                }
-                lastAITapTime = .distantPast
+            return
+        }
+
+        lastAITapTime = now
+        let item = DispatchWorkItem {
+            singleAITapWorkItem = nil
+            lastAITapTime = .distantPast
+            guard isAIButtonVisible else { return }
+            if !askingBookAI {
+                bookAIDetent = .medium
             }
-            singleAITapWorkItem = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: item)
+            withAnimation(assistantAnimation) {
+                askingBookAI.toggle()
+            }
+        }
+        singleAITapWorkItem = item
+        // Opening the assistant waits for the double-tap window to close, so
+        // the second tap of a real double tap always arrives first. The two
+        // used to be timed independently, which let a slightly slow double tap
+        // open the assistant over the button and lose the tap that follows.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.aiDoubleTapWindow + 0.02, execute: item)
+    }
+
+    /// Where the control last sat, in window coordinates. Persisted because the
+    /// hidden state outlives the app: a reader opened with the control already
+    /// hidden has nothing to measure, but still has to be restorable.
+    private var rememberedAIButtonFrame: CGRect {
+        let parts = storedAIButtonFrame.split(separator: ",").compactMap { Double($0) }
+        guard parts.count == 4, parts[2] > 0, parts[3] > 0 else { return .zero }
+        return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+    }
+
+    private func rememberAIButtonFrame(_ frame: CGRect) {
+        guard frame.width > 0, frame.height > 0 else { return }
+        let encoded = "\(frame.minX),\(frame.minY),\(frame.width),\(frame.height)"
+        if encoded != storedAIButtonFrame {
+            storedAIButtonFrame = encoded
         }
     }
 
@@ -498,12 +543,11 @@ struct PDFKitView: UIViewRepresentable {
 /// A temporary transparent drawing surface above PDFKit. It takes the gesture
 /// while active, which prevents the PDF's scroll view from panning underneath
 /// the student's rectangle, then removes itself as soon as the drag finishes.
-final class BookRegionSelectionOverlay: UIView, UIGestureRecognizerDelegate {
+final class BookRegionSelectionOverlay: UIView {
     var onFinished: ((CGRect) -> Void)?
 
     private let shape = CAShapeLayer()
     private var start = CGPoint.zero
-    private lazy var panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -516,10 +560,6 @@ final class BookRegionSelectionOverlay: UIView, UIGestureRecognizerDelegate {
         shape.lineWidth = 2
         shape.lineDashPattern = [7, 5]
         layer.addSublayer(shape)
-
-        panGesture.cancelsTouchesInView = false
-        panGesture.delegate = self
-        addGestureRecognizer(panGesture)
     }
 
     @available(*, unavailable)
@@ -527,23 +567,15 @@ final class BookRegionSelectionOverlay: UIView, UIGestureRecognizerDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        let point = recognizer.location(in: self)
-        switch recognizer.state {
-        case .began:
-            start = point
-            shape.path = nil
-        case .changed:
-            shape.path = UIBezierPath(roundedRect: rectangle(to: point), cornerRadius: 6).cgPath
-        case .ended:
-            onFinished?(rectangle(to: point))
-        case .cancelled, .failed:
-            shape.path = nil
-        default:
-            break
-        }
-    }
-
+    // Handle the drawing surface's touches directly. A pan recognizer here
+    // still had to arbitrate with PDFKit's private scroll recognizers and could
+    // lose the first drag after the assistant changed the reader's width. The
+    // temporary overlay is the topmost interactive view while selection is
+    // active, so direct touch tracking is deterministic and keeps PDFKit from
+    // scrolling underneath the rectangle. It also has no recognizer that could
+    // be asked to run alongside the back swipe — a pan added here once did,
+    // and answering "yes" to every other recognizer is what let a drag out of
+    // a region box slide back to the shelf.
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let point = touches.first?.location(in: self) else { return }
         start = point
@@ -564,13 +596,6 @@ final class BookRegionSelectionOverlay: UIView, UIGestureRecognizerDelegate {
         shape.path = nil
     }
 
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        true
-    }
-
     private func rectangle(to point: CGPoint) -> CGRect {
         CGRect(
             x: min(start.x, point.x),
@@ -585,89 +610,169 @@ extension Double {
     var clamped01: Double { min(max(self, 0), 1) }
 }
 
-/// Disables the interactive pop gesture while the reader is active so touches
-/// across the book (page turning, box region selection) never accidentally pop
-/// back to the library shelf.
+/// Keeps the interactive pop gesture switched off for as long as the reader is
+/// on screen, so that no drag across the book — turning a page, or pulling out
+/// a region box — can slide back to the shelf. A book is left through the
+/// navigation bar's back button and nothing else.
+///
+/// Switching the recognizer off once, when the reader appears, is not enough:
+/// the navigation stack switches it back on whenever it updates, which is why
+/// the swipe kept coming back. The reader re-asserts the state on every layout
+/// pass and every SwiftUI update, and watches the recognizer on top of that,
+/// then hands back whatever it found when the book closes. Replacing the
+/// recognizer's delegate — the previous attempt — is not an option: it belongs
+/// to the navigation stack, which both overwrites it and needs it back
+/// afterwards for every other screen's swipe.
 private struct InteractivePopGestureDisabler: UIViewRepresentable {
-    func makeUIView(context: Context) -> AttachingDisableView {
-        AttachingDisableView()
+    func makeUIView(context: Context) -> PopGestureDisablingView {
+        PopGestureDisablingView()
     }
 
-    func updateUIView(_ uiView: AttachingDisableView, context: Context) {}
+    func updateUIView(_ uiView: PopGestureDisablingView, context: Context) {
+        uiView.enforceDisabled()
+    }
 }
 
-private final class AttachingDisableView: UIView {
-    private weak var observedNavController: UINavigationController?
-    private let blocker = PopGestureBlocker()
+private final class PopGestureDisablingView: UIView {
+    private weak var navigationController: UINavigationController?
+    private var observation: NSKeyValueObservation?
+    private var enabledBeforeReader: Bool?
+    /// Set while this view is the one writing `isEnabled`, so the observer does
+    /// not answer its own change.
+    private var isAsserting = false
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil else {
-            observedNavController?.interactivePopGestureRecognizer?.isEnabled = true
-            observedNavController?.interactivePopGestureRecognizer?.delegate = nil
-            observedNavController = nil
-            return
-        }
-        if let nav = findNavigationController() {
-            observedNavController = nav
-            nav.interactivePopGestureRecognizer?.isEnabled = false
-            nav.interactivePopGestureRecognizer?.delegate = blocker
+        if window == nil {
+            restore()
+        } else {
+            attach()
         }
     }
 
-    private func findNavigationController() -> UINavigationController? {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        enforceDisabled()
+    }
+
+    func enforceDisabled() {
+        guard let recognizer = navigationController?.interactivePopGestureRecognizer,
+              recognizer.isEnabled
+        else { return }
+        isAsserting = true
+        recognizer.isEnabled = false
+        isAsserting = false
+    }
+
+    private func attach() {
+        guard navigationController == nil,
+              let nav = enclosingNavigationController(),
+              let recognizer = nav.interactivePopGestureRecognizer
+        else { return }
+        navigationController = nav
+        enabledBeforeReader = recognizer.isEnabled
+        observation = recognizer.observe(\.isEnabled, options: [.new]) { [weak self] recognizer, change in
+            guard let self, !isAsserting, change.newValue == true else { return }
+            isAsserting = true
+            recognizer.isEnabled = false
+            isAsserting = false
+        }
+        enforceDisabled()
+    }
+
+    private func restore() {
+        observation = nil
+        if let enabledBeforeReader {
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = enabledBeforeReader
+        }
+        enabledBeforeReader = nil
+        navigationController = nil
+    }
+
+    private func enclosingNavigationController() -> UINavigationController? {
         var responder: UIResponder? = self
         while let next = responder?.next {
             if let nav = next as? UINavigationController {
                 return nav
             }
-            if let vc = next as? UIViewController, let nav = vc.navigationController {
+            if let controller = next as? UIViewController, let nav = controller.navigationController {
                 return nav
             }
             responder = next
         }
         return nil
     }
-}
 
-private final class PopGestureBlocker: NSObject, UIGestureRecognizerDelegate {
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        false
+    deinit {
+        restore()
     }
 }
 
-/// Listens for a double-tap in the top-trailing corner of the window when the
-/// AI button is hidden, bringing it back with zero toolbar platter remnants.
+/// Brings the assistant control back when the student double-taps the spot it
+/// used to sit in. While hidden the control is gone from the toolbar entirely —
+/// that is what keeps the bar free of any leftover platter — so there is
+/// nothing left to tap and the gesture has to be picked up from the window and
+/// matched against the frame the button was last measured at.
 private struct HiddenAIButtonTapRestorer: UIViewRepresentable {
     let isHidden: Bool
+    let buttonFrame: CGRect
     let onRestore: () -> Void
 
     func makeUIView(context: Context) -> RestoringView {
         let view = RestoringView()
         view.isUserInteractionEnabled = false
-        view.isHiddenState = isHidden
+        view.isRestoring = isHidden
+        view.buttonFrame = buttonFrame
         view.onRestore = onRestore
         return view
     }
 
     func updateUIView(_ uiView: RestoringView, context: Context) {
-        uiView.isHiddenState = isHidden
+        uiView.isRestoring = isHidden
+        uiView.buttonFrame = buttonFrame
         uiView.onRestore = onRestore
+        uiView.attachIfNeeded()
     }
 
     final class RestoringView: UIView, UIGestureRecognizerDelegate {
-        var isHiddenState = false
+        var isRestoring = false {
+            didSet {
+                guard isRestoring != oldValue else { return }
+                armedAt = isRestoring ? Date() : nil
+            }
+        }
+
+        var buttonFrame: CGRect = .zero
         var onRestore: () -> Void = {}
         private weak var recognizer: UITapGestureRecognizer?
+        private var armedAt: Date?
+
+        /// How far outside the remembered frame a tap still counts. The control
+        /// is a small circle in the corner, and the finger that put it away is
+        /// not going to come back to the same pixel.
+        private static let tapSlop: CGFloat = 22
+        /// The trailing end of the navigation bar, where the control lives.
+        private static let cornerWidth: CGFloat = 180
+        private static let cornerHeight: CGFloat = 120
+        /// The two taps that put the control away land on the window as well,
+        /// and arrive there after the control is already gone — so without a
+        /// pause they read as "bring it back" and the control never stays
+        /// hidden. Start listening once the gesture that hid it is over.
+        private static let armingDelay: TimeInterval = 0.6
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            guard let window, recognizer == nil else { return }
+            attachIfNeeded()
+        }
+
+        func attachIfNeeded() {
+            guard recognizer == nil, let window else { return }
             let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
             doubleTap.numberOfTapsRequired = 2
             doubleTap.numberOfTouchesRequired = 1
             doubleTap.delegate = self
             doubleTap.cancelsTouchesInView = false
+            doubleTap.delaysTouchesEnded = false
             window.addGestureRecognizer(doubleTap)
             recognizer = doubleTap
         }
@@ -679,12 +784,32 @@ private struct HiddenAIButtonTapRestorer: UIViewRepresentable {
         }
 
         @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-            guard isHiddenState, let window else { return }
-            let loc = gesture.location(in: window)
-            // Top-trailing area where the toolbar item sits
-            if loc.x >= window.bounds.width - 150 && loc.y <= 110 {
-                onRestore()
-            }
+            guard isRestoring, let window, let armedAt,
+                  Date().timeIntervalSince(armedAt) >= Self.armingDelay
+            else { return }
+            guard target(in: window).contains(gesture.location(in: window)) else { return }
+            onRestore()
+        }
+
+        /// The control always sits at the trailing end of the navigation bar,
+        /// so that corner is accepted whether or not anything was measured —
+        /// a reader opened with the control already hidden never gets to
+        /// measure it, and must still be restorable. A measured frame only
+        /// widens the area to wherever the control actually was.
+        private func target(in window: UIWindow) -> CGRect {
+            let corner = CGRect(
+                x: window.bounds.maxX - Self.cornerWidth,
+                y: 0,
+                width: Self.cornerWidth,
+                height: Self.cornerHeight
+            )
+            guard buttonFrame.width > 0, buttonFrame.height > 0 else { return corner }
+            let measured = buttonFrame.insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop)
+            // A toolbar item is measured in the bar's own hosting context, so
+            // treat anything that did not come back in the top trailing corner
+            // as unusable rather than stretching the target across the screen.
+            guard measured.midX > window.bounds.midX, measured.minY < Self.cornerHeight else { return corner }
+            return corner.union(measured)
         }
 
         func gestureRecognizer(
