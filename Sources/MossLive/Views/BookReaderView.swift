@@ -104,6 +104,9 @@ struct BookReaderView: View {
         return String(source.prefix(bookTitleCharacterLimit - 1)) + "…"
     }
 
+    @State private var lastAITapTime: Date = .distantPast
+    @State private var singleAITapWorkItem: DispatchWorkItem?
+
     private var assistantAnimation: Animation? {
         reduceMotion ? nil : .smooth(duration: 0.42)
     }
@@ -112,44 +115,57 @@ struct BookReaderView: View {
         model.settings.showBookAIButton
     }
 
+    @ViewBuilder
     private var bookAIButton: some View {
-        ZStack {
-            Label("Seite fragen", systemImage: "sparkles")
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(.tint)
-                .opacity(isAIButtonVisible ? 1 : 0)
-                .scaleEffect(isAIButtonVisible ? 1 : 0.8)
+        if isAIButtonVisible {
+            Button(action: handleAIButtonTap) {
+                Label("Seite fragen", systemImage: "sparkles")
+                    .labelStyle(.titleAndIcon)
+            }
+            .accessibilityLabel(askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
+            .transition(.opacity.combined(with: .scale(scale: 0.85)))
+        } else {
+            Color.clear
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    withAnimation(assistantAnimation) {
+                        model.settings.showBookAIButton = true
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Seite fragen")
+                .accessibilityHint("Zweimal schnell tippen, um den KI-Button wieder einzublenden")
         }
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
+    }
+
+    private func handleAIButtonTap() {
+        let now = Date()
+        if now.timeIntervalSince(lastAITapTime) < 0.35 {
+            singleAITapWorkItem?.cancel()
+            singleAITapWorkItem = nil
+            lastAITapTime = .distantPast
             withAnimation(assistantAnimation) {
-                if isAIButtonVisible {
+                if askingBookAI {
                     askingBookAI = false
                 }
-                model.settings.showBookAIButton.toggle()
+                model.settings.showBookAIButton = false
             }
+        } else {
+            lastAITapTime = now
+            let item = DispatchWorkItem {
+                guard isAIButtonVisible else { return }
+                if !askingBookAI {
+                    bookAIDetent = .medium
+                }
+                withAnimation(assistantAnimation) {
+                    askingBookAI.toggle()
+                }
+                lastAITapTime = .distantPast
+            }
+            singleAITapWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: item)
         }
-        .onTapGesture(count: 1) {
-            guard isAIButtonVisible else { return }
-            if !askingBookAI {
-                bookAIDetent = .medium
-            }
-            withAnimation(assistantAnimation) {
-                askingBookAI.toggle()
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(
-            isAIButtonVisible
-                ? (askingBookAI ? "Seitenassistent schließen" : "Seite fragen")
-                : "Seite fragen"
-        )
-        .accessibilityHint(
-            isAIButtonVisible
-                ? "Zweimal schnell tippen, um den KI-Button auszublenden"
-                : "Zweimal schnell tippen, um den KI-Button wieder einzublenden"
-        )
     }
 
     private var bookMenu: some View {
