@@ -505,11 +505,12 @@ struct PDFKitView: UIViewRepresentable {
 /// A temporary transparent drawing surface above PDFKit. It takes the gesture
 /// while active, which prevents the PDF's scroll view from panning underneath
 /// the student's rectangle, then removes itself as soon as the drag finishes.
-final class BookRegionSelectionOverlay: UIView {
+final class BookRegionSelectionOverlay: UIView, UIGestureRecognizerDelegate {
     var onFinished: ((CGRect) -> Void)?
 
     private let shape = CAShapeLayer()
     private var start = CGPoint.zero
+    private lazy var panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -522,6 +523,10 @@ final class BookRegionSelectionOverlay: UIView {
         shape.lineWidth = 2
         shape.lineDashPattern = [7, 5]
         layer.addSublayer(shape)
+
+        panGesture.cancelsTouchesInView = false
+        panGesture.delegate = self
+        addGestureRecognizer(panGesture)
     }
 
     @available(*, unavailable)
@@ -529,12 +534,23 @@ final class BookRegionSelectionOverlay: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    // Handle the drawing surface's touches directly. A pan recognizer here
-    // still had to arbitrate with PDFKit's private scroll recognizers and could
-    // lose the first drag after the assistant changed the reader's width. The
-    // temporary overlay is the topmost interactive view while selection is
-    // active, so direct touch tracking is deterministic and keeps PDFKit from
-    // scrolling underneath the rectangle.
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        let point = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began:
+            start = point
+            shape.path = nil
+        case .changed:
+            shape.path = UIBezierPath(roundedRect: rectangle(to: point), cornerRadius: 6).cgPath
+        case .ended:
+            onFinished?(rectangle(to: point))
+        case .cancelled, .failed:
+            shape.path = nil
+        default:
+            break
+        }
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let point = touches.first?.location(in: self) else { return }
         start = point
@@ -555,6 +571,13 @@ final class BookRegionSelectionOverlay: UIView {
         shape.path = nil
     }
 
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+
     private func rectangle(to point: CGPoint) -> CGRect {
         CGRect(
             x: min(start.x, point.x),
@@ -572,22 +595,47 @@ extension Double {
 /// Disables the interactive pop gesture while the reader is active so touches
 /// across the book (page turning, box region selection) never accidentally pop
 /// back to the library shelf.
-private struct InteractivePopGestureDisabler: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> UIViewController {
-        PopGestureDisablingViewController()
+private struct InteractivePopGestureDisabler: UIViewRepresentable {
+    func makeUIView(context: Context) -> AttachingDisableView {
+        AttachingDisableView()
     }
 
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+    func updateUIView(_ uiView: AttachingDisableView, context: Context) {}
 }
 
-private final class PopGestureDisablingViewController: UIViewController {
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        navigationController?.interactivePopGestureRecognizer?.isEnabled = false
+private final class AttachingDisableView: UIView, UIGestureRecognizerDelegate {
+    private weak var observedNavController: UINavigationController?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else {
+            observedNavController?.interactivePopGestureRecognizer?.isEnabled = true
+            observedNavController?.interactivePopGestureRecognizer?.delegate = nil
+            observedNavController = nil
+            return
+        }
+        if let nav = findNavigationController() {
+            observedNavController = nav
+            nav.interactivePopGestureRecognizer?.isEnabled = false
+            nav.interactivePopGestureRecognizer?.delegate = self
+        }
     }
 
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+    private func findNavigationController() -> UINavigationController? {
+        var responder: UIResponder? = self
+        while let next = responder?.next {
+            if let nav = next as? UINavigationController {
+                return nav
+            }
+            if let vc = next as? UIViewController, let nav = vc.navigationController {
+                return nav
+            }
+            responder = next
+        }
+        return nil
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
     }
 }
