@@ -51,6 +51,9 @@ final class AppModel {
     private(set) var recordingSubjectError: String?
     var bannerMessage: String?
 
+    /// Whether recording is currently active or wanted.
+    var isRecording: Bool { wantsRecording }
+
     /// Which place of the app the sidebar is on. Held here rather than in the
     /// shell so a screen can send the student somewhere that answers its empty
     /// state ("Zur Aufnahme") instead of describing it.

@@ -124,6 +124,18 @@ final class TimetableStore {
         guard notifyEnabled else { return }
         let granted = await (try? center.requestAuthorization(options: [.alert, .sound])) ?? false
         guard granted else { return }
+        let recordAction = UNNotificationAction(
+            identifier: "START_RECORDING_ACTION",
+            title: "Aufnahme starten",
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: "LESSON_START",
+            actions: [recordAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
         // The stored plan is enough to schedule from, so a morning without
         // signal still gets its reminders.
         var day = storedDay()
@@ -142,6 +154,8 @@ final class TimetableStore {
                 ? "Zum Aufnehmen tippen"
                 : "Zum Aufnehmen tippen · Raum \(lesson.room)"
             content.sound = .default
+            content.categoryIdentifier = "LESSON_START"
+            content.userInfo = ["action": "start-recording", "lessonId": lesson.id]
             let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: start)
             let request = UNNotificationRequest(
                 identifier: "lesson-\(lesson.id)",
