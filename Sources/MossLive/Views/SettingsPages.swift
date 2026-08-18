@@ -152,6 +152,14 @@ struct LibrarySettingsView: View {
         @Bindable var settings = model.settings
         Form {
             Section {
+                Toggle("KI-Button anzeigen", isOn: $settings.showBookAIButton)
+            } footer: {
+                Text(
+                    "Zeigt im Buch den Knopf „Seite fragen“. Kann auch durch schnelles Doppeltippen auf den Knopf ein- und ausgeblendet werden."
+                )
+            }
+
+            Section {
                 Toggle("Seitenzahlen anpassen", isOn: $settings.showPageNumberEditor)
             } footer: {
                 Text("Zeigt im Buch den Knopf für die gedruckte Seitenzahl. Eingestellte Zahlen bleiben erhalten.")
