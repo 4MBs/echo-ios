@@ -5,6 +5,12 @@ import Speech
 
 /// Live dictation for the chat composer. Recognition uses Apple's speech
 /// service directly; the captured audio is never uploaded to Echo's server.
+///
+/// While a lesson is being recorded the microphone belongs to that recording:
+/// dictation listens in through `SharedMicrophone` and leaves the audio
+/// session alone. Taking it — a second engine on the input node, a category
+/// change, a `setActive(false)` on the way out — ended the lesson recording,
+/// which is the one thing dictation must never cost.
 @MainActor
 @Observable
 final class ChatVoiceInput {
@@ -18,6 +24,16 @@ final class ChatVoiceInput {
     private var task: SFSpeechRecognitionTask?
     private var mockTask: Task<Void, Never>?
     private var hasInputTap = false
+    private var sharedMicrophoneListener: UUID?
+    private var ownsAudioSession = false
+
+    /// `SFSpeechAudioBufferRecognitionRequest` accepts buffers from the audio
+    /// thread, which is where the shared microphone publishes them.
+    private final class RecognitionSink: @unchecked Sendable {
+        private let request: SFSpeechAudioBufferRecognitionRequest
+        init(_ request: SFSpeechAudioBufferRecognitionRequest) { self.request = request }
+        func append(_ buffer: AVAudioPCMBuffer) { request.append(buffer) }
+    }
 
     func toggle() async {
         if isRecording {
@@ -64,18 +80,26 @@ final class ChatVoiceInput {
         request = recognitionRequest
 
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
-            try session.setActive(true)
+            if SharedMicrophone.shared.isCapturing {
+                let sink = RecognitionSink(recognitionRequest)
+                sharedMicrophoneListener = SharedMicrophone.shared.addListener { buffer in
+                    sink.append(buffer)
+                }
+            } else {
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+                try session.setActive(true)
+                ownsAudioSession = true
 
-            let input = audioEngine.inputNode
-            let format = input.outputFormat(forBus: 0)
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-                recognitionRequest.append(buffer)
+                let input = audioEngine.inputNode
+                let format = input.outputFormat(forBus: 0)
+                input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                    recognitionRequest.append(buffer)
+                }
+                hasInputTap = true
+                audioEngine.prepare()
+                try audioEngine.start()
             }
-            hasInputTap = true
-            audioEngine.prepare()
-            try audioEngine.start()
             isRecording = true
 
             task = recognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, error in
@@ -98,7 +122,9 @@ final class ChatVoiceInput {
     }
 
     func stop() {
-        guard isRecording || task != nil || mockTask != nil || hasInputTap else { return }
+        guard isRecording || task != nil || mockTask != nil || hasInputTap
+            || sharedMicrophoneListener != nil
+        else { return }
         request?.endAudio()
         cleanup()
     }
@@ -106,6 +132,10 @@ final class ChatVoiceInput {
     private func cleanup() {
         mockTask?.cancel()
         mockTask = nil
+        if let listener = sharedMicrophoneListener {
+            SharedMicrophone.shared.removeListener(listener)
+            sharedMicrophoneListener = nil
+        }
         if audioEngine.isRunning { audioEngine.stop() }
         if hasInputTap {
             audioEngine.inputNode.removeTap(onBus: 0)
@@ -116,6 +146,10 @@ final class ChatVoiceInput {
         request = nil
         isRecording = false
         if UITestRuntime.isEnabled { return }
+        // Only the session this class activated may be deactivated here: doing
+        // it to a session a lesson recording owns stops that recording.
+        guard ownsAudioSession else { return }
+        ownsAudioSession = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 

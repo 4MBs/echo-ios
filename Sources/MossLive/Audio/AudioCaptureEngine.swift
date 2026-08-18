@@ -55,10 +55,19 @@ final class AudioCaptureEngine {
     private var encoder: OpusStreamEncoder?
     private var recordingWriter: LocalRecordingWriter?
     private let processingQueue = DispatchQueue(label: "com.fourmbs.mosslive.audio", qos: .userInitiated)
+    /// Serializes rebuilding capture (route change, interruption, stall) away
+    /// from both the audio queue and the main thread.
+    private let controlQueue = DispatchQueue(label: "com.fourmbs.mosslive.audio.control", qos: .userInitiated)
     private(set) var running = false
     private var signalAnalyzer = AudioSignalAnalyzer()
     private var diagnostics = AudioDiagnosticsSnapshot()
     private var interruptionStartedAt: Date?
+    /// When the last microphone buffer arrived, and the timer that notices it
+    /// stopped arriving. Read and written on `processingQueue`.
+    private var lastBufferAt = Date()
+    private var stallTimer: DispatchSourceTimer?
+    private var stallReported = false
+    private var lastResumeAttemptAt = Date.distantPast
     #if canImport(UIKit)
         private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -165,12 +174,16 @@ final class AudioCaptureEngine {
             throw error
         }
         running = true
+        startStallWatchdog()
     }
 
     @discardableResult
     func stop() -> URL? {
         guard running else { return nil }
         running = false
+        stallTimer?.cancel()
+        stallTimer = nil
+        SharedMicrophone.shared.end()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         // Tear down on the processing queue: tap callbacks already enqueued
@@ -288,12 +301,19 @@ final class AudioCaptureEngine {
                 }
                 return
             }
+            // Anything else that wants the microphone listens in rather than
+            // taking it: a second engine on this input node would end capture.
+            SharedMicrophone.shared.publish(ownedBuffer)
             self?.processingQueue.async {
                 self?.handleTap(buffer: ownedBuffer)
             }
         }
         engine.prepare()
         try engine.start()
+        SharedMicrophone.shared.begin(format: hardwareFormat)
+        processingQueue.async { [weak self] in
+            self?.lastBufferAt = Date()
+        }
         log.info("capture running: hw=\(hardwareFormat.sampleRate)Hz ch=\(hardwareFormat.channelCount)")
         log.info("capture processing: voice=\(input.isVoiceProcessingEnabled) agc=\(input.isVoiceProcessingAGCEnabled)")
     }
@@ -301,6 +321,11 @@ final class AudioCaptureEngine {
     // MARK: - Conversion
 
     private func handleTap(buffer: AVAudioPCMBuffer) {
+        lastBufferAt = Date()
+        if stallReported {
+            stallReported = false
+            onResumed?()
+        }
         guard let converter, let archiveConverter, let encoder else { return }
 
         if let archiveBuffer = convert(buffer, using: archiveConverter, to: archiveFormat) {
@@ -437,7 +462,7 @@ final class AudioCaptureEngine {
             // Always try to resume, even without .shouldResume: during class
             // the device is locked in a pocket — "tap to resume" is exactly
             // what the user cannot do.
-            attemptResume(reason: "interruption ended")
+            requestResume(reason: "interruption ended")
         @unknown default:
             break
         }
@@ -470,17 +495,33 @@ final class AudioCaptureEngine {
         )
         // Apple: after a media-services reset everything must be rebuilt,
         // including the session configuration.
-        attemptResume(reason: "media services reset")
+        requestResume(reason: "media services reset")
     }
 
     private func restartEngine(reason: String) {
-        guard running else { return }
-        log.info("restarting audio engine: \(reason)")
-        engine.stop()
-        do {
-            try installTapAndStart()
-        } catch {
-            scheduleResumeRetries()
+        controlQueue.async { [weak self] in
+            guard let self, self.running else { return }
+            log.info("restarting audio engine: \(reason)")
+            engine.stop()
+            do {
+                try installTapAndStart()
+            } catch {
+                scheduleResumeRetries()
+            }
+        }
+    }
+
+    /// Rebuild capture, off both the main thread and the audio queue.
+    ///
+    /// Every resume runs on `controlQueue`, and never on `processingQueue`:
+    /// `installTapAndStart()` waits on the audio queue to swap the converters,
+    /// so a retry that started there deadlocked the queue that writes the
+    /// recording. The recording then stopped for good at the first
+    /// interruption — a phone call, Siri, iOS dictation — with the engine
+    /// still reporting itself as running and nothing left to notice.
+    private func requestResume(reason: String) {
+        controlQueue.async { [weak self] in
+            self?.attemptResume(reason: reason)
         }
     }
 
@@ -488,6 +529,11 @@ final class AudioCaptureEngine {
     /// On failure, keeps retrying in the background instead of giving up.
     private func attemptResume(reason: String) {
         guard running else { return }
+        #if DEBUG
+            // The invariant this method depends on, checked where a crash is a
+            // test failure rather than a lost lesson.
+            dispatchPrecondition(condition: .notOnQueue(processingQueue))
+        #endif
         log.info("resuming audio after: \(reason)")
         engine.stop()
         do {
@@ -528,12 +574,64 @@ final class AudioCaptureEngine {
     /// Retries every few seconds while recording is wanted and the engine is
     /// down (a phone call can hold the mic for minutes). Surfaces a banner
     /// only while retrying, so a locked device recovers unattended.
-    private func scheduleResumeRetries() {
-        onInterruption?("Aufnahme unterbrochen (Anruf oder Siri), wird automatisch fortgesetzt…")
-        processingQueue.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self, self.running, !self.engine.isRunning else { return }
-            self.attemptResume(reason: "retry")
+    private func scheduleResumeRetries(
+        message: String = "Aufnahme unterbrochen (Anruf oder Siri), wird automatisch fortgesetzt…"
+    ) {
+        onInterruption?(message)
+        controlQueue.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, self.running else { return }
+            // An engine that reports itself as running but delivers nothing is
+            // exactly the state the watchdog exists for, so do not skip it.
+            let silent = processingQueue.sync { Date().timeIntervalSince(lastBufferAt) }
+            guard !engine.isRunning || silent > Self.stallSeconds else { return }
+            attemptResume(reason: "retry")
         }
+    }
+
+    /// How long the microphone may deliver nothing before capture is rebuilt,
+    /// and how long a rebuild is given before another one is attempted.
+    private static let stallSeconds: TimeInterval = 4
+
+    /// Notices a microphone that went quiet without saying so.
+    ///
+    /// iOS keyboard dictation, a Siri request or another app taking the input
+    /// does not always arrive as an interruption that ends — the tap simply
+    /// stops being called while `AVAudioEngine` still reports itself as
+    /// running. Nothing then rebuilt capture, so a lesson ended silently at the
+    /// moment the student dictated a message, an hour before they noticed.
+    /// Buffers arrive every ~20 ms, in silence too: four seconds without one
+    /// means the microphone is gone, not that the room is quiet.
+    private func startStallWatchdog() {
+        stallTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: processingQueue)
+        timer.schedule(deadline: .now() + Self.stallSeconds, repeating: 2)
+        timer.setEventHandler { [weak self] in
+            guard let self, running else { return }
+            let now = Date()
+            guard now.timeIntervalSince(lastBufferAt) > Self.stallSeconds,
+                  now.timeIntervalSince(lastResumeAttemptAt) > Self.stallSeconds
+            else { return }
+            let silence = now.timeIntervalSince(lastBufferAt)
+            lastResumeAttemptAt = now
+            if !stallReported {
+                stallReported = true
+                record(
+                    AudioDiagnosticEvent(
+                        kind: .lostAudio,
+                        message: String(
+                            format: "Kein Mikrofonsignal seit %.0f s (Diktat oder andere App)", silence
+                        )
+                    )
+                )
+                onInterruption?(
+                    "Mikrofon von einer anderen Funktion belegt (z. B. Diktat) – "
+                        + "die Aufnahme läuft automatisch weiter…"
+                )
+            }
+            requestResume(reason: String(format: "no audio for %.1fs", silence))
+        }
+        timer.resume()
+        stallTimer = timer
     }
 
     private func recordLostBuffer(_ message: String) {
