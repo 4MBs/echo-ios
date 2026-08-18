@@ -125,7 +125,6 @@ struct BookReaderView: View {
     }
 
     @State private var lastAITapTime: Date = .distantPast
-    @State private var singleAITapWorkItem: DispatchWorkItem?
     @AppStorage("library.bookAIButtonFrame") private var storedAIButtonFrame = ""
 
     private var assistantAnimation: Animation? {
@@ -156,11 +155,16 @@ struct BookReaderView: View {
     /// A second tap has to land inside this window to read as a double tap.
     private static let aiDoubleTapWindow: TimeInterval = 0.3
 
+    /// The first tap acts at once and the second one takes it back, rather than
+    /// every tap waiting to find out whether another is coming. Holding the
+    /// assistant back for the length of the double-tap window is the textbook
+    /// way to tell the two apart, but it puts that delay on the common tap to
+    /// serve the rare one, and it was plainly felt. The panel animates from
+    /// wherever it has got to, so a double tap reads as one movement — and
+    /// closing the assistant is what a double tap does anyway.
     private func handleAIButtonTap() {
         let now = Date()
         guard now.timeIntervalSince(lastAITapTime) >= Self.aiDoubleTapWindow else {
-            singleAITapWorkItem?.cancel()
-            singleAITapWorkItem = nil
             lastAITapTime = .distantPast
             withAnimation(assistantAnimation) {
                 askingBookAI = false
@@ -170,23 +174,12 @@ struct BookReaderView: View {
         }
 
         lastAITapTime = now
-        let item = DispatchWorkItem {
-            singleAITapWorkItem = nil
-            lastAITapTime = .distantPast
-            guard isAIButtonVisible else { return }
-            if !askingBookAI {
-                bookAIDetent = .medium
-            }
-            withAnimation(assistantAnimation) {
-                askingBookAI.toggle()
-            }
+        if !askingBookAI {
+            bookAIDetent = .medium
         }
-        singleAITapWorkItem = item
-        // Opening the assistant waits for the double-tap window to close, so
-        // the second tap of a real double tap always arrives first. The two
-        // used to be timed independently, which let a slightly slow double tap
-        // open the assistant over the button and lose the tap that follows.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.aiDoubleTapWindow + 0.02, execute: item)
+        withAnimation(assistantAnimation) {
+            askingBookAI.toggle()
+        }
     }
 
     /// Where the control last sat, in window coordinates. Persisted because the
@@ -635,10 +628,13 @@ private struct InteractivePopGestureDisabler: UIViewRepresentable {
 
 private final class PopGestureDisablingView: UIView {
     private weak var navigationController: UINavigationController?
-    private var observation: NSKeyValueObservation?
-    private var enabledBeforeReader: Bool?
-    /// Set while this view is the one writing `isEnabled`, so the observer does
-    /// not answer its own change.
+    /// Every recognizer that can take the reader off the stack, each with the
+    /// state it was found in so the rest of the app gets it back untouched.
+    private var blocked: [(recognizer: UIGestureRecognizer, wasEnabled: Bool)] = []
+    private var observations: [NSKeyValueObservation] = []
+    private weak var touchWatch: TouchDownWatcher?
+    /// Set while this view is the one writing `isEnabled`, so the observers do
+    /// not answer their own change.
     private var isAsserting = false
 
     override func didMoveToWindow() {
@@ -646,7 +642,7 @@ private final class PopGestureDisablingView: UIView {
         if window == nil {
             restore()
         } else {
-            attach()
+            enforceDisabled()
         }
     }
 
@@ -655,37 +651,80 @@ private final class PopGestureDisablingView: UIView {
         enforceDisabled()
     }
 
+    /// Retries the lookup every time, rather than only when this view first
+    /// lands in a window: the navigation controller is not reliably reachable
+    /// up the responder chain that early, and a disabler that gave up after one
+    /// look sat inert for the whole reading session while the swipe kept
+    /// working.
     func enforceDisabled() {
-        guard let recognizer = navigationController?.interactivePopGestureRecognizer,
-              recognizer.isEnabled
-        else { return }
+        attachIfNeeded()
+        installTouchWatchIfNeeded()
+        guard !isAsserting else { return }
         isAsserting = true
-        recognizer.isEnabled = false
+        for entry in blocked where entry.recognizer.isEnabled {
+            entry.recognizer.isEnabled = false
+        }
         isAsserting = false
     }
 
-    private func attach() {
-        guard navigationController == nil,
-              let nav = enclosingNavigationController(),
-              let recognizer = nav.interactivePopGestureRecognizer
-        else { return }
+    private func attachIfNeeded() {
+        guard navigationController == nil, let nav = enclosingNavigationController() else { return }
         navigationController = nav
-        enabledBeforeReader = recognizer.isEnabled
-        observation = recognizer.observe(\.isEnabled, options: [.new]) { [weak self] recognizer, change in
-            guard let self, !isAsserting, change.newValue == true else { return }
-            isAsserting = true
-            recognizer.isEnabled = false
-            isAsserting = false
+
+        // The navigation stack does not always pop through the recognizer it
+        // publishes, so take every edge pan on its view as well rather than
+        // trusting `interactivePopGestureRecognizer` to be the only way out.
+        var found: [UIGestureRecognizer] = []
+        if let published = nav.interactivePopGestureRecognizer {
+            found.append(published)
         }
-        enforceDisabled()
+        for recognizer in nav.view.gestureRecognizers ?? [] where recognizer is UIScreenEdgePanGestureRecognizer {
+            found.append(recognizer)
+        }
+
+        var seen = Set<ObjectIdentifier>()
+        blocked = found
+            .filter { seen.insert(ObjectIdentifier($0)).inserted }
+            .map { (recognizer: $0, wasEnabled: $0.isEnabled) }
+
+        observations = blocked.map { entry in
+            entry.recognizer.observe(\.isEnabled, options: [.new]) { [weak self] recognizer, change in
+                guard let self, !isAsserting, change.newValue == true else { return }
+                isAsserting = true
+                recognizer.isEnabled = false
+                isAsserting = false
+            }
+        }
+    }
+
+    /// Nothing else here can promise the block is still in place when it
+    /// matters: the navigation stack switches the gesture back on to its own
+    /// schedule, and there is no guarantee of a layout pass between that and
+    /// the next touch. Re-asserting the moment a finger lands closes that gap,
+    /// early enough that no recognizer has yet decided it is a back swipe.
+    private func installTouchWatchIfNeeded() {
+        guard touchWatch == nil, !blocked.isEmpty, let window else { return }
+        let watcher = TouchDownWatcher()
+        watcher.onTouchDown = { [weak self] in self?.enforceDisabled() }
+        watcher.cancelsTouchesInView = false
+        watcher.delaysTouchesBegan = false
+        watcher.delaysTouchesEnded = false
+        window.addGestureRecognizer(watcher)
+        touchWatch = watcher
     }
 
     private func restore() {
-        observation = nil
-        if let enabledBeforeReader {
-            navigationController?.interactivePopGestureRecognizer?.isEnabled = enabledBeforeReader
+        observations = []
+        isAsserting = true
+        for entry in blocked {
+            entry.recognizer.isEnabled = entry.wasEnabled
         }
-        enabledBeforeReader = nil
+        isAsserting = false
+        blocked = []
+        if let touchWatch {
+            touchWatch.view?.removeGestureRecognizer(touchWatch)
+        }
+        touchWatch = nil
         navigationController = nil
     }
 
@@ -705,6 +744,19 @@ private final class PopGestureDisablingView: UIView {
 
     deinit {
         restore()
+    }
+}
+
+/// Reports every touch-down in the window and then gets out of the way. It
+/// fails itself immediately, so it never competes with anything and never
+/// swallows a touch.
+private final class TouchDownWatcher: UIGestureRecognizer {
+    var onTouchDown: (() -> Void)?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        onTouchDown?()
+        state = .failed
     }
 }
 
