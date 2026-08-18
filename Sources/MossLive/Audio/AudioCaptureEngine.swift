@@ -582,7 +582,7 @@ final class AudioCaptureEngine {
             guard let self, self.running else { return }
             // An engine that reports itself as running but delivers nothing is
             // exactly the state the watchdog exists for, so do not skip it.
-            let silent = processingQueue.sync { Date().timeIntervalSince(lastBufferAt) }
+            let silent = processingQueue.sync { Date().timeIntervalSince(self.lastBufferAt) }
             guard !engine.isRunning || silent > Self.stallSeconds else { return }
             attemptResume(reason: "retry")
         }
