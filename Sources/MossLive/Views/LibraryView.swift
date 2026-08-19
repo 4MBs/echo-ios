@@ -3,7 +3,9 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @State private var books: [BackendAPI.Book] = []
-    @State private var downloadedBookIDs: Set<String> = []
+    /// Which books are already on the iPad. `nil` until the disk has actually
+    /// been read: "not looked at yet" is not the same answer as "not there".
+    @State private var downloadedBookIDs: Set<String>?
     @State private var loading = true
     @State private var loadError: Error?
 
@@ -15,6 +17,10 @@ struct LibraryView: View {
                 .navigationTitle("Bibliothek")
         }
         .task { await load() }
+        // Which books are on the iPad is a question for the file system and
+        // not for the server, so it is asked here rather than at the end of
+        // `load()` — see `refreshDownloadedBooks()`.
+        .task(id: books) { await refreshDownloadedBooks() }
     }
 
     @ViewBuilder private var content: some View {
@@ -60,14 +66,18 @@ struct LibraryView: View {
     /// untappable. A book that cannot be fetched is better off opening a reader
     /// that says so and offers to try again — which is what it already does.
     @ViewBuilder private func shelfItem(_ book: BackendAPI.Book) -> some View {
-        let downloaded = downloadedBookIDs.contains(book.id)
-        let needsConnection = !downloaded && !model.connectivity.isOnline
+        // Only a finished scan may dim a cover. Until one has finished the
+        // book is shown as being here: telling a student to download a book
+        // that is already on their iPad is the mistake they see, while the
+        // opposite one costs a tap and a reader that explains itself.
+        let missing = downloadedBookIDs?.contains(book.id) == false
+        let needsConnection = missing && !model.connectivity.isOnline
         NavigationLink {
             // The destination owns the exact book that was tapped, so a shelf
             // refresh can replace `books` while a large PDF is opening without
             // invalidating the active route.
             BookReaderView(api: api, book: book) {
-                downloadedBookIDs.insert(book.id)
+                downloadedBookIDs = (downloadedBookIDs ?? []).union([book.id])
             }
         } label: {
             BookCover(api: api, book: book, unavailable: needsConnection)
@@ -95,14 +105,25 @@ struct LibraryView: View {
             if books.isEmpty { loadError = error }
         }
         loading = false
-        await refreshDownloadedBooks()
     }
 
     /// File-system probes do not belong in `body`: a split-view resize can
     /// redraw every shelf tile many times per second. Scan once off the main
     /// actor, then let all redraws use this in-memory set.
+    ///
+    /// The scan follows the shelf's contents and nothing else. Sequenced
+    /// after the list request instead, it could only answer once that request
+    /// had — and away from the server `/library` does not fail quickly: the
+    /// address is a VPN one, so the packets leave and nothing comes back
+    /// until the hundred-second timeout gives up. For all of that time the
+    /// shelf knew nothing about the iPad's own files and offered a download
+    /// for every book already on it — each of which then opened instantly
+    /// from disk when it was tapped.
     private func refreshDownloadedBooks() async {
         let snapshot = books
+        // There is nothing to answer yet, and answering "none of them" would
+        // be read as "none of them are downloaded".
+        guard !snapshot.isEmpty else { return }
         let available = await Task.detached(priority: .utility) {
             Set(snapshot.compactMap { book in
                 BackendAPI.cachedBook(id: book.id) == nil ? nil : book.id

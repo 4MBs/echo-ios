@@ -88,7 +88,9 @@ final class AppModel {
     init() {
         settings = AppSettings()
         if UITestRuntime.isEnabled {
-            let unavailableScenarios: Set<UITestRuntime.Scenario> = [.offline, .unauthorized, .serverError]
+            let unavailableScenarios: Set<UITestRuntime.Scenario> = [
+                .offline, .offlineStalled, .unauthorized, .serverError,
+            ]
             aiConfiguration = AIConfigurationStore(
                 settings: unavailableScenarios.contains(UITestRuntime.scenario) ? nil : UITestRuntime.answerSettings,
                 persistOperation: { _, _ in
@@ -573,7 +575,7 @@ final class AppModel {
             key: OfflineCache.Key.timetableSubjects
         ) ?? []
         recordingSubjectSelection.refresh(catalogue: subjects, current: timetable.lessonForRecording())
-        connectivity.configureForUITests(online: UITestRuntime.scenario != .offline)
+        connectivity.configureForUITests(online: !UITestRuntime.scenario.isOffline)
         switch UITestRuntime.scenario {
         case .recording:
             applyUITestRecordingState()
@@ -586,7 +588,7 @@ final class AppModel {
             phase = .error("Deterministischer Testfehler.")
         case .unauthorized:
             phase = .error("Testzugang abgelehnt.")
-        case .offline:
+        case .offline, .offlineStalled:
             connectivity.configureForUITests(online: false)
         default:
             break
