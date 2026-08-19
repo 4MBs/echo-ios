@@ -131,12 +131,7 @@ final class AudioCaptureEngine {
             throw Self.activationError(error)
         }
         #if canImport(UIKit)
-            if backgroundTask == .invalid {
-                backgroundTask = UIApplication.shared
-                    .beginBackgroundTask(withName: "MossLive.AudioCapture") { [weak self] in
-                        self?.log.warning("background capture task assertion expired")
-                    }
-            }
+            beginBackgroundAssertion()
         #endif
         do {
             encoder = try OpusStreamEncoder(bitrate: bitrate)
@@ -201,6 +196,68 @@ final class AudioCaptureEngine {
         log.info("capture stopped")
         return manifestURL
     }
+
+    #if canImport(UIKit)
+        /// Hold a background task assertion while recording.
+        ///
+        /// Background mode `audio` is what really keeps capture alive; this is
+        /// the cushion for the window in which it does not — the seconds after
+        /// the microphone is taken and before it comes back.
+        ///
+        /// `backgroundTask` is only ever touched here and in
+        /// `releaseAudioSession()`, both on the main thread: capture is rebuilt
+        /// on `controlQueue`, and UIApplication is not to be called from there.
+        ///
+        /// `ifRecording` is for the re-take after a rebuild — recording may have
+        /// been stopped between the control queue asking and this running, and
+        /// an assertion taken after `releaseAudioSession()` is never ended.
+        private func beginBackgroundAssertion(ifRecording: Bool = false) {
+            guard Thread.isMainThread else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.beginBackgroundAssertion(ifRecording: ifRecording)
+                }
+                return
+            }
+            guard !ifRecording || running else { return }
+            guard backgroundTask == .invalid else { return }
+            backgroundTask = UIApplication.shared
+                .beginBackgroundTask(withName: "MossLive.AudioCapture") { [weak self] in
+                    self?.backgroundAssertionExpired()
+                }
+        }
+
+        /// iOS **terminates** an app that lets a background task expire without
+        /// ending it — the expiration handler used to only write a log line.
+        ///
+        /// That is how a lesson ended for good the moment something else took
+        /// the microphone: iOS keyboard dictation interrupts the audio session,
+        /// the app is in the background with nothing keeping it awake, the
+        /// assertion runs out ~30 s later and the app is killed rather than
+        /// suspended. Killed, it loses the id of the server session that is
+        /// still being held open for it, so the recording the student starts
+        /// again is a second lesson instead of the rest of the first one — on
+        /// 19 August that happened three times, taking 8 to 12 minutes of each
+        /// hour with it. Ending the assertion turns that into a suspend the app
+        /// can come back from.
+        ///
+        /// Nothing is re-taken here: the budget is spent, and asking again in
+        /// the handler would only expire again. `installTapAndStart()` takes a
+        /// fresh one once the microphone is actually delivering audio.
+        private func backgroundAssertionExpired() {
+            let expired = backgroundTask
+            backgroundTask = .invalid
+            guard expired != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(expired)
+            log.warning("background capture task assertion expired")
+            record(
+                AudioDiagnosticEvent(
+                    kind: .transport,
+                    message: "Hintergrundzeit abgelaufen – die Aufnahme läuft weiter, sobald das "
+                        + "Mikrofon wieder frei ist"
+                )
+            )
+        }
+    #endif
 
     /// Return the shared session to ordinary media playback after recording.
     ///
@@ -310,6 +367,12 @@ final class AudioCaptureEngine {
         }
         engine.prepare()
         try engine.start()
+        #if canImport(UIKit)
+            // Capture is back, so take the cushion again if it expired while
+            // the microphone was gone. (`start()` takes the first one itself,
+            // before `running` is set.)
+            beginBackgroundAssertion(ifRecording: true)
+        #endif
         SharedMicrophone.shared.begin(format: hardwareFormat)
         processingQueue.async { [weak self] in
             self?.lastBufferAt = Date()
