@@ -68,6 +68,23 @@ struct FolderCrease: Shape {
     }
 }
 
+private extension View {
+    /// Take exactly `limit` lines of height whether or not the text fills them,
+    /// or as many as the text needs when there is no limit.
+    ///
+    /// The reserving is the point. A tile sized from its own content is a tile
+    /// whose size depends on how long a subject happens to be called, and a
+    /// grid of those does not line up.
+    @ViewBuilder
+    func reservingLines(_ limit: Int?) -> some View {
+        if let limit {
+            lineLimit(limit, reservesSpace: true)
+        } else {
+            lineLimit(nil)
+        }
+    }
+}
+
 /// One subject folder: its colour, its icon, its name and how much is in it.
 struct SubjectFolderTile: View {
     let name: String
@@ -87,6 +104,15 @@ struct SubjectFolderTile: View {
     /// grid of equal cards is what makes it read as a shelf. At accessibility
     /// sizes it grows to whatever the name and the count need instead: the text
     /// scales the whole way rather than being capped or cropped by the tile.
+    ///
+    /// "Equal" is why `label` reserves its lines rather than merely limiting
+    /// them. `aspectRatio(_:contentMode: .fit)` is handed a column width and no
+    /// height, so it resolves the height from what is inside — and then scales
+    /// the *width* to match. A name that wrapped onto a second line therefore
+    /// made its whole folder bigger than its neighbours in both directions:
+    /// Klassenleitungsstunde and Wirtschaft/Politik stood out of a shelf of
+    /// Englisch and Spanisch. Reserved lines make that height the same for
+    /// every subject, whatever it is called.
     @ViewBuilder private var folder: some View {
         if dynamicTypeSize.isAccessibilitySize {
             silhouette
@@ -127,9 +153,11 @@ struct SubjectFolderTile: View {
             Text(name)
                 .font(.headline)
                 .foregroundStyle(.primary)
-                // Two lines are the tile's budget while it holds its shape. Once
-                // it grows with the text, nothing has to be dropped at all.
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                // Two lines are the tile's budget while it holds its shape, and
+                // it spends both whether or not the name needs them — a folder
+                // may not be a different size from the one beside it. Once the
+                // tile grows with the text, nothing has to be dropped at all.
+                .reservingLines(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .minimumScaleFactor(0.75)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -140,7 +168,10 @@ struct SubjectFolderTile: View {
             Text(countLabel)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                // One reserved line: "Keine Aufnahmen" is the longest this ever
+                // says, and it fits the narrowest column with the scale factor
+                // to spare. Two would only add empty tile under every folder.
+                .reservingLines(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .minimumScaleFactor(0.75)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 2)

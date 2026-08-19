@@ -485,10 +485,15 @@ private extension UITestRuntime {
         ]
     }
 
+    // A real timetable is not all short words: "Klassenleitungsstunde" wraps
+    // onto a second line in a folder that "Physik" fills half of. The grid has
+    // to stay a grid across that, so the fixture carries one of each.
     static let subjectsObject: [String: Any] = ["subjects": [
         ["short": "MAT", "long": "Mathematik", "name": "Mathematik", "teachers": ["Frau Beispiel"]],
         ["short": "BIO", "long": "Biologie", "name": "Biologie", "teachers": ["Herr Muster"]],
         ["short": "PHY", "long": "Physik", "name": "Physik", "teachers": []],
+        ["short": "KL", "long": "Klassenleitungsstunde", "name": "Klassenleitungsstunde",
+         "teachers": ["Frau Beispiel"]],
     ]]
 
     static let booksObject: [String: Any] = ["books": [
