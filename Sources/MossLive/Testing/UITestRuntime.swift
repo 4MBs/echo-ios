@@ -9,6 +9,11 @@ enum UITestRuntime {
         case empty
         case loading
         case offline
+        /// Offline in the way that hurts: the machine is reachable only over
+        /// the VPN, so a request to it is not refused — it leaves and nothing
+        /// ever comes back. Every screen still has to be right long before
+        /// the timeout gives up.
+        case offlineStalled
         case unauthorized
         case serverError
         case recording
@@ -20,6 +25,10 @@ enum UITestRuntime {
         /// A finished 48 kHz safety recording exists on this device for the
         /// seeded lesson, which is what unlocks manual re-transcription.
         case safetyRecording
+
+        /// Both offline scenarios leave the app in the same place — the server
+        /// cannot be reached. They differ only in how long it takes to find out.
+        var isOffline: Bool { self == .offline || self == .offlineStalled }
     }
 
     static let isEnabled = ProcessInfo.processInfo.arguments.contains("-UITesting")
@@ -76,7 +85,7 @@ enum UITestRuntime {
             seedBookFiles()
             seedAudioFile()
             seedSafetyRecording()
-        case .populated, .offline, .recording, .reconnecting, .longContent, .writeError:
+        case .populated, .offline, .offlineStalled, .recording, .reconnecting, .longContent, .writeError:
             seedOfflineCache()
             seedBookFiles()
             seedAudioFile()
@@ -159,6 +168,12 @@ enum UITestRuntime {
         } else {
             try await Task.sleep(for: .milliseconds(50))
         }
+        if scenario == .offlineStalled {
+            // Deliberately longer than anything that waits on it: a screen
+            // that can only be right once this reply arrives has to fail its
+            // test rather than race it.
+            try await Task.sleep(for: .seconds(120))
+        }
         if path == "/answer" || path.hasSuffix("/ask") {
             try await Task.sleep(for: .milliseconds(300))
         }
@@ -166,7 +181,7 @@ enum UITestRuntime {
             throw BackendAPI.APIError(message: "Der Testserver lehnt Änderungen ab.", status: 500)
         }
         switch scenario {
-        case .offline:
+        case .offline, .offlineStalled:
             throw BackendAPI.APIError(message: "Keine Verbindung zum Testserver.", isOffline: true)
         case .unauthorized:
             throw BackendAPI.APIError(message: "Testzugang abgelehnt.", status: 401)

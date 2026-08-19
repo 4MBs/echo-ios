@@ -199,6 +199,33 @@ final class LibraryReaderUITests: EchoUITestCase {
         shot("reader-offline-cached")
     }
 
+    /// What the shelf says about a book has to come from the iPad. The books
+    /// live on a machine reachable only over the VPN, so away from it the list
+    /// request is not refused — it hangs until its timeout. The shelf used to
+    /// wait for that before looking at its own files, and so put a download
+    /// badge on every book already downloaded; tapping one opened it instantly
+    /// from disk, which is how obvious the lie was.
+    func testShelfNeverOffersToDownloadBooksAlreadyOnTheIPad() {
+        launch(tab: "bibliothek", scenario: "offlineStalled")
+        XCTAssertTrue(app.navigationBars["Bibliothek"].waitForExistence(timeout: 5))
+        let book = app.buttons["Echo Testbuch"]
+        XCTAssertTrue(
+            book.waitForExistence(timeout: 10),
+            "The shelf did not show the downloaded book while the list request was still unanswered"
+        )
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS 'Download benötigt'")).count,
+            0,
+            "A book already on the iPad was offered as a download"
+        )
+        shot("library-offline-stalled-shelf")
+        tap(book)
+        XCTAssertTrue(
+            app.buttons["Nächste Seite"].waitForExistence(timeout: 8),
+            "The book the shelf claimed was here did not open"
+        )
+    }
+
     func testBookAssistantDictationKeepsComposerGeometryFixed() {
         openReader()
         tap(app.buttons["Seite fragen"])
