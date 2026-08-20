@@ -27,6 +27,9 @@ struct LocalRecordingManifest: Codable, Equatable, Identifiable, Sendable {
     var framesWritten: Int64
     var events: [AudioDiagnosticEvent]
     var error: String?
+    /// The WebSocket stopped with unsent packets. The complete local M4A must
+    /// repair the server transcript once the backend is reachable again.
+    var needsServerRecovery: Bool?
 
     var durationSeconds: Double {
         guard sampleRate > 0 else { return 0 }
@@ -44,6 +47,7 @@ struct LocalRecordingSummary: Identifiable, Equatable, Sendable {
     let serverSessionId: String?
     let events: [AudioDiagnosticEvent]
     let error: String?
+    let needsServerRecovery: Bool
 }
 
 enum LocalRecordingStorage {
@@ -97,6 +101,13 @@ enum LocalRecordingStorage {
         try? save(manifest, to: manifestURL)
     }
 
+    static func setNeedsServerRecovery(_ needed: Bool, manifestURL: URL) {
+        guard var manifest = try? load(from: manifestURL) else { return }
+        manifest.needsServerRecovery = needed
+        manifest.updatedAt = .now
+        try? save(manifest, to: manifestURL)
+    }
+
     static func manifests(root: URL) -> [(URL, LocalRecordingManifest)] {
         let directories = (try? FileManager.default.contentsOfDirectory(
             at: root,
@@ -126,7 +137,8 @@ enum LocalRecordingStorage {
                 manifestURL: manifestURL,
                 serverSessionId: manifest.serverSessionId,
                 events: manifest.events,
-                error: manifest.error
+                error: manifest.error,
+                needsServerRecovery: manifest.needsServerRecovery == true
             )
         }
     }
@@ -256,6 +268,12 @@ enum LocalRecordingRecovery {
             log.error("manifest unreadable: \(error.localizedDescription)")
             return nil
         }
+        if recovered, manifest.serverSessionId != nil {
+            // The app disappeared before it could verify that every queued
+            // packet and the stop message reached the server. Re-uploading the
+            // complete safety file is idempotent and safer than guessing.
+            manifest.needsServerRecovery = true
+        }
 
         let directory = manifestURL.deletingLastPathComponent()
         let pcmURL = directory.appendingPathComponent(manifest.pcmFilename)
@@ -355,7 +373,8 @@ enum LocalRecordingRecovery {
             manifestURL: directory.appendingPathComponent(LocalRecordingStorage.manifestName),
             serverSessionId: manifest.serverSessionId,
             events: manifest.events,
-            error: manifest.error
+            error: manifest.error,
+            needsServerRecovery: manifest.needsServerRecovery == true
         )
     }
 

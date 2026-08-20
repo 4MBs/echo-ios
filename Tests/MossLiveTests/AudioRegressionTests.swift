@@ -141,6 +141,10 @@ final class AudioRegressionTests: XCTestCase {
         XCTAssertEqual(matched?.id, manifest.id)
         XCTAssertEqual(matched?.manifestURL, manifestURL)
 
+        LocalRecordingStorage.setNeedsServerRecovery(true, manifestURL: manifestURL)
+        XCTAssertTrue(try LocalRecordingStorage.load(from: manifestURL).needsServerRecovery == true)
+        XCTAssertTrue(LocalRecordingStorage.summaries(root: root)[0].needsServerRecovery)
+
         let splitLessonMatch = LocalRecordingStorage.matchingRecording(
             root: root,
             sessionId: "server-created-child-id",
@@ -170,6 +174,7 @@ final class AudioRegressionTests: XCTestCase {
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4800))
         buffer.frameLength = 4800
         try writer?.write(buffer, now: startedAt.addingTimeInterval(2))
+        writer?.setServerSessionId("interrupted-session")
         writer = nil // simulate process termination without finish()
 
         let recovered = await LocalRecordingRecovery.recoverPending(root: root)
@@ -177,6 +182,8 @@ final class AudioRegressionTests: XCTestCase {
 
         XCTAssertEqual(recovered.count, 1)
         XCTAssertEqual(manifest.state, .recovered)
+        XCTAssertTrue(manifest.needsServerRecovery == true)
+        XCTAssertTrue(recovered[0].needsServerRecovery)
         XCTAssertEqual(manifest.durationSeconds, 0.1, accuracy: 0.001)
         XCTAssertTrue(
             FileManager.default.fileExists(

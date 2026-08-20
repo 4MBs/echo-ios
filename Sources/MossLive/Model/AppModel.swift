@@ -81,6 +81,7 @@ final class AppModel {
     private var timetablePoll: Task<Void, Never>?
     private var autoStopTask: Task<Void, Never>?
     private var recordingSubjectPersistenceTask: Task<Void, Never>?
+    private var offlineRecordingRecoveryTask: Task<Void, Never>?
     private var recordingSubjectErrorWasDismissed = false
     private var wantsRecording = false
     private var lastNotificationSyncDay = Date.distantPast
@@ -357,6 +358,8 @@ final class AppModel {
             await startUITestRecording()
             return
         }
+        offlineRecordingRecoveryTask?.cancel()
+        offlineRecordingRecoveryTask = nil
         bannerMessage = nil
         recordingSubjectError = nil
         recordingSubjectErrorWasDismissed = false
@@ -415,6 +418,7 @@ final class AppModel {
             let pending = await client.disconnect(sendStop: true)
             if let manifestURL {
                 if pending > 0 {
+                    LocalRecordingStorage.setNeedsServerRecovery(true, manifestURL: manifestURL)
                     LocalRecordingStorage.append(
                         AudioDiagnosticEvent(
                             kind: .transport,
@@ -425,6 +429,7 @@ final class AppModel {
                 }
                 _ = await LocalRecordingRecovery.finalize(manifestURL: manifestURL, recovered: false)
                 await self?.refreshLocalRecordings()
+                self?.scheduleOfflineRecordingRecovery()
             }
         }
         phase = .disconnected
@@ -511,6 +516,7 @@ final class AppModel {
                 let pending = await client.disconnect(sendStop: false)
                 if let manifestURL {
                     if pending > 0 {
+                        LocalRecordingStorage.setNeedsServerRecovery(true, manifestURL: manifestURL)
                         LocalRecordingStorage.append(
                             AudioDiagnosticEvent(
                                 kind: .transport,
@@ -521,6 +527,7 @@ final class AppModel {
                     }
                     _ = await LocalRecordingRecovery.finalize(manifestURL: manifestURL, recovered: false)
                     await self?.refreshLocalRecordings()
+                    self?.scheduleOfflineRecordingRecovery()
                 }
             }
         }
@@ -559,6 +566,101 @@ final class AppModel {
                 )
             }
         }
+        scheduleOfflineRecordingRecovery()
+    }
+
+    /// Repair a recording that was stopped while its WebSocket backlog could
+    /// not reach the server. The complete 48-kHz safety file is already local;
+    /// once connectivity returns, finalize the half-open server session and
+    /// resumably re-transcribe every timetable lesson covered by that file.
+    private func scheduleOfflineRecordingRecovery() {
+        guard offlineRecordingRecoveryTask == nil, !UITestRuntime.isEnabled else { return }
+        offlineRecordingRecoveryTask = Task { [weak self] in
+            guard let self else { return }
+            defer { offlineRecordingRecoveryTask = nil }
+            while !Task.isCancelled {
+                guard !wantsRecording else {
+                    try? await Task.sleep(for: .seconds(10))
+                    continue
+                }
+                guard let root = try? LocalRecordingStorage.defaultRoot() else { return }
+                let pending = Self.pendingServerRecoveries(root: root)
+                guard !pending.isEmpty else { return }
+
+                var repairedOne = false
+                for recording in pending {
+                    guard await repairOfflineRecording(recording) else { continue }
+                    repairedOne = true
+                    break
+                }
+                if !repairedOne {
+                    try? await Task.sleep(for: .seconds(30))
+                }
+            }
+        }
+    }
+
+    private static func pendingServerRecoveries(root: URL) -> [LocalRecordingSummary] {
+        LocalRecordingStorage.summaries(root: root).filter {
+            $0.needsServerRecovery && $0.serverSessionId != nil
+        }
+    }
+
+    private func repairOfflineRecording(_ recording: LocalRecordingSummary) async -> Bool {
+        guard let serverSessionId = recording.serverSessionId else { return false }
+        do {
+            try await api.finalizeOfflineSession(id: serverSessionId)
+            let availableLessons = try await api.listLessons()
+            let lessons = availableLessons.filter {
+                Self.overlaps($0, recording: recording)
+            }
+            guard !lessons.isEmpty else {
+                throw BackendAPI.APIError(
+                    message: "Die Offline-Aufnahme ist auf dem Server noch nicht verfügbar."
+                )
+            }
+            for lesson in lessons {
+                _ = try await api.manuallyRetranscribe(
+                    lesson: lesson,
+                    recording: recording,
+                    onStatus: { _ in }
+                )
+            }
+            LocalRecordingStorage.append(
+                AudioDiagnosticEvent(
+                    kind: .recovered,
+                    message: "Offline-Audio vollständig zum Server übertragen und transkribiert"
+                ),
+                to: recording.manifestURL
+            )
+            LocalRecordingStorage.setNeedsServerRecovery(
+                false,
+                manifestURL: recording.manifestURL
+            )
+            await refreshLocalRecordings()
+            bannerMessage = "Die Offline-Aufnahme wurde vollständig nachträglich transkribiert."
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            log.warning(
+                "offline recording recovery deferred: \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
+    private static func overlaps(
+        _ lesson: BackendAPI.LessonInfo,
+        recording: LocalRecordingSummary
+    ) -> Bool {
+        let recordingStart = recording.startedAt
+        let recordingEnd = recording.startedAt.addingTimeInterval(recording.durationSeconds)
+        let lessonStart = lesson.startedAt
+        let lessonEnd = lesson.endedAtMs.map {
+            Date(timeIntervalSince1970: Double($0) / 1000)
+        } ?? lessonStart.addingTimeInterval(lesson.durationSeconds)
+        return min(lessonEnd, recordingEnd).timeIntervalSince(max(lessonStart, recordingStart)) > 0.5
     }
 
     private func appendAudioEvent(_ event: AudioDiagnosticEvent) {
