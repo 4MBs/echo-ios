@@ -41,4 +41,17 @@ final class AudioSessionErrorTests: XCTestCase {
         XCTAssertTrue(described.contains("-42"), "the code is the half worth keeping: \(described)")
         XCTAssertTrue(described.contains(NSOSStatusErrorDomain))
     }
+
+    func testCaptureSessionCanBeResumedFromTheBackground() {
+        let options = AudioCaptureEngine.captureSessionOptions
+
+        // Both options make recording mixable. iOS rejects starting a mixable
+        // input session in the background with cannotStartRecording (`'!rec'`).
+        XCTAssertFalse(options.contains(.duckOthers))
+        XCTAssertFalse(options.contains(.mixWithOthers))
+
+        XCTAssertEqual(AudioCaptureEngine.captureSessionMode, .voiceChat)
+        XCTAssertTrue(options.contains(.overrideMutedMicrophoneInterruption))
+        XCTAssertTrue(options.contains(.allowBluetoothHFP))
+    }
 }
