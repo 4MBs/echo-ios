@@ -2,6 +2,13 @@ import CryptoKit
 import Foundation
 
 extension BackendAPI {
+    func finalizeOfflineSession(id: String) async throws {
+        _ = try await request(
+            "/sessions/\(id)/offline-recovery/finalize",
+            method: "POST"
+        )
+    }
+
     struct RetranscriptionStatus: Codable, Sendable, Equatable {
         let status: String
         let offset: Int64
@@ -80,7 +87,10 @@ extension BackendAPI {
             throw APIError(message: "Die Größe der Sicherheitsaufnahme konnte nicht gelesen werden.")
         }
         let size = number.int64Value
-        let checksum = try sha256(of: recording.url)
+        let recordingURL = recording.url
+        let checksum = try await Task.detached(priority: .utility) {
+            try Self.sha256(of: recordingURL)
+        }.value
         let lessonStart = lesson.startedAt
         let sourceOffset = max(0, lessonStart.timeIntervalSince(recording.startedAt))
         let duration = lesson.endedAtMs.map {
@@ -286,7 +296,7 @@ extension BackendAPI {
         return try JSONDecoder().decode(UploadPreparation.self, from: data)
     }
 
-    private func sha256(of fileURL: URL) throws -> String {
+    private static func sha256(of fileURL: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
         var hasher = SHA256()
