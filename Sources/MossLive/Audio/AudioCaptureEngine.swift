@@ -12,11 +12,23 @@ import os
 /// (called on the audio conversion queue — the consumer must be fast and
 /// non-blocking; WebSocketClient.sendAudioFrame is).
 ///
-/// Session config: `.spokenAudio` + AVAudioEngine voice processing applies
+/// Session config: `.voiceChat` + AVAudioEngine voice processing applies
 /// Apple's device-tuned noise suppression and automatic gain control;
 /// `.playAndRecord` + background mode `audio` keeps capture alive when the
 /// app is backgrounded or when the iPad lid is closed.
 final class AudioCaptureEngine {
+    /// Recording is intentionally nonmixable. `.duckOthers` used to make the
+    /// session mixable implicitly, which iOS refuses to reactivate for input
+    /// from the background (`cannotStartRecording`). Echo has no playback to
+    /// duck, so that option was both semantically wrong and the source of the
+    /// failed hand-off to keyboard dictation.
+    static let captureSessionMode: AVAudioSession.Mode = .voiceChat
+    static let captureSessionOptions: AVAudioSession.CategoryOptions = [
+        .allowBluetoothHFP,
+        .defaultToSpeaker,
+        .overrideMutedMicrophoneInterruption,
+    ]
+
     enum CaptureError: LocalizedError {
         case microphoneDenied
         case audioSessionBusy
@@ -68,6 +80,17 @@ final class AudioCaptureEngine {
     private var stallTimer: DispatchSourceTimer?
     private var stallReported = false
     private var lastResumeAttemptAt = Date.distantPast
+    /// Recovery state. Mutated on `controlQueue`; notification handlers only
+    /// enqueue transitions onto that queue.
+    private var isForeground = true
+    private var wantsRebuildOnForeground = false
+    private var audioSessionInactive = false
+    /// So the "waiting in the background" note is written once per outage
+    /// rather than every two seconds for as long as dictation is open.
+    private var backgroundWaitReported = false
+    /// Avoid repeating the same refusal in diagnostics if iOS emits more than
+    /// one end/route signal for an outage.
+    private var lastResumeFailure: String?
     #if canImport(UIKit)
         private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -115,13 +138,13 @@ final class AudioCaptureEngine {
         }
 
         let session = AVAudioSession.sharedInstance()
-        // `.spokenAudio` keeps recording alive when the screen locks or the iPad
-        // Smart Folio cover closes. Noise suppression and AGC are enabled on the
-        // input node in installTapAndStart().
+        // `.voiceChat` matches the Voice Processing I/O unit enabled below.
+        // `overrideMutedMicrophoneInterruption` is the supported way to survive
+        // a Smart Folio mute; `.spokenAudio` is a playback mode for podcasts.
         try session.setCategory(
             .playAndRecord,
-            mode: .spokenAudio,
-            options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .duckOthers]
+            mode: Self.captureSessionMode,
+            options: Self.captureSessionOptions
         )
         try? session.setPreferredSampleRate(48000)
         try? session.setPreferredIOBufferDuration(0.02)
@@ -130,9 +153,6 @@ final class AudioCaptureEngine {
         } catch {
             throw Self.activationError(error)
         }
-        #if canImport(UIKit)
-            beginBackgroundAssertion()
-        #endif
         do {
             encoder = try OpusStreamEncoder(bitrate: bitrate)
             let recordingsRoot = try LocalRecordingStorage.defaultRoot()
@@ -169,6 +189,12 @@ final class AudioCaptureEngine {
             throw error
         }
         running = true
+        controlQueue.async { [weak self] in
+            self?.audioSessionInactive = false
+            self?.wantsRebuildOnForeground = false
+            self?.backgroundWaitReported = false
+            self?.lastResumeFailure = nil
+        }
         startStallWatchdog()
     }
 
@@ -198,32 +224,39 @@ final class AudioCaptureEngine {
     }
 
     #if canImport(UIKit)
-        /// Hold a background task assertion while recording.
+        /// Hold a short background assertion while an interruption has removed
+        /// the audio background-mode assertion.
         ///
-        /// Background mode `audio` is what really keeps capture alive; this is
-        /// the cushion for the window in which it does not — the seconds after
-        /// the microphone is taken and before it comes back.
+        /// Starting this with the recording wasted the entire allowance long
+        /// before dictation was used. It now starts only when the audio session
+        /// becomes inactive and ends as soon as capture resumes.
         ///
-        /// `backgroundTask` is only ever touched here and in
-        /// `releaseAudioSession()`, both on the main thread: capture is rebuilt
-        /// on `controlQueue`, and UIApplication is not to be called from there.
-        ///
-        /// `ifRecording` is for the re-take after a rebuild — recording may have
-        /// been stopped between the control queue asking and this running, and
-        /// an assertion taken after `releaseAudioSession()` is never ended.
-        private func beginBackgroundAssertion(ifRecording: Bool = false) {
+        /// Every access to `backgroundTask` stays on the main thread; capture
+        /// recovery itself runs on `controlQueue`.
+        private func beginBackgroundAssertion() {
             guard Thread.isMainThread else {
                 DispatchQueue.main.async { [weak self] in
-                    self?.beginBackgroundAssertion(ifRecording: ifRecording)
+                    self?.beginBackgroundAssertion()
                 }
                 return
             }
-            guard !ifRecording || running else { return }
+            guard running else { return }
             guard backgroundTask == .invalid else { return }
             backgroundTask = UIApplication.shared
                 .beginBackgroundTask(withName: "MossLive.AudioCapture") { [weak self] in
                     self?.backgroundAssertionExpired()
                 }
+        }
+
+        private func endBackgroundAssertion() {
+            guard Thread.isMainThread else {
+                DispatchQueue.main.async { [weak self] in self?.endBackgroundAssertion() }
+                return
+            }
+            let task = backgroundTask
+            backgroundTask = .invalid
+            guard task != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(task)
         }
 
         /// iOS **terminates** an app that lets a background task expire without
@@ -241,15 +274,15 @@ final class AudioCaptureEngine {
         /// can come back from.
         ///
         /// Nothing is re-taken here: the budget is spent, and asking again in
-        /// the handler would only expire again. `installTapAndStart()` takes a
-        /// fresh one once the microphone is actually delivering audio.
+        /// the handler would only expire again. A later interruption gets a new
+        /// assertion after capture has genuinely resumed in between.
         private func backgroundAssertionExpired() {
             let expired = backgroundTask
             backgroundTask = .invalid
             guard expired != .invalid else { return }
             UIApplication.shared.endBackgroundTask(expired)
             log.warning("background capture task assertion expired")
-            record(
+            recordFromAnyQueue(
                 AudioDiagnosticEvent(
                     kind: .transport,
                     message: "Hintergrundzeit abgelaufen – die Aufnahme läuft weiter, sobald das "
@@ -269,10 +302,7 @@ final class AudioCaptureEngine {
     /// before changing to an output-only category.
     private func releaseAudioSession() {
         #if canImport(UIKit)
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
-            }
+            endBackgroundAssertion()
         #endif
         let input = engine.inputNode
         if input.isVoiceProcessingEnabled {
@@ -368,10 +398,9 @@ final class AudioCaptureEngine {
         engine.prepare()
         try engine.start()
         #if canImport(UIKit)
-            // Capture is back, so take the cushion again if it expired while
-            // the microphone was gone. (`start()` takes the first one itself,
-            // before `running` is set.)
-            beginBackgroundAssertion(ifRecording: true)
+            // Audio background mode owns execution again; the temporary
+            // interruption cushion is no longer needed.
+            endBackgroundAssertion()
         #endif
         SharedMicrophone.shared.begin(format: hardwareFormat)
         processingQueue.async { [weak self] in
@@ -387,6 +416,18 @@ final class AudioCaptureEngine {
         lastBufferAt = Date()
         if stallReported {
             stallReported = false
+            controlQueue.async { [weak self] in
+                self?.backgroundWaitReported = false
+                self?.audioSessionInactive = false
+                self?.wantsRebuildOnForeground = false
+                self?.lastResumeFailure = nil
+            }
+            record(
+                AudioDiagnosticEvent(
+                    kind: .recovered,
+                    message: "Mikrofon wieder frei; die Aufnahme läuft ohne Unterbrechung weiter"
+                )
+            )
             onResumed?()
         }
         guard let converter, let archiveConverter, let encoder else { return }
@@ -496,36 +537,90 @@ final class AudioCaptureEngine {
             self, selector: #selector(handleMediaReset(_:)),
             name: AVAudioSession.mediaServicesWereResetNotification, object: nil
         )
+        #if canImport(UIKit)
+            center.addObserver(
+                self, selector: #selector(handleDidBecomeActive),
+                name: UIApplication.didBecomeActiveNotification, object: nil
+            )
+            center.addObserver(
+                self, selector: #selector(handleDidEnterBackground),
+                name: UIApplication.didEnterBackgroundNotification, object: nil
+            )
+            let foreground = UIApplication.shared.applicationState == .active
+            controlQueue.async { [weak self] in self?.isForeground = foreground }
+        #endif
     }
 
+    #if canImport(UIKit)
+        @objc private func handleDidEnterBackground() {
+            controlQueue.async { [weak self] in self?.isForeground = false }
+        }
+
+        /// Back in the foreground, so a rebuild is allowed again.
+        ///
+        /// This is where a recording that went silent behind iOS dictation is
+        /// actually put back together — the one place iOS lets it happen.
+        @objc private func handleDidBecomeActive() {
+            controlQueue.async { [weak self] in
+                guard let self else { return }
+                isForeground = true
+                guard running else { return }
+                let stalled = processingQueue.sync { Date().timeIntervalSince(self.lastBufferAt) }
+                guard wantsRebuildOnForeground || !engine.isRunning || stalled > Self.stallSeconds else {
+                    return
+                }
+                wantsRebuildOnForeground = false
+                attemptResume(reason: "app returned to the foreground")
+            }
+        }
+    #endif
+
+    /// Pause the configured engine as soon as iOS takes the session. This
+    /// releases its I/O for keyboard dictation's first tap while preserving the
+    /// tap and converters for a true resume when the interruption ends.
     @objc private func handleInterruption(_ note: Notification) {
         guard let info = note.userInfo,
-              let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: raw)
+              let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: rawType)
         else { return }
         switch type {
         case .began:
-            log.warning("audio interruption began (call/Siri)")
-            let now = Date()
-            processingQueue.async { [weak self] in
-                self?.interruptionStartedAt = now
-                self?.diagnostics.interruptions += 1
-                self?.record(
-                    AudioDiagnosticEvent(
-                        kind: .interruptionBegan,
-                        message: "Audio-Unterbrechung begann (Anruf, Siri oder andere App)",
-                        date: now
+            #if canImport(UIKit)
+                beginBackgroundAssertion()
+            #endif
+            let rawReason = info[AVAudioSessionInterruptionReasonKey] as? UInt
+            controlQueue.async { [weak self] in
+                guard let self, running else { return }
+                audioSessionInactive = true
+                wantsRebuildOnForeground = true
+                engine.pause()
+                log.warning("audio session interrupted (reason: \(String(describing: rawReason)))")
+                let now = Date()
+                processingQueue.async { [weak self] in
+                    guard let self else { return }
+                    interruptionStartedAt = now
+                    diagnostics.interruptions += 1
+                    record(
+                        AudioDiagnosticEvent(
+                            kind: .interruptionBegan,
+                            message: "Mikrofon an Diktat, Siri, einen Anruf oder eine andere App übergeben",
+                            date: now
+                        )
                     )
+                }
+                onInterruption?(
+                    "Mikrofon wird vorübergehend von einer anderen Funktion verwendet – "
+                        + "Echo setzt die Aufnahme danach automatisch fort…"
                 )
             }
-            // iOS sometimes never delivers .ended (e.g. declined call while
-            // locked) — the retry loop below recovers regardless.
-            scheduleResumeRetries()
         case .ended:
-            // Always try to resume, even without .shouldResume: during class
-            // the device is locked in a pocket — "tap to resume" is exactly
-            // what the user cannot do.
-            requestResume(reason: "interruption ended")
+            // A lesson recording is an explicit, continuing user action, so it
+            // is appropriate to resume even if shouldResume is absent. This
+            // runs only after iOS says the competing session has ended.
+            controlQueue.async { [weak self] in
+                guard let self, running else { return }
+                resumeConfiguredEngine(reason: "audio interruption ended")
+            }
         @unknown default:
             break
         }
@@ -564,6 +659,18 @@ final class AudioCaptureEngine {
     private func restartEngine(reason: String) {
         controlQueue.async { [weak self] in
             guard let self, self.running else { return }
+            // A route change in the background used to come straight through
+            // here and stop the engine — the same fatal teardown the watchdog
+            // was stopped from doing, by a different door. Dictation taking and
+            // returning the microphone *is* a route change.
+            guard isForeground else {
+                log.info("route changed in the background (\(reason)); trying configured resume")
+                wantsRebuildOnForeground = true
+                if audioSessionInactive {
+                    resumeConfiguredEngine(reason: reason)
+                }
+                return
+            }
             log.info("restarting audio engine: \(reason)")
             engine.stop()
             do {
@@ -606,8 +713,8 @@ final class AudioCaptureEngine {
             // voice processing before capture resumes.
             try session.setCategory(
                 .playAndRecord,
-                mode: .spokenAudio,
-                options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .duckOthers]
+                mode: Self.captureSessionMode,
+                options: Self.captureSessionOptions
             )
             try session.setActive(true, options: [])
             try installTapAndStart()
@@ -629,9 +736,34 @@ final class AudioCaptureEngine {
             }
             onResumed?()
         } catch {
-            log.warning("audio resume failed (\(error.localizedDescription)); retrying")
+            log.warning("audio resume failed (\(Self.describe(error))); retrying")
+            recordFromAnyQueue(
+                AudioDiagnosticEvent(
+                    kind: .lostAudio,
+                    message: "Aufnahme konnte nicht fortgesetzt werden: \(Self.describe(error))"
+                )
+            )
             scheduleResumeRetries()
         }
+    }
+
+    /// The OSStatus is the useful half of an audio-session error and the half
+    /// `localizedDescription` throws away — 561145187 (`'!rec'`) and 560557684
+    /// (`'!int'`) are the two that decide whether a recording can come back.
+    ///
+    /// Not private so the codes themselves are covered: they are the whole
+    /// reason the background rule exists, and a typo in one would only ever
+    /// show up as an unreadable diagnostic months later.
+    static func describe(_ error: Error) -> String {
+        let code = (error as NSError).code
+        let name =
+            switch code {
+            case 561_145_187: "cannotStartRecording"
+            case 560_557_684: "cannotInterruptOthers"
+            case 561_017_449: "insufficientPriority"
+            default: (error as NSError).domain
+            }
+        return "\(name) \(code)"
     }
 
     /// Retries every few seconds while recording is wanted and the engine is
@@ -647,6 +779,13 @@ final class AudioCaptureEngine {
             // exactly the state the watchdog exists for, so do not skip it.
             let silent = processingQueue.sync { Date().timeIntervalSince(self.lastBufferAt) }
             guard !engine.isRunning || silent > Self.stallSeconds else { return }
+            // A full rebuild is a foreground-only move. In the background,
+            // wait for the interruption-end or return-route signal instead of
+            // activating recording while another app still owns the microphone.
+            guard isForeground else {
+                wantsRebuildOnForeground = true
+                return
+            }
             attemptResume(reason: "retry")
         }
     }
@@ -654,6 +793,77 @@ final class AudioCaptureEngine {
     /// How long the microphone may deliver nothing before capture is rebuilt,
     /// and how long a rebuild is given before another one is attempted.
     private static let stallSeconds: TimeInterval = 4
+
+    /// Resume the engine only after iOS says the competing audio session has
+    /// ended. The tap, converters, category, and voice-processing unit remain
+    /// configured throughout the interruption; this is a resume, not a new
+    /// background recording.
+    private func resumeConfiguredEngine(reason: String) {
+        guard running else { return }
+        log.info("resuming configured audio engine after: \(reason)")
+        do {
+            try AVAudioSession.sharedInstance().setActive(true, options: [])
+            if !engine.isRunning {
+                engine.prepare()
+                try engine.start()
+            }
+            audioSessionInactive = false
+            wantsRebuildOnForeground = false
+            lastResumeFailure = nil
+            #if canImport(UIKit)
+                endBackgroundAssertion()
+            #endif
+            log.info("microphone resumed")
+            let now = Date()
+            processingQueue.async { [weak self] in
+                guard let self else { return }
+                let gap = interruptionStartedAt.map { now.timeIntervalSince($0) }
+                interruptionStartedAt = nil
+                record(
+                    AudioDiagnosticEvent(
+                        kind: .interruptionEnded,
+                        message: gap.map { String(format: "Audio nach %.1f Sekunden fortgesetzt", $0) }
+                            ?? "Audio fortgesetzt",
+                        gapSeconds: gap,
+                        date: now
+                    )
+                )
+            }
+            onResumed?()
+        } catch {
+            wantsRebuildOnForeground = true
+            let described = Self.describe(error)
+            guard lastResumeFailure != described else { return }
+            lastResumeFailure = described
+            log.warning("recommended audio resume failed: \(described)")
+            recordFromAnyQueue(
+                AudioDiagnosticEvent(
+                    kind: .lostAudio,
+                    message: "iOS konnte das Mikrofon im Hintergrund nicht fortsetzen (\(described)); "
+                        + "die Aufnahme wird beim Öffnen der App fortgesetzt"
+                )
+            )
+        }
+    }
+
+    /// The "waiting in the background" note, written once per outage rather
+    /// than every two seconds for as long as dictation is open.
+    private func noteBackgroundWait(silentFor silence: TimeInterval) {
+        wantsRebuildOnForeground = true
+        guard !backgroundWaitReported else { return }
+        backgroundWaitReported = true
+        recordFromAnyQueue(
+            AudioDiagnosticEvent(
+                kind: .lostAudio,
+                message: String(
+                    format: "Mikrofon seit %.0f s von einer anderen App belegt (z. B. Diktat); "
+                        + "Echo wartet auf die Freigabe durch iOS",
+                    silence
+                ),
+                gapSeconds: silence
+            )
+        )
+    }
 
     /// Notices a microphone that went quiet without saying so.
     ///
@@ -671,11 +881,12 @@ final class AudioCaptureEngine {
         timer.setEventHandler { [weak self] in
             guard let self, running else { return }
             let now = Date()
-            guard now.timeIntervalSince(lastBufferAt) > Self.stallSeconds,
-                  now.timeIntervalSince(lastResumeAttemptAt) > Self.stallSeconds
-            else { return }
+            guard now.timeIntervalSince(lastBufferAt) > Self.stallSeconds else { return }
             let silence = now.timeIntervalSince(lastBufferAt)
-            lastResumeAttemptAt = now
+            // A rebuild is expensive and is rate-limited. Background recovery
+            // is driven by AVAudioSession interruption and route notifications.
+            let mayRebuild = now.timeIntervalSince(lastResumeAttemptAt) > Self.stallSeconds
+            if mayRebuild { lastResumeAttemptAt = now }
             if !stallReported {
                 stallReported = true
                 record(
@@ -691,7 +902,15 @@ final class AudioCaptureEngine {
                         + "die Aufnahme läuft automatisch weiter…"
                 )
             }
-            requestResume(reason: String(format: "no audio for %.1fs", silence))
+            controlQueue.async { [weak self] in
+                guard let self, running else { return }
+                guard isForeground else {
+                    noteBackgroundWait(silentFor: silence)
+                    return
+                }
+                guard mayRebuild else { return }
+                attemptResume(reason: String(format: "no audio for %.1fs", silence))
+            }
         }
         timer.resume()
         stallTimer = timer
@@ -705,6 +924,14 @@ final class AudioCaptureEngine {
     private func record(_ event: AudioDiagnosticEvent) {
         recordingWriter?.append(event)
         onEvent?(event)
+    }
+
+    /// `record` from a caller that is not on `processingQueue`. The manifest
+    /// writer belongs to that queue, and the resume paths run on `controlQueue`.
+    private func recordFromAnyQueue(_ event: AudioDiagnosticEvent) {
+        processingQueue.async { [weak self] in
+            self?.record(event)
+        }
     }
 
     private static func currentRouteDescription() -> String {
