@@ -76,6 +76,9 @@ final class AudioCaptureEngine {
     /// So the "waiting in the background" note is written once per outage
     /// rather than every two seconds for as long as dictation is open.
     private var backgroundWaitReported = false
+    /// The last refusal `reclaimInBackground()` got, so a reclaim that is
+    /// retried every two seconds does not write the same line every two seconds.
+    private var lastReclaimFailure: String?
     #if canImport(UIKit)
         private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -397,6 +400,7 @@ final class AudioCaptureEngine {
             stallReported = false
             backgroundWaitReported = false
             wantsRebuildOnForeground = false
+            lastReclaimFailure = nil
             record(
                 AudioDiagnosticEvent(
                     kind: .recovered,
@@ -576,7 +580,7 @@ final class AudioCaptureEngine {
             if isForeground {
                 requestResume(reason: "interruption ended")
             } else {
-                controlQueue.async { [weak self] in self?.continueInBackground() }
+                controlQueue.async { [weak self] in self?.reclaimInBackground() }
             }
         @unknown default:
             break
@@ -616,6 +620,15 @@ final class AudioCaptureEngine {
     private func restartEngine(reason: String) {
         controlQueue.async { [weak self] in
             guard let self, self.running else { return }
+            // A route change in the background used to come straight through
+            // here and stop the engine — the same fatal teardown the watchdog
+            // was stopped from doing, by a different door. Dictation taking and
+            // returning the microphone *is* a route change.
+            guard isForeground else {
+                log.info("route changed in the background (\(reason)); reclaiming without a rebuild")
+                reclaimInBackground()
+                return
+            }
             log.info("restarting audio engine: \(reason)")
             engine.stop()
             do {
@@ -692,43 +705,6 @@ final class AudioCaptureEngine {
         }
     }
 
-    /// Pick a real interruption back up without rebuilding anything.
-    ///
-    /// A genuine interruption leaves the session deactivated and the engine
-    /// stopped, so sitting still would be silence for as long as the app stays
-    /// in the background. This is the most iOS will consider from there:
-    /// reactivate the session that already exists and start the engine that is
-    /// already configured. No `setCategory`, no new tap, no converters — that
-    /// would be *starting* a recording, which is the thing that gets refused.
-    ///
-    /// One attempt, and no retry loop. If iOS says no, the recording is picked
-    /// up the moment the app is opened.
-    private func continueInBackground() {
-        guard running, !engine.isRunning else { return }
-        do {
-            try AVAudioSession.sharedInstance().setActive(true, options: [])
-            try engine.start()
-            log.info("audio continued in the background after an interruption")
-            recordFromAnyQueue(
-                AudioDiagnosticEvent(
-                    kind: .interruptionEnded,
-                    message: "Aufnahme im Hintergrund fortgesetzt"
-                )
-            )
-            onResumed?()
-        } catch {
-            wantsRebuildOnForeground = true
-            log.warning("background continue refused: \(Self.describe(error))")
-            recordFromAnyQueue(
-                AudioDiagnosticEvent(
-                    kind: .lostAudio,
-                    message: "iOS ließ die Aufnahme im Hintergrund nicht fortsetzen "
-                        + "(\(Self.describe(error))); sie wird beim Öffnen der App fortgesetzt"
-                )
-            )
-        }
-    }
-
     /// The OSStatus is the useful half of an audio-session error and the half
     /// `localizedDescription` throws away — 561145187 (`'!rec'`) and 560557684
     /// (`'!int'`) are the two that decide whether a recording can come back.
@@ -761,10 +737,12 @@ final class AudioCaptureEngine {
             // exactly the state the watchdog exists for, so do not skip it.
             let silent = processingQueue.sync { Date().timeIntervalSince(self.lastBufferAt) }
             guard !engine.isRunning || silent > Self.stallSeconds else { return }
-            // Retrying in the background retries a refusal, every three seconds,
-            // for as long as the student is dictating. Wait for the microphone
-            // or for the app to be opened instead.
-            guard mayRebuildCapture(silentFor: silent) else { return }
+            // A full rebuild is a foreground-only move; in the background the
+            // cheap reclaim is the only one iOS might allow.
+            guard isForeground else {
+                reclaimInBackground()
+                return
+            }
             attemptResume(reason: "retry")
         }
     }
@@ -773,47 +751,70 @@ final class AudioCaptureEngine {
     /// and how long a rebuild is given before another one is attempted.
     private static let stallSeconds: TimeInterval = 4
 
-    /// Whether capture may be torn down and built again right now.
+    /// Ask iOS for the microphone back without rebuilding anything.
     ///
-    /// Only in the foreground. iOS refuses to *start* a recording from the
-    /// background — `AVAudioSession.ErrorCode.cannotStartRecording`, OSStatus
-    /// 561145187, `'!rec'`: "the app is not allowed to start recording, usually
-    /// because it is starting a mixable recording from the background". Echo's
-    /// session is mixable whether it asks to be or not, because `.duckOthers`
-    /// implicitly sets `.mixWithOthers`.
+    /// The microphone is exclusive on iOS: while keyboard dictation has it,
+    /// Echo cannot record, and no amount of code changes that. The whole game
+    /// is getting it back the moment dictation lets go — and iOS does not
+    /// announce that. It arrives as silence, or as a route change, or as
+    /// nothing at all, so something has to keep asking.
     ///
-    /// So a rebuild in the background does not restore the recording. It
-    /// destroys the one that is still there: `attemptResume()` stops the
-    /// engine, and iOS then refuses to let it start again until the app is
-    /// foregrounded. That is the whole of the bug the student kept reporting —
-    /// use iOS keyboard dictation in another app, and four seconds later the
-    /// watchdog meant to save the lesson is what ended it. Waiting instead
-    /// costs nothing: the engine is still running and still holds a live
-    /// session, so when dictation gives the microphone back the tap simply
-    /// starts being called again, with nothing to restart.
+    /// What it must *not* do is rebuild. `attemptResume()` stops the engine,
+    /// sets the category and installs a new tap, which is "starting a
+    /// recording" — refused from the background with
+    /// `AVAudioSession.ErrorCode.cannotStartRecording` (561145187, `'!rec'`),
+    /// and destructive, because the engine is already stopped by the time iOS
+    /// says no. Reactivating the session that already exists and starting the
+    /// engine that is already configured is *resuming*, which is the most iOS
+    /// will consider from the background.
     ///
-    /// If it does not come back on its own, `handleDidBecomeActive()` rebuilds
-    /// the moment the app is opened — which is exactly what happens today, and
-    /// the one path iOS actually permits.
-    private func mayRebuildCapture(silentFor silence: TimeInterval) -> Bool {
-        if isForeground { return true }
-        wantsRebuildOnForeground = true
-        if !backgroundWaitReported {
-            backgroundWaitReported = true
+    /// Every distinct refusal is written into the recording's diagnostics once,
+    /// with its OSStatus. Three fixes have been aimed at this bug from guesses;
+    /// the next one gets to read what iOS actually said.
+    private func reclaimInBackground() {
+        guard running else { return }
+        do {
+            try AVAudioSession.sharedInstance().setActive(true, options: [])
+            if !engine.isRunning {
+                try engine.start()
+            }
+            if lastReclaimFailure != nil {
+                lastReclaimFailure = nil
+                log.info("microphone reclaimed in the background")
+            }
+        } catch {
+            wantsRebuildOnForeground = true
+            let described = Self.describe(error)
+            guard lastReclaimFailure != described else { return }
+            lastReclaimFailure = described
+            log.warning("background reclaim refused: \(described)")
             recordFromAnyQueue(
                 AudioDiagnosticEvent(
                     kind: .lostAudio,
-                    message: String(
-                        format: "Mikrofon seit %.0f s von einer anderen App belegt; die Aufnahme "
-                            + "wartet im Hintergrund darauf, es zurückzubekommen (iOS lässt sie "
-                            + "dort nicht neu starten)",
-                        silence
-                    ),
-                    gapSeconds: silence
+                    message: "iOS gab das Mikrofon im Hintergrund nicht zurück (\(described)); "
+                        + "die Aufnahme wird beim Öffnen der App fortgesetzt"
                 )
             )
         }
-        return false
+    }
+
+    /// The "waiting in the background" note, written once per outage rather
+    /// than every two seconds for as long as dictation is open.
+    private func noteBackgroundWait(silentFor silence: TimeInterval) {
+        wantsRebuildOnForeground = true
+        guard !backgroundWaitReported else { return }
+        backgroundWaitReported = true
+        recordFromAnyQueue(
+            AudioDiagnosticEvent(
+                kind: .lostAudio,
+                message: String(
+                    format: "Mikrofon seit %.0f s von einer anderen App belegt (z. B. Diktat); "
+                        + "Echo fordert es laufend zurück",
+                    silence
+                ),
+                gapSeconds: silence
+            )
+        )
     }
 
     /// Notices a microphone that went quiet without saying so.
@@ -832,11 +833,13 @@ final class AudioCaptureEngine {
         timer.setEventHandler { [weak self] in
             guard let self, running else { return }
             let now = Date()
-            guard now.timeIntervalSince(lastBufferAt) > Self.stallSeconds,
-                  now.timeIntervalSince(lastResumeAttemptAt) > Self.stallSeconds
-            else { return }
+            guard now.timeIntervalSince(lastBufferAt) > Self.stallSeconds else { return }
             let silence = now.timeIntervalSince(lastBufferAt)
-            lastResumeAttemptAt = now
+            // A rebuild is expensive and is rate-limited; the background
+            // reclaim is one setActive call and runs on every tick, because
+            // the sooner it asks after dictation ends, the less is missed.
+            let mayRebuild = now.timeIntervalSince(lastResumeAttemptAt) > Self.stallSeconds
+            if mayRebuild { lastResumeAttemptAt = now }
             if !stallReported {
                 stallReported = true
                 record(
@@ -852,10 +855,15 @@ final class AudioCaptureEngine {
                         + "die Aufnahme läuft automatisch weiter…"
                 )
             }
-            // In the background the microphone going quiet is something to sit
-            // out, not something to fix. Rebuilding capture there cannot work
-            // and is not free: see `mayRebuildCapture`.
-            guard mayRebuildCapture(silentFor: silence) else { return }
+            guard isForeground else {
+                // Not a rebuild — see `reclaimInBackground()`. Waiting alone is
+                // not enough: iOS hands the microphone back silently, and
+                // something has to ask for it.
+                noteBackgroundWait(silentFor: silence)
+                controlQueue.async { [weak self] in self?.reclaimInBackground() }
+                return
+            }
+            guard mayRebuild else { return }
             requestResume(reason: String(format: "no audio for %.1fs", silence))
         }
         timer.resume()
