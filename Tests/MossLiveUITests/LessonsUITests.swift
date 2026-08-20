@@ -31,6 +31,41 @@ final class LessonsUITests: EchoUITestCase {
         rotateAndCapture("lesson-detail")
     }
 
+    /// The shelf has to look like a shelf. `aspectRatio(_:contentMode: .fit)`
+    /// resolves a folder's height from what is inside it and then scales the
+    /// width to match, so before the tile reserved its lines, a subject whose
+    /// name wrapped — Klassenleitungsstunde among Physik and Biologie — came
+    /// out visibly larger than every folder next to it.
+    func testEverySubjectFolderIsTheSameSize() {
+        for contentSize in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryXXL"] {
+            launch(tab: "stunden", contentSize: contentSize)
+            XCTAssertTrue(app.navigationBars["Stunden"].waitForExistence(timeout: 5))
+
+            // Matched on any element rather than `app.buttons`: a folder is a
+            // NavigationLink or a Button depending on whether it has anything
+            // in it, and this has to measure both. (Same reason `switchTo`
+            // reads the sidebar that way.)
+            let folders = app.descendants(matching: .any).matching(identifier: "subject-folder")
+            XCTAssertGreaterThanOrEqual(
+                folders.count, 4, "the grid needs a wrapping name beside short ones to be a test"
+            )
+            let sizes = (0 ..< folders.count).map { folders.element(boundBy: $0).frame.size }
+            let names = (0 ..< folders.count).map { folders.element(boundBy: $0).label }
+            guard let first = sizes.first else { return XCTFail("no folders in the grid") }
+            for (size, name) in zip(sizes, names) {
+                XCTAssertEqual(
+                    size.width, first.width, accuracy: 1,
+                    "\(name) is \(size.width) wide, the others are \(first.width) (\(contentSize))"
+                )
+                XCTAssertEqual(
+                    size.height, first.height, accuracy: 1,
+                    "\(name) is \(size.height) tall, the others are \(first.height) (\(contentSize))"
+                )
+            }
+            shot("lessons-folders-\(contentSize)")
+        }
+    }
+
     func testArchivedLessonOffersSubjectChange() {
         launch(tab: "stunden")
         tap(button(containing: "Mathematik"))

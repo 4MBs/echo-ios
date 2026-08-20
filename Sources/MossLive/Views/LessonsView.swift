@@ -159,6 +159,7 @@ struct LessonsView: View {
             }
             .buttonStyle(PressableCardStyle())
             .accessibilityHint("Noch keine Aufnahmen")
+            .accessibilityIdentifier(Self.folderIdentifier)
         } else {
             NavigationLink {
                 SubjectView(api: api, folder: folder, catalogue: catalogue) { await load() }
@@ -166,8 +167,14 @@ struct LessonsView: View {
                 tile(folder)
             }
             .buttonStyle(PressableCardStyle())
+            .accessibilityIdentifier(Self.folderIdentifier)
         }
     }
+
+    /// Shared by every folder in the grid rather than naming each one: the test
+    /// that reads it is measuring that they are all the same size, which needs
+    /// to match all of them at once.
+    static let folderIdentifier = "subject-folder"
 
     private func tile(_ folder: SubjectFolder) -> some View {
         SubjectFolderTile(
