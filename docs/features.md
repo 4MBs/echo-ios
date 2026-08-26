@@ -155,6 +155,11 @@ keeping.
 The chat answers free-form questions about the running recording or any past
 lesson. While recording, a sticky note on the page answers "what did they just
 say" for the last N seconds. A Home and Lock Screen widget does the same and is
+joined by an **AI Answer** control for Control Center. Add it from Control
+Center's control gallery and resize it to the largest size to keep the answer
+text prominent. Its shape, interaction and glass material are rendered by the
+iOS 26 system control, while tapping it uses the same server settings and
+answer history as the widget. The Home and Lock Screen widget remains
 deliberately anonymous-looking, which matters more than it should.
 
 <p align="center">
