@@ -15,6 +15,7 @@ import WidgetKit
 @main
 struct MossLiveWidgetBundle: WidgetBundle {
     var body: some Widget {
+        AnswerControl()
         AnswerWidget()
     }
 }
@@ -71,7 +72,7 @@ struct FetchAnswerIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         AnswerSnapshotStore.save(.init(state: .loading, text: "", updatedAt: Date()))
-        WidgetCenter.shared.reloadAllTimelines()
+        AnswerSurfaceReloader.reload()
         do {
             let conn = Self.resolveConnection(
                 host: host, port: port, token: token, contextSeconds: contextSeconds
@@ -85,7 +86,7 @@ struct FetchAnswerIntent: AppIntent {
             let message = (error as? WidgetBackendError)?.message ?? error.localizedDescription
             AnswerSnapshotStore.save(.init(state: .failure, text: message, updatedAt: Date()))
         }
-        WidgetCenter.shared.reloadAllTimelines()
+        AnswerSurfaceReloader.reload()
         return .result()
     }
 
@@ -119,8 +120,8 @@ enum WidgetBackend {
             // tile tells the truth about what to fix
             if SharedConfig.resolvedGroupID == nil {
                 throw WidgetBackendError(
-                    message: "App-widget link unavailable (SideStore stripped app groups). "
-                        + "Long-press → Edit Widget → enter server & token there."
+                    message: "App-extension link unavailable (SideStore stripped app groups). "
+                        + "Long-press → Edit → enter server & token there."
                 )
             }
             throw WidgetBackendError(
@@ -188,6 +189,10 @@ struct AnswerSnapshot: Codable {
 
 enum AnswerSnapshotStore {
     private static let key = "answer-snapshot"
+    /// Answers disappear again so lecture content does not linger indefinitely.
+    static let answerLifetime: TimeInterval = 10 * 60
+    /// A request older than the backend timeout is an orphaned loading state.
+    static let loadingTimeout: TimeInterval = 150
 
     static func save(_ snapshot: AnswerSnapshot) {
         if let data = try? JSONEncoder().encode(snapshot) {
@@ -199,6 +204,19 @@ enum AnswerSnapshotStore {
         guard let data = UserDefaults.standard.data(forKey: key),
               let snapshot = try? JSONDecoder().decode(AnswerSnapshot.self, from: data)
         else {
+            return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
+        }
+        return snapshot
+    }
+
+    static func current(at date: Date = .now) -> AnswerSnapshot {
+        let snapshot = load()
+        if snapshot.state == .answer || snapshot.state == .failure,
+           date.timeIntervalSince(snapshot.updatedAt) > answerLifetime {
+            return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
+        }
+        if snapshot.state == .loading,
+           date.timeIntervalSince(snapshot.updatedAt) > loadingTimeout {
             return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
         }
         return snapshot
@@ -217,13 +235,6 @@ struct AnswerEntry: TimelineEntry {
 }
 
 struct AnswerProvider: AppIntentTimelineProvider {
-    /// Answers auto-expire back to the blank tile (stealth: nothing lingers
-    /// on the Home/Lock Screen after class).
-    static let answerLifetime: TimeInterval = 10 * 60
-    /// A loading state older than this is an orphaned request (the widget
-    /// request itself times out after 60 s) and reads as idle again.
-    static let loadingTimeout: TimeInterval = 150
-
     func placeholder(in context: Context) -> AnswerEntry {
         AnswerEntry(
             date: .now,
@@ -257,7 +268,7 @@ struct AnswerProvider: AppIntentTimelineProvider {
         switch snapshot.state {
         case .answer, .failure:
             // schedule the wipe back to the blank tile
-            let expiry = snapshot.updatedAt.addingTimeInterval(Self.answerLifetime)
+            let expiry = snapshot.updatedAt.addingTimeInterval(AnswerSnapshotStore.answerLifetime)
             let blank = AnswerEntry(
                 date: max(expiry, .now + 1),
                 snapshot: .init(state: .idle, text: "", updatedAt: .now),
@@ -269,7 +280,7 @@ struct AnswerProvider: AppIntentTimelineProvider {
             // If the fetch dies with the extension process, no reload ever
             // arrives — fall back to the blank tile instead of dots forever.
             let reset = AnswerEntry(
-                date: .now + Self.loadingTimeout,
+                date: .now + AnswerSnapshotStore.loadingTimeout,
                 snapshot: .init(state: .idle, text: "", updatedAt: .now),
                 config: configuration,
                 configured: isConfigured(configuration)
@@ -290,16 +301,7 @@ struct AnswerProvider: AppIntentTimelineProvider {
     }
 
     private func currentSnapshot() -> AnswerSnapshot {
-        let snapshot = AnswerSnapshotStore.load()
-        if snapshot.state == .answer || snapshot.state == .failure,
-           Date().timeIntervalSince(snapshot.updatedAt) > Self.answerLifetime {
-            return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
-        }
-        if snapshot.state == .loading,
-           Date().timeIntervalSince(snapshot.updatedAt) > Self.loadingTimeout {
-            return AnswerSnapshot(state: .idle, text: "", updatedAt: .distantPast)
-        }
-        return snapshot
+        AnswerSnapshotStore.current()
     }
 }
 
@@ -308,7 +310,7 @@ struct AnswerProvider: AppIntentTimelineProvider {
 struct AnswerWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(
-            kind: "MossLiveAnswerWidget",
+            kind: answerWidgetKind,
             intent: WidgetConfigIntent.self,
             provider: AnswerProvider()
         ) { entry in
