@@ -9,6 +9,7 @@ final class BookPDFView: PDFView {
     private var selectionOverlay: BookRegionSelectionOverlay?
     private var adjustmentOverlay: BookRegionAdjustmentOverlay?
     private var displayedRegion: BackendAPI.BookPageRegion?
+    private var layoutTransitionSnapshot: UIView?
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
     private var scrollEnabledBeforeRegionSelection: Bool?
@@ -327,6 +328,12 @@ final class BookPDFView: PDFView {
         let anchorIndex = min(max(anchorPage - 1, 0), document.pageCount - 1)
         guard let anchor = document.page(at: anchorIndex) else { return }
 
+        // PDFKit changes display modes in one non-animatable layout pass. Keep
+        // the currently rendered page above it while the live view settles,
+        // then move that page to the new spread frame and reveal PDFKit below.
+        finishPageLayoutTransition()
+        let oldContentFrame = visiblePageFrame ?? bounds
+        let snapshot = snapshotView(afterScreenUpdates: false)
         let zoomRatio = restingScale > 0 ? max(scaleFactor / restingScale, 1) : 1
         displayMode = targetMode
         displaysAsBook = twoUp
@@ -339,5 +346,73 @@ final class BookPDFView: PDFView {
         if zoomRatio > 1.001, restingScale > 0 {
             scaleFactor = min(restingScale * zoomRatio, maxScaleFactor)
         }
+
+        guard let snapshot, bounds.width > 0, bounds.height > 0 else { return }
+        snapshot.frame = bounds
+        snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        snapshot.isUserInteractionEnabled = false
+        snapshot.accessibilityElementsHidden = true
+        snapshot.layer.minificationFilter = .trilinear
+        snapshot.layer.magnificationFilter = .linear
+        addSubview(snapshot)
+        layoutTransitionSnapshot = snapshot
+
+        // PDFKit reports the new visible pages on the next run loop. Waiting
+        // for that frame avoids animating toward the previous page rectangle.
+        DispatchQueue.main.async { [weak self, weak snapshot] in
+            guard let self, let snapshot, layoutTransitionSnapshot === snapshot else { return }
+            layoutDocumentView()
+            layoutIfNeeded()
+            applyScaleLimits()
+
+            guard animated else {
+                finishPageLayoutTransition()
+                return
+            }
+
+            let finalContentFrame = visiblePageFrame ?? bounds
+            let scale = min(
+                finalContentFrame.width / max(oldContentFrame.width, 1),
+                finalContentFrame.height / max(oldContentFrame.height, 1)
+            )
+            let baseCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+            let oldOffset = CGPoint(
+                x: oldContentFrame.midX - baseCenter.x,
+                y: oldContentFrame.midY - baseCenter.y
+            )
+
+            UIView.animate(
+                withDuration: 0.34,
+                delay: 0.06,
+                options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+            ) {
+                snapshot.transform = CGAffineTransform(scaleX: scale, y: scale)
+                snapshot.center = CGPoint(
+                    x: finalContentFrame.midX - scale * oldOffset.x,
+                    y: finalContentFrame.midY - scale * oldOffset.y
+                )
+                snapshot.alpha = 0
+            } completion: { [weak self, weak snapshot] _ in
+                guard let self, let snapshot, layoutTransitionSnapshot === snapshot else { return }
+                finishPageLayoutTransition()
+            }
+        }
+    }
+
+    private var visiblePageFrame: CGRect? {
+        let frames = visiblePages.map { page in
+            convert(page.bounds(for: .cropBox), from: page).standardized
+        }.filter { !$0.isNull && !$0.isEmpty }
+        guard var frame = frames.first else { return nil }
+        for next in frames.dropFirst() {
+            frame = frame.union(next)
+        }
+        return frame
+    }
+
+    private func finishPageLayoutTransition() {
+        layoutTransitionSnapshot?.layer.removeAllAnimations()
+        layoutTransitionSnapshot?.removeFromSuperview()
+        layoutTransitionSnapshot = nil
     }
 }
