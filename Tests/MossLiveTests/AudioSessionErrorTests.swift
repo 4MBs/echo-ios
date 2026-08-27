@@ -13,7 +13,7 @@ final class AudioSessionErrorTests: XCTestCase {
         NSError(domain: NSOSStatusErrorDomain, code: code)
     }
 
-    func testTheRefusalsThatMeanWaitRatherThanRetry() {
+    func testAudioSessionRefusalsRemainReadableInDiagnostics() {
         XCTAssertEqual(
             AudioCaptureEngine.describe(sessionError(561_145_187)),
             "cannotStartRecording 561145187",
@@ -42,11 +42,12 @@ final class AudioSessionErrorTests: XCTestCase {
         XCTAssertTrue(described.contains(NSOSStatusErrorDomain))
     }
 
-    func testCaptureSessionCanBeResumedFromTheBackground() {
+    func testCaptureSessionMatchesTheVoiceProcessingInputGraph() {
         let options = AudioCaptureEngine.captureSessionOptions
 
-        // Both options make recording mixable. iOS rejects starting a mixable
-        // input session in the background with cannotStartRecording (`'!rec'`).
+        // Echo does not play anything while recording, so it must not duck or
+        // mix unrelated apps. Recovery after a real interruption is handled by
+        // rebuilding the already-running input graph, not by changing category.
         XCTAssertFalse(options.contains(.duckOthers))
         XCTAssertFalse(options.contains(.mixWithOthers))
 
