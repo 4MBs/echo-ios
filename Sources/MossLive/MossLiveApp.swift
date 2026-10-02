@@ -222,7 +222,6 @@ struct MainTabView: View {
         switch model.selectedTab ?? .aufnahme {
         case .aufnahme: LiveView()
         case .stunden: LessonsView()
-        case .lernen: LearnView()
         case .bibliothek: LibraryView()
         case .chat: ChatView()
         case .einstellungen: SettingsView()
@@ -264,7 +263,7 @@ private struct IncomingNoteImportBanner: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case aufnahme, stunden, lernen, bibliothek, chat, einstellungen
+    case aufnahme, stunden, bibliothek, chat, einstellungen
 
     var id: Self { self }
 
@@ -276,7 +275,6 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .aufnahme: "Aufnahme"
         case .stunden: "Stunden"
-        case .lernen: "Lernen"
         case .bibliothek: "Bibliothek"
         case .chat: "Chat mit KI"
         case .einstellungen: "Einstellungen"
@@ -287,10 +285,9 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .aufnahme: "waveform"
         // A folder, not a bookshelf: this tab holds one folder per subject.
-        // The shelf read as books, and Bibliothek two rows below is books —
-        // two book glyphs in a list of five is one too many.
+        // The shelf read as books, and Bibliothek right below is books —
+        // two book glyphs in a list of four is one too many.
         case .stunden: "folder"
-        case .lernen: "brain.head.profile"
         case .bibliothek: "book.closed"
         case .chat: "bubble.left.and.text.bubble.right"
         case .einstellungen: "gearshape"

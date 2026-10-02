@@ -1,7 +1,7 @@
 # Echo
 
 Echo is an iPad app for school: it transcribes lessons live, keeps a searchable
-archive of them, turns them into flashcards, and holds your schoolbooks. All of
+archive of them, answers questions about them, and holds your schoolbooks. All of
 it runs against a backend on a machine you own — there is no cloud and no
 account.
 
@@ -78,8 +78,8 @@ in [docs/building.md](./docs/building.md).
 
 The long version of all of the above lives in [docs/](./docs).
 
-- [What Echo does](./docs/features.md) — the six tabs: recording, the lesson
-  archive, flashcards, the schoolbook reader, chat and settings
+- [What Echo does](./docs/features.md) — the five tabs: recording, the lesson
+  archive, the schoolbook reader, chat and settings
 - [Building and CI](./docs/building.md) — developing an iOS app from Linux
 - [Architecture and repository layout](./docs/architecture.md)
 

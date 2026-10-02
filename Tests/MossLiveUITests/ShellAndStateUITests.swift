@@ -2,7 +2,7 @@ import XCTest
 
 final class ShellAndStateUITests: EchoUITestCase {
     func testEveryPrimaryDestinationLaunchesAndRotates() {
-        let destinations = ["aufnahme", "stunden", "lernen", "bibliothek", "chat", "einstellungen"]
+        let destinations = ["aufnahme", "stunden", "bibliothek", "chat", "einstellungen"]
         // One launch, then the sidebar: relaunching for each destination costs
         // a dozen seconds apiece and tests a launch flag instead of navigation.
         launch(tab: destinations[0])
@@ -12,7 +12,6 @@ final class ShellAndStateUITests: EchoUITestCase {
             switch tab {
             case "aufnahme": XCTAssertTrue(app.buttons["Aufnahme starten"].exists)
             case "stunden": XCTAssertTrue(app.navigationBars["Stunden"].exists)
-            case "lernen": XCTAssertTrue(app.navigationBars["Lernen"].exists)
             case "bibliothek": XCTAssertTrue(app.navigationBars["Bibliothek"].exists)
             case "chat": XCTAssertTrue(app.buttons["Chatverlauf"].exists)
             default: XCTAssertTrue(app.navigationBars["Einstellungen"].exists)
@@ -53,7 +52,7 @@ final class ShellAndStateUITests: EchoUITestCase {
     func testEmptyLoadingOfflineUnauthorizedAndLongContentMatrix() {
         executionTimeAllowance = 600
         let states = ["empty", "loading", "offline", "unauthorized", "serverError", "longContent"]
-        let tabs = ["stunden", "lernen", "bibliothek", "chat"]
+        let tabs = ["stunden", "bibliothek", "chat"]
         for state in states {
             launch(tab: tabs[0], scenario: state)
             for tab in tabs {
@@ -85,7 +84,7 @@ final class ShellAndStateUITests: EchoUITestCase {
 
     func testAccessibilityAuditOnEveryPrimaryDestination() throws {
         var findings: [String] = []
-        let destinations = ["aufnahme", "stunden", "lernen", "bibliothek", "chat", "einstellungen"]
+        let destinations = ["aufnahme", "stunden", "bibliothek", "chat", "einstellungen"]
         launch(tab: destinations[0])
         for tab in destinations {
             if tab != destinations[0] { switchTo(tab: tab) }
@@ -97,7 +96,7 @@ final class ShellAndStateUITests: EchoUITestCase {
                 // frame. Suppress only that identified system-row false
                 // positive; all app content remains audited for clipping.
                 let sidebarLabels: Set<String> = [
-                    "Aufnahme", "Stunden", "Lernen", "Bibliothek", "Chat mit KI", "Einstellungen",
+                    "Aufnahme", "Stunden", "Bibliothek", "Chat mit KI", "Einstellungen",
                 ]
                 let isSystemSidebarNode = issue.element?.identifier.hasPrefix("tab.") == true
                     || sidebarLabels.contains(issue.element?.label ?? "")

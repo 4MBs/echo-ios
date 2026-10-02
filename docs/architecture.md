@@ -21,7 +21,7 @@ Sources/MossLive/
   Network/                   wire protocol, WebSocket client with resume + disk backlog
   Model/                     app state machine, settings, stores
   Notes/                     Goodnotes/Notability/PDF import, parsed on the iPad
-  Views/                     SwiftUI: transcript, lessons, learn, library, chat
+  Views/                     SwiftUI: transcript, lessons, library, chat
   Testing/                   deterministic fixtures for -UITesting launches
 Sources/Shared/              settings and share-inbox types used by every target
 Sources/MossLiveWidget/      Home and Lock Screen answer widget

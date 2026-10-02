@@ -129,7 +129,7 @@ jobs:
           exported = pathlib.Path("exported")
           out = pathlib.Path("screenshots")
           manifest = json.loads((exported / "manifest.json").read_text())
-          wanted = {"recording", "lessons", "learn", "chat", "library"}
+          wanted = {"recording", "lessons", "chat", "library"}
           found = set()
 
           for test in manifest:

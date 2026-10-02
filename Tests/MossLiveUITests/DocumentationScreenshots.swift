@@ -11,7 +11,6 @@ final class DocumentationScreenshots: EchoUITestCase {
     func testCaptureDocumentationScreens() {
         capture(name: "recording", tab: "aufnahme", scenario: "recording")
         capture(name: "lessons", tab: "stunden", scenario: "populated")
-        capture(name: "learn", tab: "lernen", scenario: "populated")
         capture(name: "chat", tab: "chat", scenario: "populated")
         capture(name: "library", tab: "bibliothek", scenario: "populated")
     }
