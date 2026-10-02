@@ -197,7 +197,8 @@ lesson:
 ## Bibliothek
 
 The schoolbook shelf. PDFs sit in one folder on the server, appear in the app as
-a grid of covers, and a book downloads once, into permanent storage, the first
+a grid of covers, each named underneath (by the name given to it in the reader,
+if it was renamed), and a book downloads once, into permanent storage, the first
 time it is opened. After that it is available offline.
 
 The reader shows a book rather than a document. One page, or a real 2–3 spread,

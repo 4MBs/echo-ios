@@ -37,7 +37,10 @@ struct LibraryView: View {
             .groupedScreen()
         } else {
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 148, maximum: 210), spacing: 24)], spacing: 28) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 148, maximum: 210), spacing: 24, alignment: .top)],
+                    spacing: 30
+                ) {
                     ForEach(books) { book in
                         shelfItem(book)
                     }
@@ -80,10 +83,9 @@ struct LibraryView: View {
                 downloadedBookIDs = (downloadedBookIDs ?? []).union([book.id])
             }
         } label: {
-            BookCover(api: api, book: book, unavailable: needsConnection)
+            ShelfItemLabel(api: api, book: book, unavailable: needsConnection)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(needsConnection ? "\(book.title), Download benötigt" : book.title)
+        .buttonStyle(PressableCardStyle())
         .accessibilityHint(needsConnection ? "Öffnet den Download mit einer Möglichkeit zum erneuten Versuch" : "")
     }
 
@@ -131,6 +133,51 @@ struct LibraryView: View {
         }.value
         guard !Task.isCancelled else { return }
         downloadedBookIDs = available
+    }
+}
+
+/// A cover and the book's name under it.
+///
+/// The shelf used to be covers alone. A schoolbook's cover usually names it,
+/// but not when the cover has not arrived yet — every placeholder was the same
+/// grey book — and never when the book had been renamed: the name given in the
+/// reader showed up in the reader and nowhere else.
+private struct ShelfItemLabel: View {
+    let api: BackendAPI
+    let book: BackendAPI.Book
+    let unavailable: Bool
+
+    @AppStorage private var renamedTitle: String
+
+    init(api: BackendAPI, book: BackendAPI.Book, unavailable: Bool) {
+        self.api = api
+        self.book = book
+        self.unavailable = unavailable
+        // The same key the reader's "Buch umbenennen" writes.
+        _renamedTitle = AppStorage(wrappedValue: "", "library.bookTitle.\(book.id)")
+    }
+
+    private var title: String {
+        let custom = renamedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? book.title : custom
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            BookCover(api: api, book: book, unavailable: unavailable)
+            Text(title)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(unavailable ? .secondary : .primary)
+                .multilineTextAlignment(.leading)
+                // Two lines, always: a grid whose rows depend on how long a
+                // title happens to be does not line up.
+                .lineLimit(2, reservesSpace: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 2)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(unavailable ? "\(title), Download benötigt" : title)
     }
 }
 

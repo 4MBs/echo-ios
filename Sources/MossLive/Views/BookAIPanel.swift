@@ -91,9 +91,27 @@ struct BookAIPanel: View {
 
     // MARK: - Header
 
+    /// The header names what the next question is about. Each page and each
+    /// marked region keeps a thread of its own, so the place the panel is
+    /// answering for is the one thing about it worth a line of type — and
+    /// without it a page turn silently swapped the conversation underneath.
     private var panelHeader: some View {
         HStack(spacing: 4) {
-            Spacer()
+            Label {
+                Text(contextTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+            } icon: {
+                Image(systemName: context.region == nil ? "doc.text" : "rectangle.dashed")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.leading, 12)
+            .animation(reduceMotion ? nil : .snappy, value: contextTitle)
+            .accessibilityLabel("Frage bezieht sich auf \(contextTitle)")
+
+            Spacer(minLength: 8)
 
             Button {
                 showHistory = true
@@ -131,13 +149,28 @@ struct BookAIPanel: View {
         }
     }
 
+    /// "Seite 12", "Seiten 12–13", or the marked region on its page. Pages in
+    /// front of the book's own numbering are named by their PDF page, as the
+    /// sources are.
+    private var contextTitle: String {
+        let pages = context.pages.sorted()
+        guard let first = pages.first, let last = pages.last else { return "Seite fragen" }
+        if context.region != nil {
+            return "Bereich auf \(numbering.citationLabel(pdfPage: first))"
+        }
+        guard first != last else { return numbering.citationLabel(pdfPage: first) }
+        if let from = numbering.printedNumber(first), let to = numbering.printedNumber(last) {
+            return "Seiten \(from)–\(to)"
+        }
+        return "PDF-Seiten \(first)–\(last)"
+    }
+
     // MARK: - Messages
 
     @ViewBuilder
     private var messagesArea: some View {
         if store.turns.isEmpty, store.pending == nil {
-            Color.black
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            emptyConversation
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -172,6 +205,34 @@ struct BookAIPanel: View {
                 .onChange(of: store.sending) { scrollToBottom(proxy) }
             }
         }
+    }
+
+    /// What an unasked page shows: what can be asked, and the one tool that
+    /// is easy to miss — marking a region instead of asking about the page.
+    private var emptyConversation: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.bottom, 4)
+                .accessibilityHidden(true)
+            Text("Frag etwas zu dieser Seite")
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text(
+                "Eine Aufgabe, ein Begriff, eine Abbildung. Für eine bestimmte Stelle "
+                    + "zuerst mit dem gestrichelten Rahmen einen Bereich markieren."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 300)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+        .accessibilityElement(children: .combine)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

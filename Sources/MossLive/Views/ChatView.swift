@@ -156,7 +156,7 @@ struct ChatView: View {
     @ViewBuilder
     private var messagesArea: some View {
         if chat.messages.isEmpty {
-            Color.clear
+            ChatEmptyState(context: chat.context)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
@@ -327,18 +327,38 @@ struct ChatView: View {
                 .accessibilityLabel("Kontext: Aktuelle Aufnahme")
         } else {
             Menu {
-                Button("Ohne Kontext", systemImage: chat.context == .none ? "checkmark" : "circle") {
+                Button {
                     chat.context = .none
+                } label: {
+                    if chat.context == .none {
+                        Label("Ohne Kontext", systemImage: "checkmark")
+                    } else {
+                        Text("Ohne Kontext")
+                    }
                 }
                 if !lessons.isEmpty { Divider() }
-                ForEach(lessons) { lesson in
-                    Button(lesson.compactDisplayTitle) {
-                        chat.context = .lesson(id: lesson.id, title: lesson.compactDisplayTitle)
+                // A term's worth of lessons in one flat menu is a list taller
+                // than the screen. Past a handful they are filed by subject,
+                // the way Stunden files them.
+                if lessons.count > Self.flatLessonLimit {
+                    ForEach(lessonsBySubject, id: \.subject) { group in
+                        Menu(group.subject) {
+                            ForEach(group.lessons) { lesson in
+                                lessonContextButton(lesson, title: lesson.displayTitle, detail: lessonDate(lesson))
+                            }
+                        }
+                    }
+                } else {
+                    ForEach(lessonsNewestFirst) { lesson in
+                        lessonContextButton(lesson, title: lesson.compactDisplayTitle, detail: lessonDate(lesson))
                     }
                 }
             } label: {
                 if case .lesson = chat.context {
-                    Label("Stunde", systemImage: "text.book.closed")
+                    // The subject rather than the word "Stunde": the capsule
+                    // should say which lesson, not that there is one.
+                    Label(selectedLessonSubject ?? "Stunde", systemImage: "text.book.closed")
+                        .lineLimit(1)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tint)
                         .padding(.horizontal, 9)
@@ -524,45 +544,50 @@ private struct ChatMessageRow: View {
 
     var body: some View {
         if message.role == .user {
-            VStack(alignment: .trailing, spacing: 5) {
+            // Attachments sit above the bubble rather than inside it. Inside,
+            // a file tile pushed the bubble out to its full width and left the
+            // question floating at the far end of an empty grey slab.
+            VStack(alignment: .trailing, spacing: 6) {
                 if !message.attachments.isEmpty {
                     ChatSentAttachments(attachments: message.attachments)
                 }
-                if message.text.count >= 1200 {
-                    Button { showLongMessage = true } label: {
-                        ChatLongMessageCard(text: message.text)
+                VStack(alignment: .trailing, spacing: 5) {
+                    if message.text.count >= 1200 {
+                        Button { showLongMessage = true } label: {
+                            ChatLongMessageCard(text: message.text)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(renderedMarkdown(message.text))
+                            .font(.body)
+                            .textSelection(.enabled)
+                            .multilineTextAlignment(.leading)
+                            // Message text keeps its own measured height: the
+                            // accessibility audit reads a bubble that is even a
+                            // point short of its descenders as clipped text.
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("chat.message.text")
                     }
-                    .buttonStyle(.plain)
-                } else {
-                    Text(renderedMarkdown(message.text))
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .multilineTextAlignment(.leading)
-                        // Message text keeps its own measured height: the
-                        // accessibility audit reads a bubble that is even a
-                        // point short of its descenders as clipped text.
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("chat.message.text")
+                    if message.usedWebSearch {
+                        Label("Websuche", systemImage: "globe")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.blue)
+                    }
                 }
-                if message.usedWebSearch {
-                    Label("Websuche", systemImage: "globe")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.blue)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 10)
+                .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .frame(maxWidth: 640, alignment: .trailing)
+                .contextMenu {
+                    Button(action: onResend) { Label("Erneut senden", systemImage: "arrow.clockwise") }
+                        .disabled(isSending)
+                    Button(action: copy) { Label("Kopieren", systemImage: "doc.on.doc") }
+                    Button(action: onEdit) { Label("Bearbeiten", systemImage: "pencil") }
+                        .disabled(isSending)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .frame(maxWidth: 640, alignment: .trailing)
             .padding(.leading, 48)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .contextMenu {
-                Button(action: onResend) { Label("Erneut senden", systemImage: "arrow.clockwise") }
-                    .disabled(isSending)
-                Button(action: copy) { Label("Kopieren", systemImage: "doc.on.doc") }
-                Button(action: onEdit) { Label("Bearbeiten", systemImage: "pencil") }
-                    .disabled(isSending)
-            }
             .sheet(isPresented: $showLongMessage) {
                 ChatLongMessageSheet(text: message.text)
                     .presentationDetents([.medium, .large])
@@ -686,303 +711,52 @@ struct ChatStatusPill: View {
     }
 }
 
-// MARK: - Attachments
+// MARK: - Choosing a lesson as context
 
-private struct ChatAttachmentPreviewBar: View {
-    let attachments: [ChatStore.Attachment]
-    let processingCount: Int
-    let onRemove: (UUID) -> Void
+extension ChatView {
+    private static let flatLessonLimit = 8
 
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(attachments) { attachment in
-                    ChatAttachmentChip(attachment: attachment, onRemove: { onRemove(attachment.id) })
+    private var lessonsNewestFirst: [BackendAPI.LessonInfo] {
+        lessons.sortedNewestFirst
+    }
+
+    private var lessonsBySubject: [(subject: String, lessons: [BackendAPI.LessonInfo])] {
+        let groups = Dictionary(grouping: lessonsNewestFirst) { $0.displaySubject ?? otherSubjectName }
+        return groups
+            .map { (subject: $0.key, lessons: $0.value) }
+            .sorted { lhs, rhs in
+                if (lhs.subject == otherSubjectName) != (rhs.subject == otherSubjectName) {
+                    return rhs.subject == otherSubjectName
                 }
-                ForEach(0 ..< processingCount, id: \.self) { _ in
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Verarbeiten…").font(.caption)
-                    }
-                    .padding(8)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-                }
+                return lhs.subject.localizedStandardCompare(rhs.subject) == .orderedAscending
             }
-        }
-        .scrollIndicators(.hidden)
-    }
-}
-
-private struct ChatAttachmentChip: View {
-    let attachment: ChatStore.Attachment
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            attachmentPreview
-                .frame(width: 38, height: 38)
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attachment.fileName)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
-                Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(6)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-        .frame(maxWidth: 210)
     }
 
-    @ViewBuilder
-    private var attachmentPreview: some View {
-        if let data = attachment.thumbnailData, let image = UIImage(data: data) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-        } else {
-            ZStack {
-                Color.secondary.opacity(0.08)
-                Image(systemName: attachment.kind.systemImage)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private struct ChatSentAttachments: View {
-    let attachments: [ChatStore.Attachment]
-
-    // The chip grows with the student's text instead of holding one size and
-    // cutting the name in half against the message underneath it.
-    @ScaledMetric(relativeTo: .caption) private var tileWidth: CGFloat = 160
-    @ScaledMetric(relativeTo: .caption) private var thumbnailWidth: CGFloat = 150
-    @ScaledMetric(relativeTo: .caption) private var thumbnailHeight: CGFloat = 110
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(attachments) { attachment in
-                    VStack(alignment: .leading, spacing: 5) {
-                        if let data = attachment.thumbnailData, let image = UIImage(data: data) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: thumbnailWidth, height: thumbnailHeight)
-                                .clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        } else {
-                            Image(systemName: attachment.kind.systemImage)
-                                .font(.title2)
-                        }
-                        Text(attachment.fileName)
-                            .font(.caption.weight(.medium))
-                            // A name cut off at the tile's edge hides the very
-                            // part that identifies the file; keep both ends.
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("chat.attachment.name")
-                    }
-                    .frame(maxWidth: tileWidth, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    // "Versuchsprotokoll.pdf" spoken as one word is not a
-                    // sentence anyone can follow: say what it is instead.
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.spokenLabel(for: attachment))
-                }
-            }
-        }
-        .scrollIndicators(.hidden)
+    private var selectedLessonSubject: String? {
+        guard case .lesson(let id, _) = chat.context else { return nil }
+        return lessons.first { $0.id == id }?.displaySubject
     }
 
-    private static func spokenLabel(for attachment: ChatStore.Attachment) -> String {
-        let name = attachment.fileName as NSString
-        let type = name.pathExtension.uppercased()
-        let base = name.deletingPathExtension
-        return type.isEmpty ? "Anhang: \(base)" : "Anhang: \(base), \(type)"
-    }
-}
-
-private struct ChatLongMessageCard: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "doc.text").font(.title3)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Lange Nachricht").font(.subheadline.weight(.semibold))
-                Text("\(text.split(whereSeparator: \.isWhitespace).count) Wörter")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(text).font(.caption).lineLimit(2)
+    /// One lesson in the context menu: its name, the day it was, and a tick
+    /// when it is what the next question will be answered from.
+    private func lessonContextButton(
+        _ lesson: BackendAPI.LessonInfo,
+        title: String,
+        detail: String
+    ) -> some View {
+        Button {
+            chat.context = .lesson(id: lesson.id, title: lesson.compactDisplayTitle)
+        } label: {
+            if case .lesson(let id, _) = chat.context, id == lesson.id {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
             }
-            Spacer()
-            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct ChatLongMessageSheet: View {
-    let text: String
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                Text(text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
-            }
-            .navigationTitle("Lange Nachricht")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
-            }
-        }
-    }
-}
-
-// MARK: - Sheets
-
-private struct ChatAddSheet: View {
-    let canUseCamera: Bool
-    let onCamera: () -> Void
-    let onPhotos: () -> Void
-    let onFiles: () -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 22) {
-                HStack(spacing: 12) {
-                    if canUseCamera { option("Kamera", systemImage: "camera", action: onCamera) }
-                    option("Fotos", systemImage: "photo.on.rectangle", action: onPhotos)
-                    option("Dateien", systemImage: "doc.badge.plus", action: onFiles)
-                }
-                Text("Bilderkennung und Dokumenttext werden lokal auf diesem Gerät verarbeitet.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
-            .padding(.top, 24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
-            .navigationTitle("Zum Chat hinzufügen")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
-            }
+            Text(detail)
         }
     }
 
-    private func option(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.title2)
-                    .frame(width: 48, height: 48)
-                    .background(.background, in: Circle())
-                Text(title).font(.caption.weight(.medium))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(.background, in: RoundedRectangle(cornerRadius: 16))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("chat.add.\(title.lowercased())")
-    }
-}
-
-private struct ChatHistorySheet: View {
-    let chat: ChatStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var renamingConversation: ChatStore.Conversation?
-    @State private var renameText = ""
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(chat.conversations) { conversation in
-                    Button {
-                        chat.select(conversation.id)
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(conversation.title)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                if !conversation.messages.isEmpty {
-                                    Text(conversation.updatedAt, style: .relative)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            if conversation.id == chat.selectedConversationID {
-                                Image(systemName: "checkmark").foregroundStyle(.tint)
-                            }
-                        }
-                    }
-                    .swipeActions {
-                        Button("Löschen", role: .destructive) { chat.delete(conversation.id) }
-                        Button("Umbenennen") {
-                            renamingConversation = conversation
-                            renameText = conversation.title
-                        }
-                        .tint(.blue)
-                    }
-                    .contextMenu {
-                        Button("Umbenennen", systemImage: "pencil") {
-                            renamingConversation = conversation
-                            renameText = conversation.title
-                        }
-                        Button("Löschen", systemImage: "trash", role: .destructive) {
-                            chat.delete(conversation.id)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Chatverlauf")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Fertig") { dismiss() } }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        chat.createConversation()
-                        dismiss()
-                    } label: {
-                        Label("Neue Unterhaltung", systemImage: "plus")
-                    }
-                }
-            }
-            .alert("Unterhaltung umbenennen", isPresented: renamePresented) {
-                TextField("Titel", text: $renameText)
-                Button("Abbrechen", role: .cancel) { renamingConversation = nil }
-                Button("Sichern") {
-                    if let conversation = renamingConversation {
-                        chat.rename(conversation.id, to: renameText)
-                    }
-                    renamingConversation = nil
-                }
-            }
-        }
-    }
-
-    private var renamePresented: Binding<Bool> {
-        Binding(
-            get: { renamingConversation != nil },
-            set: { if !$0 { renamingConversation = nil } }
-        )
+    private func lessonDate(_ lesson: BackendAPI.LessonInfo) -> String {
+        lesson.startedAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 }
