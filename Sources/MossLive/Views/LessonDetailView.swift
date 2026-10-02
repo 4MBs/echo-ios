@@ -562,7 +562,7 @@ private struct TranscriptCard: View {
             Text("Transkript")
                 .font(.headline)
             Spacer(minLength: 0)
-            Text("\(matches.count) Zeilen")
+            Text(matches.count == 1 ? "1 Zeile" : "\(matches.count) Zeilen")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

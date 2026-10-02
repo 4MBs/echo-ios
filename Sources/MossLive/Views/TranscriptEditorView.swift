@@ -70,6 +70,9 @@ struct TranscriptEditorView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            // A swipe down must not throw away an hour of corrections. The
+            // explicit "Abbrechen" still discards; a stray drag no longer does.
+            .interactiveDismissDisabled(saving || hasChanges)
             .sheet(isPresented: $showingHistory) {
                 TranscriptHistoryView(api: api, lesson: lesson) { restored in
                     onApply(restored)
@@ -103,6 +106,13 @@ struct TranscriptEditorView: View {
                 .scrollContentBackground(.hidden)
         }
         .padding(.vertical, 4)
+    }
+
+    private var hasChanges: Bool {
+        rows.count != lesson.segments.count
+            || zip(rows, lesson.segments).contains { row, segment in
+                row.text != segment.text || row.t0 != segment.t0 || row.t1 != segment.t1
+            }
     }
 
     private func mergeWithPrevious(_ id: UUID) {

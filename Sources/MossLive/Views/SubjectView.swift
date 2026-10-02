@@ -345,7 +345,7 @@ struct SubjectView: View {
         lessons.removeAll { $0.id == lesson.id }
         do {
             try await api.deleteLesson(id: lesson.id)
-            BackendAPI.purgeCachedAudio(id: lesson.id)
+            Self.forgetLocally(lesson.id)
             await onChanged()
         } catch {
             lessons = previous
@@ -372,7 +372,7 @@ struct SubjectView: View {
         for id in targets {
             do {
                 try await api.deleteLesson(id: id)
-                BackendAPI.purgeCachedAudio(id: id)
+                Self.forgetLocally(id)
             } catch {
                 failed.insert(id)
                 lastError = error.localizedDescription
@@ -389,10 +389,28 @@ struct SubjectView: View {
         await onChanged()
     }
 
+    /// What the iPad kept of a lesson that is gone from the server: its
+    /// recording, and the stored copies that let it open offline. Left behind,
+    /// they are megabytes of a lesson nothing can reach any more.
+    private static func forgetLocally(_ id: String) {
+        BackendAPI.purgeCachedAudio(id: id)
+        OfflineCache.remove(key: OfflineCache.Key.lesson(id))
+        OfflineCache.remove(key: OfflineCache.Key.waveform(id))
+    }
+
     /// Refile lessons under another subject. They leave this folder as each one
     /// lands, so the board shows how far it has got.
+    ///
+    /// Picking the subject the folder already is changes nothing, and is
+    /// answered with nothing. It used to be sent anyway and the lessons taken
+    /// off the board as if they had moved — they had not, so they were simply
+    /// gone from the folder they were still filed in until it was reopened.
     private func changeSubject(of ids: [String], to subject: BackendAPI.SubjectInfo) async {
         guard !ids.isEmpty else { return }
+        guard folder.isOther || subject.name != folder.name else {
+            endSelection()
+            return
+        }
         isWorking = true
         var lastError: String?
         var failed = 0

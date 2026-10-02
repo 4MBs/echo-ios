@@ -172,6 +172,16 @@ final class LessonAudioPlayer {
         return segments.firstIndex { time >= $0.t0 && time < $0.t1 }
     }
 
+    /// Whether playback stopped because the recording ran out rather than
+    /// because something paused it. AVAudioPlayer rewinds itself when it
+    /// finishes, so the last position the ticker saw is the better witness.
+    private static func reachedEnd(_ player: AVAudioPlayer, lastSeen: Double) -> Bool {
+        let tail = max(0.5, player.duration * 0.002)
+        return lastSeen >= player.duration - tail
+            || player.currentTime >= player.duration - tail
+            || (player.currentTime < 0.05 && lastSeen > 0.5)
+    }
+
     private func clamp(_ time: Double, _ player: AVAudioPlayer) -> Double {
         max(0, min(time, max(0, player.duration - 0.05)))
     }
@@ -182,14 +192,22 @@ final class LessonAudioPlayer {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(150))
                 guard let self, let player = self.player else { return }
-                self.currentTime = player.currentTime
                 if !player.isPlaying, self.isPlaying {
-                    // finished (or was paused elsewhere): reset to the start
                     self.isPlaying = false
-                    self.currentTime = 0
-                    self.activeIndex = nil
+                    if Self.reachedEnd(player, lastSeen: self.currentTime) {
+                        self.currentTime = 0
+                        self.activeIndex = nil
+                    } else {
+                        // Paused from outside — a call, Siri, another app
+                        // taking the audio. The player keeps its place, so
+                        // the page must too: resetting the clock here made
+                        // the play button start the lesson over from 0:00.
+                        self.currentTime = player.currentTime
+                        self.refreshActiveIndex()
+                    }
                     return
                 }
+                self.currentTime = player.currentTime
                 self.refreshActiveIndex()
             }
         }

@@ -205,7 +205,12 @@ final class AppModel {
             subjects = fresh
             OfflineCache.save(fresh, as: OfflineCache.Key.timetableSubjects)
         } catch {
-            if subjects.isEmpty { bannerMessage = error.localizedDescription }
+            // Not a banner. This runs at launch, before anyone asked for
+            // anything, and the subject picker is optional — without a
+            // catalogue it is simply unavailable. Pinning the request's error
+            // over the recording screen put "Keine Verbindung zum Server" or
+            // an unconfigured address there on every launch away from home.
+            log.info("subject catalogue unavailable: \(error.localizedDescription, privacy: .public)")
         }
         recordingSubjectSelection.refresh(
             catalogue: subjects,

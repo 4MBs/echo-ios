@@ -54,9 +54,18 @@ struct LiveView: View {
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                // Closable: several of these report something that has already
+                // happened — a recording stopped at the bell, a backlog that
+                // finished uploading — and nothing else ever takes them down
+                // before the next recording starts.
                 if let banner = model.bannerMessage {
-                    NoticeBanner(text: banner, systemImage: "info.circle.fill", tint: .orange)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    NoticeBanner(
+                        text: banner,
+                        systemImage: "info.circle.fill",
+                        tint: .orange,
+                        dismiss: { model.bannerMessage = nil }
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if model.phase == .reconnecting, model.bufferedSeconds >= 1 {
                     NoticeBanner(

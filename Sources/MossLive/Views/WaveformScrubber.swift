@@ -30,7 +30,10 @@ struct WaveformScrubber: View {
         GeometryReader { geo in
             let bars = downsampled(to: geo.size.width)
             Canvas { context, size in
-                guard !bars.isEmpty else { return }
+                guard !bars.isEmpty else {
+                    drawPlainTrack(in: context, size: size)
+                    return
+                }
                 let slot = size.width / CGFloat(bars.count)
                 let width = max(1.2, slot - 1.3)
                 let playedUntil = size.width * CGFloat(min(max(progress, 0), 1))
@@ -68,6 +71,27 @@ struct WaveformScrubber: View {
         .accessibilityElement()
         .accessibilityLabel("Aufnahme")
         .accessibilityValue("\(Int((progress * 100).rounded())) Prozent")
+        // Swiping up or down with VoiceOver moves through the recording in
+        // steps of a twentieth, which the drag alone never offered.
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onScrub(min(progress + 0.05, 1))
+            case .decrement: onScrub(max(progress - 0.05, 0))
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Without an envelope — no audio yet, or a server that cannot decode it —
+    /// the control is a plain track that still scrubs, and looks like one.
+    private func drawPlainTrack(in context: GraphicsContext, size: CGSize) {
+        let thickness: CGFloat = 5
+        let track = CGRect(x: 0, y: (size.height - thickness) / 2, width: size.width, height: thickness)
+        context.fill(Path(roundedRect: track, cornerRadius: thickness / 2), with: .color(Color(.tertiarySystemFill)))
+        var played = track
+        played.size.width = size.width * CGFloat(min(max(progress, 0), 1))
+        guard played.width > 0 else { return }
+        context.fill(Path(roundedRect: played, cornerRadius: thickness / 2), with: .color(Theme.accent))
     }
 
     /// One bar per ~3.5pt, each the loudest moment it covers. Taking the peak
@@ -166,26 +190,21 @@ struct LessonPlayer: View {
 
     // MARK: - Waveform and clock
 
-    @ViewBuilder
+    /// Without peaks the scrubber draws a plain track. It used to be a
+    /// `ProgressView` instead, which looked like a track and ignored the
+    /// finger — the recording could only be played from the start.
     private var scrubber: some View {
-        if peaks.isEmpty {
-            // No envelope (no audio, or a server that cannot decode it): a
-            // plain track still scrubs, and says so by looking like one.
-            ProgressView(value: fraction)
-                .frame(height: 52)
-        } else {
-            WaveformScrubber(
-                peaks: peaks,
-                progress: fraction,
-                onScrub: { target in
-                    Task {
-                        guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
-                        player.seek(to: target * max(player.duration, 0))
-                    }
-                },
-                height: 52
-            )
-        }
+        WaveformScrubber(
+            peaks: peaks,
+            progress: fraction,
+            onScrub: { target in
+                Task {
+                    guard await player.ensureLoaded(api: api, lessonId: lessonId) else { return }
+                    player.seek(to: target * max(player.duration, 0))
+                }
+            },
+            height: 52
+        )
     }
 
     private var clock: some View {

@@ -99,7 +99,9 @@ struct SubjectVocabularyView: View {
 
     private func add() async {
         let additions = parsedTerms
-        guard !additions.isEmpty else { return }
+        // Return on the keyboard reaches here too, and is not disabled while
+        // a save is running the way the button is.
+        guard !additions.isEmpty, !saving else { return }
         saving = true
         do {
             terms = try await api.addVocabulary(subject: subject, terms: additions)
