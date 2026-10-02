@@ -38,19 +38,52 @@ struct TranscriptPane: View {
 }
 
 /// What fills the transcript area before there is a transcript: while recording,
-/// one quiet line until the first words land. At rest, deliberately nothing —
-/// the page is left blank.
+/// one quiet line until the first words land. At rest, one quiet paragraph
+/// that says what this page is for.
+///
+/// It used to be nothing at all at rest. That kept the screen calm, but a
+/// blank page above a single button gave no hint that the button fills the
+/// page — the first recording of every install began by guessing. The text is
+/// set in the faintest colours the system has, so it is calm all the same.
 struct TranscriptEmptyState: View {
     @Environment(AppModel.self) private var model
 
+    @ScaledMetric(relativeTo: .largeTitle) private var glyphSize: CGFloat = 40
+
     var body: some View {
-        if model.phase == .recording {
-            Label("Warte auf die ersten Wörter…", systemImage: "waveform")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-                .symbolEffect(.variableColor.iterative)
-                .transition(.opacity)
+        Group {
+            if model.phase == .recording {
+                Label("Warte auf die ersten Wörter…", systemImage: "waveform")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .symbolEffect(.variableColor.iterative)
+            } else if !model.isRecording {
+                idle
+            }
         }
+        .transition(.opacity)
+        .animation(.smooth(duration: 0.3), value: model.phase == .recording)
+    }
+
+    private var idle: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "text.bubble")
+                .font(.system(size: glyphSize, weight: .ultraLight))
+                .foregroundStyle(.quaternary)
+                .padding(.bottom, 4)
+                .accessibilityHidden(true)
+            Text("Bereit für die Stunde")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("Starte unten die Aufnahme. Was gesagt wird, erscheint hier.")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 360)
+        .padding(.horizontal, 24)
+        .accessibilityElement(children: .combine)
     }
 }
 

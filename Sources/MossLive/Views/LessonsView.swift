@@ -17,7 +17,9 @@ struct LessonsView: View {
     @State private var catalogue: [BackendAPI.SubjectInfo] = []
     @State private var loading = true
     @State private var loadError: Error?
-    @State private var sort: FolderSort = .name
+    /// Remembered: whoever sorts by "Zuletzt aufgenommen" wants it that way
+    /// the next time the grid opens too.
+    @AppStorage("lessons.folderSort") private var sort: FolderSort = .name
     @State private var searchText = ""
     /// The subject whose folder was tapped while it had nothing in it.
     @State private var emptySubject: String?

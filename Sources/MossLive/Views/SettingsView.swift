@@ -39,12 +39,17 @@ struct SettingsView: View {
                     NavigationLink {
                         RecordingSettingsView()
                     } label: {
-                        SettingsRow(title: "Aufnahme", systemImage: "waveform", tint: .pink)
+                        SettingsRow(
+                            title: "Aufnahme",
+                            systemImage: "waveform",
+                            tint: .pink,
+                            value: "\(model.settings.bitrate / 1000) kbit/s"
+                        )
                     }
                     NavigationLink {
                         AISettingsView()
                     } label: {
-                        SettingsRow(title: "KI", systemImage: "sparkles", tint: .purple)
+                        SettingsRow(title: "KI", systemImage: "sparkles", tint: .purple, value: aiValue)
                     }
                 }
 
@@ -84,6 +89,18 @@ struct SettingsView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Einstellungen")
             .task { await model.refreshTimetable() }
+            .task { await model.aiConfiguration.load(api: model.api) }
+        }
+    }
+
+    /// Which AI answers, once the server has said. Nothing rather than a guess
+    /// while it has not: the provider lives on the server, not on the iPad.
+    private var aiValue: String? {
+        switch model.aiConfiguration.settings?.provider {
+        case "chatgpt": "ChatGPT"
+        case "claude": "Claude"
+        case "gemini": "Gemini"
+        default: nil
         }
     }
 
