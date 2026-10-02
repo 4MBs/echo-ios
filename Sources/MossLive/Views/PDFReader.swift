@@ -33,7 +33,10 @@ struct PDFReader: View {
     }
 
     @State private var document: PDFDocument?
-    @State private var twoUp = true
+    /// One page or a spread, remembered across books and launches: whoever
+    /// reads in portrait and switched to one page should not be handed a
+    /// spread of postage stamps every time a book opens.
+    @AppStorage("reader.twoUp") private var twoUp = true
     @State private var currentPage = 1
     @State private var visiblePages: [Int] = [1]
     @State private var pageCount = 0
@@ -500,7 +503,9 @@ struct PDFReader: View {
     /// explicit when opened.
     private var modeToggle: some View {
         Menu {
-            Picker("Seitendarstellung", selection: $twoUp) {
+            // Animated so the bar's glyph morphs into the new layout's rather
+            // than swapping; the pages themselves are moved by the PDF view.
+            Picker("Seitendarstellung", selection: $twoUp.animation(reduceMotion ? nil : .snappy)) {
                 Label("Einzelseite", systemImage: "rectangle.portrait")
                     .tag(false)
                 Label("Doppelseite", systemImage: "rectangle.portrait.on.rectangle.portrait")
@@ -530,6 +535,7 @@ struct PDFReader: View {
             }
         } label: {
             Image(systemName: twoUp ? "rectangle.portrait.on.rectangle.portrait" : "rectangle.portrait")
+                .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.glass)
         .accessibilityLabel("Seitendarstellung")

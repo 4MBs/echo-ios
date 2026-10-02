@@ -9,7 +9,13 @@ final class BookPDFView: PDFView {
     private var selectionOverlay: BookRegionSelectionOverlay?
     private var adjustmentOverlay: BookRegionAdjustmentOverlay?
     private var displayedRegion: BackendAPI.BookPageRegion?
-    private var layoutTransitionSnapshot: UIView?
+    /// The stand-in shown while the layout changes between one page and a
+    /// spread. See `setPageLayout`.
+    private var layoutTransition: PageLayoutTransitionStage?
+    /// The colour behind the reader. The stand-in paints its backdrop with it,
+    /// and covers the live view while PDFKit relayouts, so any difference
+    /// would flash for the length of the move.
+    var canvasColor: UIColor = .systemGroupedBackground
     private weak var observedScrollView: UIScrollView?
     private var scrollObservations: [NSKeyValueObservation] = []
     private var scrollEnabledBeforeRegionSelection: Bool?
@@ -37,11 +43,18 @@ final class BookPDFView: PDFView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // The pictures of a layout change belong to the size they were taken
+        // at. A resize under them — the assistant opening, a rotation — would
+        // move every page somewhere else, so the change ends where it is.
+        if let layoutTransition, layoutTransition.bounds.size != bounds.size {
+            finishPageLayoutTransition()
+        }
         applyScaleLimits()
         selectionOverlay?.frame = bounds
         observeScrollingIfNeeded()
         updateDisplayedRegion()
         if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
+        if let layoutTransition { bringSubviewToFront(layoutTransition) }
     }
 
     func beginRegionSelection(onSelected: @escaping (BackendAPI.BookPageRegion) -> Void) {
@@ -152,6 +165,7 @@ final class BookPDFView: PDFView {
         adjustmentOverlay?.setSelectionFrame(selectionFrame)
         if let adjustmentOverlay { bringSubviewToFront(adjustmentOverlay) }
         if let selectionOverlay { bringSubviewToFront(selectionOverlay) }
+        if let layoutTransition { bringSubviewToFront(layoutTransition) }
     }
 
     private func installAdjustmentOverlayIfNeeded() {
@@ -312,6 +326,8 @@ final class BookPDFView: PDFView {
 
     func goToPageAtFinalQuality(_ pageIndex: Int) {
         guard let document, document.pageCount > 0 else { return }
+        // A page turned mid-change would land under pictures of the old page.
+        finishPageLayoutTransition()
         let clamped = min(max(pageIndex, 0), document.pageCount - 1)
         guard let page = document.page(at: clamped) else { return }
         go(to: page)
@@ -320,7 +336,27 @@ final class BookPDFView: PDFView {
         layoutIfNeeded()
         applyScaleLimits()
     }
+}
 
+// MARK: - One page or a spread
+
+extension BookPDFView {
+    /// Switch between a single page and a spread.
+    ///
+    /// PDFKit makes the change in one layout pass that cannot be animated, so
+    /// the reader covers the live view with pictures of the pages, lets PDFKit
+    /// relayout underneath, and then moves the pictures to where PDFKit put
+    /// the real pages before handing back.
+    ///
+    /// The move is a camera move. The page being read never fades and never
+    /// changes shape: going to a spread it shrinks into its half of the
+    /// spread while the facing page slides in from the side it is printed on,
+    /// as if the reader stepped back from the book; going back it grows into
+    /// the middle and its neighbour leaves the same way. What this replaced
+    /// scaled a screenshot of the whole view — background included — towards
+    /// the middle of the spread while fading it out over the new layout, so
+    /// for a third of a second the old page sat ghosted across the gutter of
+    /// the new one.
     func setPageLayout(twoUp: Bool, anchorPage: Int, animated: Bool) {
         let targetMode: PDFDisplayMode = twoUp ? .twoUp : .singlePage
         guard displayMode != targetMode || displaysAsBook != twoUp else { return }
@@ -328,13 +364,33 @@ final class BookPDFView: PDFView {
         let anchorIndex = min(max(anchorPage - 1, 0), document.pageCount - 1)
         guard let anchor = document.page(at: anchorIndex) else { return }
 
-        // PDFKit changes display modes in one non-animatable layout pass. Keep
-        // the currently rendered page above it while the live view settles,
-        // then move that page to the new spread frame and reveal PDFKit below.
         finishPageLayoutTransition()
-        let oldContentFrame = visiblePageFrame ?? bounds
-        let snapshot = snapshotView(afterScreenUpdates: false)
+        let oldFrames = frames(ofPages: visiblePages.map { document.index(for: $0) })
         let zoomRatio = restingScale > 0 ? max(scaleFactor / restingScale, 1) : 1
+        // Zoomed in, the page runs past the edges of the view and there is no
+        // whole page to move. Reduce Motion asks for a dissolve rather than a
+        // move. Both get the old layout fading into the new one.
+        let movingStage = animated && isAtRestingScale && oldFrames[anchorIndex] != nil
+            ? makeMovingStage(oldFrames: oldFrames)
+            : nil
+        let moves = movingStage != nil
+        let stage = movingStage ?? makeDissolvingStage()
+        let newIndices = Self.pageIndices(showing: anchorIndex, twoUp: twoUp, pageCount: document.pageCount)
+
+        // Pages the old layout never drew — the facing page of a new spread —
+        // and the page that grows into a single page are rendered off the main
+        // thread while PDFKit relayouts. A picture taken at the old, smaller
+        // size would be stretched soft on its way up.
+        var renders: PageLayoutRenders?
+        if moves, let url = document.documentURL {
+            let wanted = twoUp ? Set(newIndices).subtracting(oldFrames.keys) : [anchorIndex]
+            renders = PageLayoutRenders(
+                url: url,
+                pages: wanted,
+                maxPixelDimension: transitionRenderDimension(twoUp: twoUp, page: anchor)
+            )
+        }
+
         displayMode = targetMode
         displaysAsBook = twoUp
         go(to: anchor)
@@ -347,72 +403,189 @@ final class BookPDFView: PDFView {
             scaleFactor = min(restingScale * zoomRatio, maxScaleFactor)
         }
 
-        guard let snapshot, bounds.width > 0, bounds.height > 0 else { return }
-        snapshot.frame = bounds
-        snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        snapshot.isUserInteractionEnabled = false
-        snapshot.accessibilityElementsHidden = true
-        snapshot.layer.minificationFilter = .trilinear
-        snapshot.layer.magnificationFilter = .linear
-        addSubview(snapshot)
-        layoutTransitionSnapshot = snapshot
+        guard let stage else { return }
+        addSubview(stage)
+        layoutTransition = stage
 
-        // PDFKit reports the new visible pages on the next run loop. Waiting
-        // for that frame avoids animating toward the previous page rectangle.
-        DispatchQueue.main.async { [weak self, weak snapshot] in
-            guard let self, let snapshot, layoutTransitionSnapshot === snapshot else { return }
+        // PDFKit settles the new page rectangles on the next run loop, and the
+        // renders have to be back before anything moves. Whichever is later
+        // starts the move; a render that is slow to arrive is not waited for.
+        let begin: (PageLayoutRenders.Images) -> Void = { [weak self, weak stage] images in
+            guard let self, let stage, layoutTransition === stage, !stage.hasBegun else { return }
+            stage.hasBegun = true
             layoutDocumentView()
             layoutIfNeeded()
             applyScaleLimits()
-
-            guard animated else {
-                finishPageLayoutTransition()
-                return
-            }
-
-            let finalContentFrame = visiblePageFrame ?? bounds
-            let scale = min(
-                finalContentFrame.width / max(oldContentFrame.width, 1),
-                finalContentFrame.height / max(oldContentFrame.height, 1)
-            )
-            let baseCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-            let oldOffset = CGPoint(
-                x: oldContentFrame.midX - baseCenter.x,
-                y: oldContentFrame.midY - baseCenter.y
-            )
-
-            UIView.animate(
-                withDuration: 0.34,
-                delay: 0.06,
-                options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
-            ) {
-                snapshot.transform = CGAffineTransform(scaleX: scale, y: scale)
-                snapshot.center = CGPoint(
-                    x: finalContentFrame.midX - scale * oldOffset.x,
-                    y: finalContentFrame.midY - scale * oldOffset.y
-                )
-                snapshot.alpha = 0
-            } completion: { [weak self, weak snapshot] _ in
-                guard let self, let snapshot, layoutTransitionSnapshot === snapshot else { return }
-                finishPageLayoutTransition()
-            }
+            let moved = moves
+                && runMove(on: stage, anchorIndex: anchorIndex, newIndices: newIndices, images: images)
+            if !moved { handBack(stage, duration: 0.24) }
+        }
+        if let renders {
+            renders.start { images in begin(images) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { begin(renders.finished) }
+        } else {
+            DispatchQueue.main.async { begin([:]) }
         }
     }
 
-    private var visiblePageFrame: CGRect? {
-        let frames = visiblePages.map { page in
-            convert(page.bounds(for: .cropBox), from: page).standardized
-        }.filter { !$0.isNull && !$0.isEmpty }
-        guard var frame = frames.first else { return nil }
-        for next in frames.dropFirst() {
-            frame = frame.union(next)
+    /// The pages PDFKit puts on screen for a page in a layout: the page alone,
+    /// or the spread it belongs to. A book's cover stands by itself and the
+    /// rest pair up as they are printed, two with three, four with five.
+    static func pageIndices(showing index: Int, twoUp: Bool, pageCount: Int) -> [Int] {
+        guard twoUp, index > 0 else { return [index] }
+        let left = index.isMultiple(of: 2) ? index - 1 : index
+        return [left, left + 1].filter { $0 < pageCount }
+    }
+
+    /// Where each page sits in this view, keyed by page index.
+    private func frames(ofPages indices: [Int]) -> [Int: CGRect] {
+        guard let document else { return [:] }
+        var frames: [Int: CGRect] = [:]
+        for index in indices {
+            guard let page = document.page(at: index) else { continue }
+            let frame = convert(page.bounds(for: .cropBox), from: page).standardized
+            if !frame.isNull, !frame.isEmpty { frames[index] = frame }
         }
-        return frame
+        return frames
+    }
+
+    /// The largest the rendered pages are shown at, in pixels: the page fitted
+    /// into the whole view for a single page, into half of it for a spread.
+    private func transitionRenderDimension(twoUp: Bool, page: PDFPage) -> Int {
+        let box = page.bounds(for: .cropBox).size
+        let room = CGSize(width: twoUp ? bounds.width / 2 : bounds.width, height: bounds.height)
+        guard box.width > 0, box.height > 0, room.width > 0, room.height > 0 else { return 1024 }
+        let fit = min(room.width / box.width, room.height / box.height)
+        let points = max(box.width, box.height) * fit
+        let scale = max(traitCollection.displayScale, 1)
+        return min(2048, max(512, Int((points * scale).rounded(.up))))
+    }
+
+    /// A stand-in for the moving case: every page on screen, cut out of the
+    /// view as it is drawn right now, shadow and all, on the reader's own
+    /// backdrop.
+    private func makeMovingStage(oldFrames: [Int: CGRect]) -> PageLayoutTransitionStage? {
+        let stage = PageLayoutTransitionStage(frame: bounds, backdrop: canvasColor)
+        for (index, frame) in oldFrames {
+            // The margin takes PDFKit's own page shadow along with the page.
+            let margin = PageLayoutTransitionStage.shadowMargin
+            let cut = frame.insetBy(dx: -margin, dy: -margin).intersection(bounds)
+            guard !cut.isNull, !cut.isEmpty,
+                  let picture = resizableSnapshotView(from: cut, afterScreenUpdates: false, withCapInsets: .zero)
+            else { return nil }
+            stage.addPage(
+                index: index,
+                picture: picture,
+                frame: cut.offsetBy(dx: -bounds.minX, dy: -bounds.minY),
+                pageFrame: frame.offsetBy(dx: -cut.minX, dy: -cut.minY)
+            )
+        }
+        return stage.isEmpty ? nil : stage
+    }
+
+    /// A stand-in for the dissolve: the whole view as it was.
+    private func makeDissolvingStage() -> PageLayoutTransitionStage? {
+        guard let picture = snapshotView(afterScreenUpdates: false) else { return nil }
+        let stage = PageLayoutTransitionStage(frame: bounds, backdrop: canvasColor)
+        stage.addBackdropPicture(picture)
+        return stage
+    }
+
+    /// Moves the pictures from the old layout to the new one. False when the
+    /// new layout is not what it was expected to be, which the caller answers
+    /// with a dissolve instead.
+    private func runMove(
+        on stage: PageLayoutTransitionStage,
+        anchorIndex: Int,
+        newIndices: [Int],
+        images: PageLayoutRenders.Images
+    ) -> Bool {
+        let newFrames = frames(ofPages: newIndices)
+        let visible = bounds.insetBy(dx: -1, dy: -1)
+        guard newFrames.count == newIndices.count,
+              newFrames.values.allSatisfy({ visible.contains($0) }),
+              let oldAnchor = stage.pageFrame(of: anchorIndex),
+              let newAnchor = newFrames[anchorIndex].map({ $0.offsetBy(dx: -bounds.minX, dy: -bounds.minY) }),
+              oldAnchor.width > 0
+        else { return false }
+
+        // One transform for the whole stage, chosen so the page being read
+        // lands exactly on its new rectangle. Everything else follows it,
+        // which is what makes the move read as one camera rather than as
+        // several pages each finding their own way.
+        let scale = newAnchor.width / oldAnchor.width
+        let center = CGPoint(x: stage.bounds.midX, y: stage.bounds.midY)
+        let shift = CGPoint(
+            x: newAnchor.midX - center.x - scale * (oldAnchor.midX - center.x),
+            y: newAnchor.midY - center.y - scale * (oldAnchor.midY - center.y)
+        )
+
+        // A page that is new to the screen is placed where that same camera
+        // would have had it before the move: beside the current page, at its
+        // size, mostly out of view.
+        var arriving: [UIView] = []
+        for index in newIndices where !stage.hasPage(index) {
+            guard let image = images[index], let newFrame = newFrames[index] else { return false }
+            let target = newFrame.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
+            let start = CGRect(
+                x: center.x + (target.minX - center.x - shift.x) / scale,
+                y: center.y + (target.minY - center.y - shift.y) / scale,
+                width: target.width / scale,
+                height: target.height / scale
+            )
+            let page = stage.addRenderedPage(index: index, image: image, frame: start)
+            page.alpha = 0
+            arriving.append(page)
+        }
+        // The page that grows swaps its picture for a sharp one before it
+        // starts to grow; at its current size the two are the same.
+        if scale > 1.1, let image = images[anchorIndex] {
+            stage.sharpen(index: anchorIndex, with: image)
+        }
+        let leaving = stage.pages(notIn: Set(newIndices))
+
+        UIView.animate(
+            springDuration: 0.52,
+            bounce: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            stage.camera.transform = CGAffineTransform(
+                a: scale, b: 0, c: 0, d: scale, tx: shift.x, ty: shift.y
+            )
+        } completion: { [weak self, weak stage] _ in
+            guard let self, let stage, layoutTransition === stage else { return }
+            handBack(stage, duration: 0.16)
+        }
+        UIView.animate(withDuration: 0.34, delay: 0.04, options: [.curveEaseOut, .allowUserInteraction]) {
+            arriving.forEach { $0.alpha = 1 }
+        }
+        UIView.animate(withDuration: 0.26, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+            leaving.forEach { $0.alpha = 0 }
+        }
+        return true
+    }
+
+    /// Fades the stand-in away over the live view. After a move the pictures
+    /// sit exactly on PDFKit's pages, so all that changes is that the live
+    /// pages are sharp at any zoom; without one, the old layout dissolves into
+    /// the new one where it stands.
+    private func handBack(_ stage: PageLayoutTransitionStage, duration: TimeInterval) {
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]
+        ) {
+            stage.alpha = 0
+        } completion: { [weak self, weak stage] _ in
+            guard let self, let stage, layoutTransition === stage else { return }
+            finishPageLayoutTransition()
+        }
     }
 
     private func finishPageLayoutTransition() {
-        layoutTransitionSnapshot?.layer.removeAllAnimations()
-        layoutTransitionSnapshot?.removeFromSuperview()
-        layoutTransitionSnapshot = nil
+        guard let stage = layoutTransition else { return }
+        layoutTransition = nil
+        stage.cancel()
+        stage.removeFromSuperview()
     }
 }
