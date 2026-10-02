@@ -1,7 +1,7 @@
 # What Echo does
 
-Echo has six tabs: **Aufnahme**, **Stunden**, **Lernen**, **Bibliothek**,
-**Chat** and **Einstellungen**, the last pinned to the foot of the sidebar.
+Echo has five tabs: **Aufnahme**, **Stunden**, **Bibliothek**, **Chat** and
+**Einstellungen**, the last pinned to the foot of the sidebar.
 
 ## Live transcription
 
@@ -122,33 +122,6 @@ declares Goodnotes, Notability, PDF, JPEG and PNG as supported document types,
 copies the temporary incoming file into its own container immediately, and then
 uses the same running-recording or lesson-selection flow as a normal
 installation.
-
-## Lernen
-
-A lesson that was recorded, transcribed and summarised is most of the way to
-being revisable, so Echo takes the last step. **Lernen** turns lessons into
-flashcards and schedules them.
-
-<p align="center">
-  <img src="screenshots/learn.png" width="880" alt="The Lernen tab: how many cards are due today with an estimate in minutes, overall mastery as a progress bar, the same figures per subject, and entries for learned concepts and processing lessons into cards">
-</p>
-
-Cards are generated per lesson, on request, from that lesson's transcript. They
-come in several shapes — multiple choice, true/false, cloze, free text and oral
-— and each keeps a link back to where it came from: the lesson, the concept, and
-the millisecond offset in the transcript, so a card that is not obvious can be
-traced to the moment it was taught.
-
-The tab opens on what is due today, an estimate in minutes, and overall mastery,
-with the same figures broken down per subject. A day's plan can be asked for by
-the time available rather than by the card count — thirty minutes of revision
-returns blocks per subject, each with a reason for being there.
-
-Answers are checked by the server, not by self-assessment: a free-text answer
-comes back categorised, with feedback and the expected answer. Every review
-updates the card's box, stability, repetition and lapse counts, and its next due
-date. Cards can be deleted individually when a generated one is not worth
-keeping.
 
 ## Chat and the answer note
 
